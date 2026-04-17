@@ -4,18 +4,20 @@ import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CalibrationLayout } from "@/components/unseen/CalibrationLayout";
+import { ReferenceUploadDropzone } from "@/components/unseen/ReferenceUploadDropzone";
 
 const MIN_REFERENCE_IMAGES = 30;
 const MAX_REFERENCE_IMAGES = 150;
 const GALLERY_ENTRY_ARRIVAL_KEY = "unseen:gallery-entry-arrival";
 const GALLERY_ARRIVAL_ACTIVE_KEY = "unseen:gallery-arrival-active";
 const PROCESSING_MESSAGES = [
-  "Reading visual references for recurring intent and aesthetic direction",
-  "Mapping silhouette, material, finish, and visual density",
-  "Translating input into an initial personalized signature",
-  "Composing the first Edit, Capsule, and surrounding discovery field",
-  "Balancing affinity, contrast, and range across the first view",
-  "Finalizing the first issue",
+  "Reading references.",
+  "Mapping silhouette, material, finish.",
+  "Distilling palette and proportion.",
+  "Resolving the Signature.",
+  "Composing the Main Edit.",
+  "Placing Issue 01.",
 ] as const;
 
 const DEFAULT_MAIN_EDIT_NAME = "mainEdit";
@@ -34,12 +36,29 @@ type ReferenceImage = {
   previewUrl: string;
 };
 
+function getProcessingMessageIndex(progress: number): number {
+  if (progress < 16) return 0;
+  if (progress < 33) return 1;
+  if (progress < 50) return 2;
+  if (progress < 66) return 3;
+  if (progress < 83) return 4;
+  return 5;
+}
+
 const STEP_META: StepMeta[] = [
   { key: "invitation", label: "Access" },
   { key: "account", label: "Account" },
   { key: "references", label: "References" },
   { key: "processing", label: "Entry" },
 ];
+
+const CALIBRATION_SPACING = {
+  A: "mt-12",
+  B: "mt-7",
+  C: "mt-8",
+  D: "mt-5",
+  E: "mt-8",
+} as const;
 
 function randomId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -69,7 +88,7 @@ function UnseenBetaMark() {
   return (
     <div className="fixed right-10 top-[23px] z-30 h-[26px] w-[161px]">
       <p className="absolute left-0 top-0 w-[94px] text-right text-ink leading-none">
-        <span className="font-ui text-[14px] font-semibold leading-[26px] tracking-[-0.04em]">seenless</span>
+        <span className="font-ui text-[18px] font-semibold leading-[26px] tracking-[-0.04em]">cenoir</span>
       </p>
       <div className="absolute left-[100px] top-[7px] flex h-3 items-center justify-center rounded-[2px] bg-ink px-1 py-[3px]">
         <span className="font-ui text-[7px] font-bold leading-[7px] tracking-[-0.14px] text-paper">BETA</span>
@@ -82,6 +101,7 @@ export function OnboardingFlow() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const referencesRef = useRef<ReferenceImage[]>([]);
+  const uploadPulseTimeoutRef = useRef<number | null>(null);
 
   const [stepIndex, setStepIndex] = useState(0);
   const [name, setName] = useState("");
@@ -94,9 +114,9 @@ export function OnboardingFlow() {
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [references, setReferences] = useState<ReferenceImage[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isReferenceUploading, setIsReferenceUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [processingProgress, setProcessingProgress] = useState(0);
-  const [processingMessageIndex, setProcessingMessageIndex] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1440));
 
   const currentStep = STEP_META[stepIndex]?.key ?? "invitation";
@@ -116,6 +136,9 @@ export function OnboardingFlow() {
       referencesRef.current.forEach((entry) => {
         URL.revokeObjectURL(entry.previewUrl);
       });
+      if (uploadPulseTimeoutRef.current !== null) {
+        window.clearTimeout(uploadPulseTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -137,10 +160,6 @@ export function OnboardingFlow() {
 
     rafId = window.requestAnimationFrame(tick);
 
-    const messageTimer = window.setInterval(() => {
-      setProcessingMessageIndex((current) => Math.min(current + 1, PROCESSING_MESSAGES.length - 1));
-    }, 5000);
-
     const completeTimer = window.setTimeout(() => {
       try {
         window.localStorage.setItem(
@@ -158,7 +177,6 @@ export function OnboardingFlow() {
           }),
         );
         window.localStorage.setItem("unseen:onboarding-complete", "1");
-        window.localStorage.setItem("unseen:show-around-pending", "1");
         window.sessionStorage.setItem(
           GALLERY_ENTRY_ARRIVAL_KEY,
           JSON.stringify({
@@ -170,25 +188,25 @@ export function OnboardingFlow() {
       } catch {
         // Ignore local storage failures.
       }
-      router.push("/gallery");
+      router.push("/gallery?entry=signup");
     }, durationMs);
 
     return () => {
       window.cancelAnimationFrame(rafId);
-      window.clearInterval(messageTimer);
       window.clearTimeout(completeTimer);
     };
   }, [currentStep, email, isPhoneVerified, name, phone, references, router]);
 
   const allReferenceItems = useMemo(() => references, [references]);
   const referencePreviewColumns = getReferencePreviewColumns(viewportWidth);
+  const processingMessageIndex = getProcessingMessageIndex(processingProgress);
 
   const actionPillPrimaryClass =
     "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium hover:text-ink focus-visible:font-medium focus-visible:text-ink focus-visible:outline-none";
-  const actionPillSkipClass =
-    "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-[#E8B9B9] bg-[#FCEBEB] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#B22929] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:border-[#B22929] hover:bg-[#B22929] hover:text-paper focus-visible:border-[#B22929] focus-visible:bg-[#B22929] focus-visible:text-paper focus-visible:outline-none";
+  const actionPillStandardInkClass =
+    "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-ink shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium focus-visible:font-medium focus-visible:outline-none";
   const inputClass =
-    "h-[34px] w-full border-0 border-b border-line bg-transparent px-0 font-ui text-[14px] font-normal leading-5 text-ink outline-none placeholder:text-inactive focus:border-ink";
+    "h-[34px] w-full border-0 bg-transparent px-0 font-ui text-[14px] font-normal leading-5 text-ink outline-none placeholder:text-inactive";
   const onboardingTitleClass = "inline-flex items-end text-[30px] leading-none text-ink";
 
   const appendReferences = (incomingFiles: File[]) => {
@@ -226,29 +244,26 @@ export function OnboardingFlow() {
     });
   };
 
+  const pulseReferenceUploading = () => {
+    setIsReferenceUploading(true);
+    if (uploadPulseTimeoutRef.current !== null) {
+      window.clearTimeout(uploadPulseTimeoutRef.current);
+    }
+    uploadPulseTimeoutRef.current = window.setTimeout(() => {
+      setIsReferenceUploading(false);
+      uploadPulseTimeoutRef.current = null;
+    }, 280);
+  };
+
+  const handleIncomingReferences = (incomingFiles: File[]) => {
+    if (incomingFiles.length === 0) return;
+    pulseReferenceUploading();
+    appendReferences(incomingFiles);
+  };
+
   const moveToAccount = () => {
     setError(null);
     setStepIndex(1);
-  };
-
-  const skipToGalleryForTesting = () => {
-    setError(null);
-    try {
-      window.localStorage.setItem("unseen:onboarding-complete", "1");
-      window.localStorage.setItem("unseen:show-around-pending", "1");
-      window.localStorage.setItem("unseen:onboarding-skip-testing", "1");
-      window.sessionStorage.setItem(
-        GALLERY_ENTRY_ARRIVAL_KEY,
-        JSON.stringify({
-          source: "onboarding",
-          at: new Date().toISOString(),
-        }),
-      );
-      window.sessionStorage.setItem(GALLERY_ARRIVAL_ACTIVE_KEY, "1");
-    } catch {
-      // Ignore local storage failures.
-    }
-    router.push("/gallery");
   };
 
   const handlePhoneChange = (value: string) => {
@@ -293,7 +308,7 @@ export function OnboardingFlow() {
     const trimmedPhone = phone.trim();
 
     if (trimmedName.length < 2) {
-      setError("Please enter your name.");
+      setError("Please enter a name.");
       return;
     }
 
@@ -336,7 +351,6 @@ export function OnboardingFlow() {
     }
     setError(null);
     setProcessingProgress(0);
-    setProcessingMessageIndex(0);
     setStepIndex(3);
   };
 
@@ -347,7 +361,6 @@ export function OnboardingFlow() {
 
         <div className="pt-[92px]">
           <nav aria-label="Onboarding steps" className="relative mx-auto w-full max-w-[920px]">
-            <div className="pointer-events-none absolute inset-x-0 top-[14px] h-px bg-line" />
             <ol className="relative flex items-center justify-between gap-2">
               {STEP_META.map((step, index) => {
                 const isActive = index === stepIndex;
@@ -363,11 +376,11 @@ export function OnboardingFlow() {
                         }
                       }}
                       disabled={!isPast}
-                      className={`inline-flex h-[29px] items-center justify-center whitespace-nowrap rounded-[999px] border px-[11px] font-ui text-[13px] leading-[18px] tracking-[-0.03em] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 ${
+                      className={`inline-flex h-[29px] items-center justify-center whitespace-nowrap rounded-[999px] border px-[11px] font-ui text-[13px] font-normal leading-[18px] tracking-[-0.03em] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 ${
                         isActive
                           ? "border-ink bg-ink text-paper"
                           : isPast
-                            ? "cursor-pointer border-line/80 bg-[#F5F5F6] text-ink"
+                            ? "cursor-pointer border-line/80 bg-[#F5F5F6] text-ink hover:font-medium focus-visible:font-medium"
                             : "cursor-default border-line/80 bg-paper text-inactive"
                       }`}
                     >
@@ -379,8 +392,9 @@ export function OnboardingFlow() {
             </ol>
           </nav>
 
-          <div className="mx-auto mt-12 w-full max-w-[920px]">
-            <AnimatePresence mode="wait">
+          <div className="mx-auto w-full max-w-[920px]">
+            <CalibrationLayout className={CALIBRATION_SPACING.A}>
+              <AnimatePresence mode="wait">
               {currentStep === "invitation" ? (
                 <motion.div
                   key="invitation"
@@ -395,14 +409,13 @@ export function OnboardingFlow() {
                     <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Beta</span>
                   </h1>
 
-                  <div className="mt-7 w-full max-w-[760px]">
+                  <div className={`${CALIBRATION_SPACING.B} w-full`}>
                     <div>
-                      <p className="font-ui text-[14px] leading-[1.9] tracking-[0.02em] text-meta">
-                        Some recommendations may still be resolving, some links may not yet reflect live availability,
-                        and certain functions are still in progress. The experience is being refined continuously, and
-                        feedback helps shape what evolves next. Thank you for being part of it at this early stage.
+                      <p className="text-left font-ui text-[14px] leading-[1.9] tracking-[0.02em] text-ink">
+                        Some recommendations may still be resolving. Certain links or functions remain in progress.
+                        Feedback shapes what comes next. Thank you for being here this early.
                       </p>
-                      <p className="mt-6 font-ui text-[13px] leading-[1.8] tracking-[0.02em] text-meta">
+                      <p className="mt-6 text-left font-ui text-[13px] leading-[1.8] tracking-[0.02em] text-ink">
                         Best,
                       </p>
                       <p className="mt-4 font-belmonte text-[28px] leading-none italic text-accent">
@@ -411,12 +424,9 @@ export function OnboardingFlow() {
                     </div>
                   </div>
 
-                  <div className="mt-8 flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={moveToAccount} className={actionPillPrimaryClass}>
+                  <div className={`${CALIBRATION_SPACING.E} flex flex-wrap items-center justify-start gap-3`}>
+                    <button type="button" onClick={moveToAccount} className={actionPillStandardInkClass}>
                       enter
-                    </button>
-                    <button type="button" onClick={skipToGalleryForTesting} className={actionPillSkipClass}>
-                      skip
                     </button>
                   </div>
                 </motion.div>
@@ -436,30 +446,30 @@ export function OnboardingFlow() {
                     <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Details</span>
                   </h1>
 
-                  <div className="mt-8 w-full space-y-5">
-                    <label className="grid min-h-[60px] grid-cols-1 items-center gap-2 md:grid-cols-[140px_minmax(0,1fr)] md:gap-6">
+                  <div className={`${CALIBRATION_SPACING.C} w-full space-y-11`}>
+                    <label className="block">
                       <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">Name</span>
                       <input
                         type="text"
                         value={name}
                         onChange={(event) => setName(event.target.value)}
-                        placeholder="Your name"
-                        className={inputClass}
+                        placeholder="Name"
+                        className={`${inputClass} mt-2`}
                       />
                     </label>
 
-                    <label className="grid min-h-[60px] grid-cols-1 items-center gap-2 md:grid-cols-[140px_minmax(0,1fr)] md:gap-6">
+                    <label className="block">
                       <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">Email</span>
                       <input
                         type="email"
                         value={email}
                         onChange={(event) => setEmail(event.target.value)}
                         placeholder="you@example.com"
-                        className={inputClass}
+                        className={`${inputClass} mt-2`}
                       />
                     </label>
 
-                    <label className="grid min-h-[60px] grid-cols-1 items-center gap-2 md:grid-cols-[140px_minmax(0,1fr)] md:gap-6">
+                    <label className="block">
                       <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
                         Password
                       </span>
@@ -468,11 +478,11 @@ export function OnboardingFlow() {
                         value={password}
                         onChange={(event) => setPassword(event.target.value)}
                         placeholder="For email login"
-                        className={inputClass}
+                        className={`${inputClass} mt-2`}
                       />
                     </label>
 
-                    <label className="grid min-h-[60px] grid-cols-1 items-center gap-2 md:grid-cols-[140px_minmax(0,1fr)] md:gap-6">
+                    <label className="block">
                       <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
                         Phone <span className="font-normal">(optional)</span>
                       </span>
@@ -481,17 +491,17 @@ export function OnboardingFlow() {
                         value={phone}
                         onChange={(event) => handlePhoneChange(event.target.value)}
                         placeholder="+41 79 123 45 67"
-                        className={inputClass}
+                        className={`${inputClass} mt-2`}
                       />
                     </label>
                   </div>
 
-                  <p className="mt-5 font-ui text-[12px] leading-[1.8] tracking-[0.02em] text-meta">
-                    Either email or phone number is required. Phone access uses a one-time code.
+                  <p className={`${CALIBRATION_SPACING.D} font-ui text-[12px] leading-[1.8] tracking-[0.02em] text-meta`}>
+                    Email or phone required. Phone access uses a one-time code.
                   </p>
 
                   {phone.trim().length > 0 ? (
-                    <div className="mt-5 w-full">
+                    <div className={`${CALIBRATION_SPACING.D} w-full`}>
                       <div className="flex flex-wrap items-center gap-3">
                         <button type="button" onClick={sendPhoneCode} className={actionPillPrimaryClass}>
                           {isPhoneCodeSent ? "resend code" : "send code"}
@@ -504,8 +514,8 @@ export function OnboardingFlow() {
                       </div>
 
                       {isPhoneCodeSent && !isPhoneVerified ? (
-                        <div className="mt-4 flex flex-wrap items-end gap-3">
-                          <label className="min-w-[180px] flex-1">
+                        <div className="mt-4 w-full">
+                          <label className="block">
                             <span className="font-ui text-[11px] font-medium uppercase tracking-[0.08em] text-meta">
                               Verification Code
                             </span>
@@ -515,12 +525,14 @@ export function OnboardingFlow() {
                               value={phoneCodeInput}
                               onChange={(event) => setPhoneCodeInput(event.target.value.replace(/[^\d]/g, "").slice(0, 6))}
                               placeholder="6-digit code"
-                              className={`${inputClass} mt-1`}
+                              className={`${inputClass} mt-2`}
                             />
                           </label>
-                          <button type="button" onClick={confirmPhoneCode} className={actionPillPrimaryClass}>
-                            confirm code
-                          </button>
+                          <div className="mt-4 flex items-center justify-start">
+                            <button type="button" onClick={confirmPhoneCode} className={actionPillPrimaryClass}>
+                              confirm code
+                            </button>
+                          </div>
                         </div>
                       ) : null}
 
@@ -532,10 +544,7 @@ export function OnboardingFlow() {
                     </div>
                   ) : null}
 
-                  <div className="mt-8 flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={() => setStepIndex(0)} className={actionPillPrimaryClass}>
-                      back
-                    </button>
+                  <div className={`${CALIBRATION_SPACING.E} flex flex-wrap items-center justify-start gap-3`}>
                     <button type="button" onClick={moveToReferences} className={actionPillPrimaryClass}>
                       proceed
                     </button>
@@ -557,13 +566,6 @@ export function OnboardingFlow() {
                     <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Sets</span>
                   </h1>
 
-                  <div className="mt-6 w-full">
-                    <p className="font-ui text-[13px] leading-[1.8] tracking-[0.02em] text-meta">
-                      Add visual references that define the aesthetic direction. The selection shapes the personalized
-                      Signature and forms the foundation of the Main Edit.
-                    </p>
-                  </div>
-
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -571,36 +573,32 @@ export function OnboardingFlow() {
                     accept="image/*"
                     className="hidden"
                     onChange={(event) => {
-                      appendReferences(Array.from(event.target.files ?? []));
+                      handleIncomingReferences(Array.from(event.target.files ?? []));
                       event.currentTarget.value = "";
                     }}
                   />
 
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      setIsDragOver(true);
-                    }}
-                    onDragLeave={() => setIsDragOver(false)}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      setIsDragOver(false);
-                      appendReferences(Array.from(event.dataTransfer.files));
-                    }}
-                    className={`mx-auto mt-8 flex w-fit max-w-[calc(100%-2rem)] flex-col items-center justify-center rounded-full border px-12 py-10 text-center transition-colors duration-150 ${
-                      isDragOver ? "border-ink text-ink" : "border-line text-meta"
-                    }`}
-                  >
-                    <span className="font-ui text-[32px] font-normal leading-none">+</span>
-                    <span className="mt-2 font-ui text-[14px] font-normal leading-5">Add visual references</span>
-                    <span className="mt-1 font-ui text-[12px] font-normal leading-5 text-meta">Screenshots, saved images, or Pinterest board captures.</span>
-                  </button>
+                  {allReferenceItems.length === 0 ? (
+                    <>
+                      <div className={`${CALIBRATION_SPACING.B} w-full`}>
+                        <p className="font-ui text-[13px] leading-[1.8] tracking-[0.02em] text-meta">
+                          Add visual references that define the aesthetic direction. The selection shapes the
+                          Signature and anchors the Main Edit.
+                        </p>
+                      </div>
 
-                  {allReferenceItems.length > 0 ? (
+                      <ReferenceUploadDropzone
+                        register="accent"
+                        align="left"
+                        isUploading={isReferenceUploading}
+                        onClick={() => fileInputRef.current?.click()}
+                        onFilesDrop={handleIncomingReferences}
+                        className={CALIBRATION_SPACING.C}
+                      />
+                    </>
+                  ) : (
                     <div
-                      className="mt-6 grid w-full gap-[6px]"
+                      className={`${CALIBRATION_SPACING.C} grid w-full gap-[6px]`}
                       style={{ gridTemplateColumns: `repeat(${referencePreviewColumns}, minmax(0, 1fr))` }}
                     >
                       {allReferenceItems.map((entry) => (
@@ -624,18 +622,36 @@ export function OnboardingFlow() {
                           </button>
                         </div>
                       ))}
-                    </div>
-                  ) : null}
 
-                  <p className="mt-5 font-ui text-[12px] leading-5 tracking-[0.02em] text-meta">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          setIsDragOver(true);
+                        }}
+                        onDragLeave={() => setIsDragOver(false)}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          setIsDragOver(false);
+                          handleIncomingReferences(Array.from(event.dataTransfer.files));
+                        }}
+                        className={`flex aspect-square w-full items-center justify-center bg-mist font-ui text-[32px] font-normal leading-none text-meta transition-colors duration-150 hover:text-ink ${
+                          isDragOver ? "text-accent" : ""
+                        }`}
+                        aria-label="Add visual references"
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+
+                  <p className={`${CALIBRATION_SPACING.D} font-ui text-[12px] leading-5 tracking-[0.02em] text-meta`}>
                     {references.length} selected · min {MIN_REFERENCE_IMAGES} · max {MAX_REFERENCE_IMAGES}
                   </p>
 
-                  <div className="mt-8 flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={() => setStepIndex(1)} className={actionPillPrimaryClass}>
-                      back
-                    </button>
-                    <button type="button" onClick={moveToProcessing} className={actionPillPrimaryClass}>
+                  <div className={`${CALIBRATION_SPACING.E} flex flex-wrap items-center justify-start gap-3`}>
+                    <button type="button" onClick={moveToProcessing} className={actionPillStandardInkClass}>
                       calibrate
                     </button>
                   </div>
@@ -652,9 +668,9 @@ export function OnboardingFlow() {
                   className="w-full"
                 >
                   <h1 className={onboardingTitleClass}>
-                    <span className="font-ui font-normal tracking-[-0.06em]">Enter</span>
-                    <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">-</span>
-                    <span className="ml-[1px] font-ui font-normal tracking-[-0.06em]">seenless</span>
+                    <span className="font-ui font-normal tracking-[-0.06em]">Entering</span>
+                    <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">–</span>
+                    <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Cenoir</span>
                   </h1>
 
                   <AnimatePresence mode="wait">
@@ -664,31 +680,28 @@ export function OnboardingFlow() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -5 }}
                       transition={{ duration: 0.2, ease: "easeOut" }}
-                      className="mt-6 font-ui text-[14px] leading-7 text-meta"
+                      className={`${CALIBRATION_SPACING.B} font-ui text-[14px] leading-7 text-meta`}
                     >
                       {PROCESSING_MESSAGES[processingMessageIndex]}
                     </motion.p>
                   </AnimatePresence>
 
-                  <div className="mt-8 w-full overflow-hidden rounded-full border border-line bg-paper p-[2px]">
+                  <div className={`${CALIBRATION_SPACING.C} h-px w-full overflow-hidden`}>
                     <motion.div
-                      className="h-[8px] rounded-full bg-ink"
-                      animate={{ width: `${processingProgress}%` }}
+                      className="h-px w-full bg-ink"
+                      animate={{ scaleX: processingProgress / 100 }}
                       transition={{ duration: 0.15, ease: "easeOut" }}
-                      style={{ width: `${processingProgress}%` }}
+                      style={{ transformOrigin: "left" }}
                     />
                   </div>
-
-                  <p className="mt-2 text-right font-ui text-[12px] font-medium leading-5 tracking-[0.03em] text-meta">
-                    {processingProgress}%
-                  </p>
                 </motion.div>
               ) : null}
-            </AnimatePresence>
+              </AnimatePresence>
 
-            {error ? (
-              <p className="mt-6 font-ui text-[13px] leading-6 text-[#B22929]">{error}</p>
-            ) : null}
+              {error ? (
+                <p className="mt-6 font-ui text-[13px] leading-6 text-[#B22929]">{error}</p>
+              ) : null}
+            </CalibrationLayout>
           </div>
         </div>
       </div>
