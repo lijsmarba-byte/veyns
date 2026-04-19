@@ -50,7 +50,7 @@ export function GalleryEditNav({ tabs = defaultTabs }: GalleryEditNavProps) {
   };
 
   return (
-    <div data-show-around-target="edit-nav" className="relative z-20 flex h-12 w-max items-end gap-[47px]">
+    <div className="relative z-20 flex h-12 w-max items-end gap-[47px]" data-gallery-edit-nav="true">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -58,7 +58,7 @@ export function GalleryEditNav({ tabs = defaultTabs }: GalleryEditNavProps) {
             onClick={() => setActiveTab(tab.id)}
             className={`font-ui relative inline-flex h-10 items-center whitespace-nowrap px-0 text-[14px] leading-5 tracking-[0.28px] transition-colors ${
               resolvedActiveTab === tab.id
-                ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-px after:w-full after:bg-black after:content-['']"
+                ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
                 : "font-medium text-inactive hover:text-meta"
             }`}
           >

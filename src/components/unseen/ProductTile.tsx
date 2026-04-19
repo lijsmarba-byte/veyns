@@ -77,7 +77,11 @@ function getItemNumber(item: MockCatalogItem) {
   return fromId ?? "00";
 }
 
-export function ProductTile({ item, mode = "archive", issueNumber = "04" }: ProductTileProps) {
+export function ProductTile({
+  item,
+  mode = "archive",
+  issueNumber = "04",
+}: ProductTileProps) {
   const hasHoverActions = mode === "gallery" || mode === "archive";
   const [hoverResetKey, setHoverResetKey] = useState(0);
   const [returnImageState, setReturnImageState] = useState(() => {

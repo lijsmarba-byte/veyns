@@ -11,6 +11,13 @@ type RightCategoryNavProps = {
 
 const DEFAULT_STICKY_HEIGHT_PX = 156;
 const CATEGORY_FOCUS_OFFSET_PX = 200;
+const SAFARI_SCROLL_SYNC_DEBOUNCE_MS = 60;
+
+function isSafariBrowser() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /Safari\//.test(ua) && !/Chrome\/|CriOS\/|Chromium\/|Edg\//.test(ua);
+}
 
 function getStickyHeightFromCssVar() {
   const value = getComputedStyle(document.documentElement).getPropertyValue("--sticky-h").trim();
@@ -68,8 +75,6 @@ export function RightCategoryNav({
   const [activeCategory, setActiveCategory] = useState(sectionKeys[0] ?? "");
   const [displayActiveCategory, setDisplayActiveCategory] = useState(sectionKeys[0] ?? "");
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isTourActive, setIsTourActive] = useState(false);
-  const [isTourForcedExpanded, setIsTourForcedExpanded] = useState(false);
   const autoScrollTargetRef = useRef<string | null>(null);
   const closeExpandedTimerRef = useRef<number | null>(null);
   const displaySwapTimerRef = useRef<number | null>(null);
@@ -90,6 +95,8 @@ export function RightCategoryNav({
   useEffect(() => {
     if (sections.length === 0) return;
     let observer: IntersectionObserver | null = null;
+    const useDebouncedScrollSync = isSafariBrowser();
+    let scrollDebounceTimer: number | null = null;
 
     const resolveActiveFromDom = (activationTop: number) => {
       const nodes = sections
@@ -167,6 +174,16 @@ export function RightCategoryNav({
         resolveActiveFromDom(activationTop);
       });
     };
+    const syncWithDebounce = () => {
+      if (scrollDebounceTimer !== null) {
+        window.clearTimeout(scrollDebounceTimer);
+      }
+      scrollDebounceTimer = window.setTimeout(() => {
+        scrollDebounceTimer = null;
+        const activationTop = getStickyHeightFromCssVar() + CATEGORY_FOCUS_OFFSET_PX;
+        resolveActiveFromDom(activationTop);
+      }, SAFARI_SCROLL_SYNC_DEBOUNCE_MS);
+    };
 
     const releaseAutoScrollLock = () => {
       autoScrollTargetRef.current = null;
@@ -182,7 +199,7 @@ export function RightCategoryNav({
     };
 
     connectObserver();
-    window.addEventListener("scroll", syncWithRaf, { passive: true });
+    window.addEventListener("scroll", useDebouncedScrollSync ? syncWithDebounce : syncWithRaf, { passive: true });
     window.addEventListener("wheel", releaseAutoScrollLock, { passive: true });
     window.addEventListener("touchstart", releaseAutoScrollLock, { passive: true });
     window.addEventListener("keydown", releaseAutoScrollLock);
@@ -191,7 +208,7 @@ export function RightCategoryNav({
 
     return () => {
       observer?.disconnect();
-      window.removeEventListener("scroll", syncWithRaf);
+      window.removeEventListener("scroll", useDebouncedScrollSync ? syncWithDebounce : syncWithRaf);
       window.removeEventListener("wheel", releaseAutoScrollLock);
       window.removeEventListener("touchstart", releaseAutoScrollLock);
       window.removeEventListener("keydown", releaseAutoScrollLock);
@@ -200,6 +217,9 @@ export function RightCategoryNav({
       if (rafSyncRef.current !== null) {
         window.cancelAnimationFrame(rafSyncRef.current);
         rafSyncRef.current = null;
+      }
+      if (scrollDebounceTimer !== null) {
+        window.clearTimeout(scrollDebounceTimer);
       }
       if (displaySwapTimerRef.current !== null) {
         window.clearTimeout(displaySwapTimerRef.current);
@@ -239,7 +259,6 @@ export function RightCategoryNav({
   };
 
   const handleBlurCapture = (event: FocusEvent<HTMLElement>) => {
-    if (isTourForcedExpanded) return;
     const next = event.relatedTarget;
     if (!next || !event.currentTarget.contains(next as Node)) {
       if (closeExpandedTimerRef.current !== null) {
@@ -251,7 +270,6 @@ export function RightCategoryNav({
   };
 
   const openExpanded = () => {
-    if (isTourActive) return;
     if (closeExpandedTimerRef.current !== null) {
       window.clearTimeout(closeExpandedTimerRef.current);
       closeExpandedTimerRef.current = null;
@@ -260,8 +278,6 @@ export function RightCategoryNav({
   };
 
   const closeExpanded = () => {
-    if (isTourActive) return;
-    if (isTourForcedExpanded) return;
     if (closeExpandedTimerRef.current !== null) {
       window.clearTimeout(closeExpandedTimerRef.current);
     }
@@ -271,30 +287,7 @@ export function RightCategoryNav({
     }, 180);
   };
 
-  useEffect(() => {
-    const handleTourStepChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ stepId?: string | null }>).detail;
-      const stepId = detail?.stepId ?? null;
-      const shouldForceExpand = stepId === "categories";
-      const tourIsActive = stepId !== null;
-      setIsTourActive(tourIsActive);
-      setIsTourForcedExpanded(shouldForceExpand);
-      if (closeExpandedTimerRef.current !== null) {
-        window.clearTimeout(closeExpandedTimerRef.current);
-        closeExpandedTimerRef.current = null;
-      }
-      if (tourIsActive) {
-        setIsExpanded(false);
-      }
-    };
-
-    window.addEventListener("unseen:tour-step-change", handleTourStepChange as EventListener);
-    return () => {
-      window.removeEventListener("unseen:tour-step-change", handleTourStepChange as EventListener);
-    };
-  }, []);
-
-  const effectiveExpanded = isExpanded || isTourForcedExpanded;
+  const effectiveExpanded = isExpanded;
   const visualActiveKey = displayActiveCategory || activeCategory;
   const activeSection =
     sections.find((section) => section.key === visualActiveKey) ??
@@ -309,7 +302,7 @@ export function RightCategoryNav({
   const expandedMarkerHeightPx = 236;
   const markerLeftInsetPx = 16;
   const markerGapPx = 16;
-  const markerWidthPx = 1;
+  const markerWidthPx = 1.5;
   const inactiveTextLeftPx = markerLeftInsetPx + markerGapPx + markerWidthPx;
   const activeMarkerHeight = effectiveExpanded ? expandedMarkerHeightPx : collapsedMarkerHeightPx;
   const markerCenterOffsetPx = effectiveExpanded
@@ -329,7 +322,6 @@ export function RightCategoryNav({
 
   return (
     <nav
-      data-show-around-target="category-nav"
       aria-label="Category navigation"
       aria-expanded={effectiveExpanded}
       className={`group -m-4 hidden select-none p-4 lg:block ${className}`.trim()}
@@ -343,7 +335,6 @@ export function RightCategoryNav({
           <div
             className="pointer-events-none absolute top-1/2 z-20 -translate-y-1/2"
             style={{ left: `${markerLeftInsetPx}px` }}
-            data-show-around-target="category-nav-content"
           >
             <div
               className="pointer-events-auto inline-flex translate-x-[2px] items-center gap-2"
@@ -355,7 +346,6 @@ export function RightCategoryNav({
                 aria-controls={expandedListId}
                 onClick={() => handleClick(activeSection.key, activeSection.id)}
                 className="inline-flex items-center justify-start rounded-md py-[2px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
-                data-show-around-target="category-nav-content"
               >
                 <ActiveCategoryLabel label={activeSection.label} />
               </button>
@@ -363,9 +353,9 @@ export function RightCategoryNav({
             </div>
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute left-0 top-1/2 block w-px bg-ink transition-[height,transform] ease-out motion-reduce:transition-none"
-              data-show-around-target="category-nav-content"
+              className="pointer-events-none absolute left-0 top-1/2 block bg-ink transition-[height,transform] ease-out motion-reduce:transition-none"
               style={{
+                width: `${markerWidthPx}px`,
                 height: `${activeMarkerHeight}px`,
                 transform: `translateY(calc(-50% + ${markerCenterOffsetPx}px))`,
                 transitionDuration: `${motionDurationMs}ms`,
@@ -377,7 +367,6 @@ export function RightCategoryNav({
         <ul
           id={expandedListId}
           aria-hidden={!effectiveExpanded}
-          data-show-around-target="category-nav-content"
           className={`absolute inset-0 z-10 transition-opacity duration-300 ease-out motion-reduce:transition-none ${
             effectiveExpanded ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
           }`}
@@ -401,7 +390,6 @@ export function RightCategoryNav({
                   type="button"
                   tabIndex={effectiveExpanded ? 0 : -1}
                   onClick={() => handleClick(section.key, section.id)}
-                  data-show-around-target="category-nav-content"
                   className="inline-flex items-center justify-start text-left font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-inactive transition-colors duration-300 ease-out hover:text-meta focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
                 >
                   <span>{section.label}</span>

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { BrowserEnvSync } from "@/components/unseen/BrowserEnvSync";
 import { ReturnTransitionBridge } from "@/components/unseen/ReturnTransitionBridge";
 import "./globals.css";
 
@@ -68,7 +69,7 @@ const belmonteBallpoint = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "seenless",
+  title: "cenoir",
   description: "Editorial gallery interface",
 };
 
@@ -82,6 +83,7 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${instrumentSerif.variable} ${ibmPlexMono.variable} ${belmonteBallpoint.variable} antialiased`}
       >
+        <BrowserEnvSync />
         {children}
         <ReturnTransitionBridge />
       </body>

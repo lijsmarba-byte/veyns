@@ -354,6 +354,7 @@ function ImmersiveProductCard({
 
 export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const focusLabelRef = useRef<HTMLParagraphElement | null>(null);
   const focusedImageRef = useRef<HTMLDivElement | null>(null);
@@ -718,7 +719,9 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
 
   useLayoutEffect(() => {
     const updateViewportWidth = () => {
-      const viewportW = Math.max(window.innerWidth, document.documentElement.clientWidth);
+      const visualViewportWidth = window.visualViewport?.width ?? 0;
+      const visualViewportHeight = window.visualViewport?.height ?? 0;
+      const viewportW = Math.max(window.innerWidth, document.documentElement.clientWidth, visualViewportWidth);
       const stageWidth = rowStageRef.current?.getBoundingClientRect().width;
       const stageRect = rowStageRef.current?.getBoundingClientRect();
       if (stageRect) {
@@ -736,13 +739,17 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       const sectionRect = sectionRef.current?.getBoundingClientRect();
       if (sectionRect?.height && sectionRect.height > 0) {
         setSectionHeight(sectionRect.height);
+      } else if (visualViewportHeight > 0) {
+        setSectionHeight(visualViewportHeight);
       }
     };
     updateViewportWidth();
     window.addEventListener("resize", updateViewportWidth);
+    window.visualViewport?.addEventListener("resize", updateViewportWidth);
 
     return () => {
       window.removeEventListener("resize", updateViewportWidth);
+      window.visualViewport?.removeEventListener("resize", updateViewportWidth);
     };
   }, []);
 
@@ -1003,7 +1010,6 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     }
   }, [activeCapsule, focusedItem, focusedTrack, mode, renderCategory]);
 
-  const pathname = usePathname();
   const backHref = queryString ? `${pathname}?${queryString}` : pathname;
 
   const buildProductViewHref = useCallback(
@@ -1606,7 +1612,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const focusedItemNumber = focusedItem ? getItemNumber(focusedItem) : "00";
   const focusedBrandClass = mode === "archive" ? "text-accent" : "text-ink";
   const activeCategoryPillClass =
-    "border-[#181818] bg-[linear-gradient(180deg,#2A2A2A_0%,#121212_100%)] font-medium text-paper shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_1px_2px_rgba(0,0,0,0.14)]";
+    "border-[0.5px] border-[#181818] bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] font-medium text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)]";
   const wheelBackground = "radial-gradient(circle at 32% 28%, #2f2f2f 0%, #171717 54%, #0e0e0e 100%)";
   const isReturnLaneFrozen = returnImageState.freezeLane;
   const isCategoryMenuVisible = categoryMenuPhase !== "closed";
@@ -1662,11 +1668,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       >
         <div
           ref={rowStageRef}
-          className="relative mt-[8px] w-[calc(100dvw+6px)] max-w-none overflow-x-hidden overflow-y-visible"
+          className="relative mt-[8px] max-w-none overflow-x-hidden overflow-y-visible"
           style={{
             height: `${rowHeightPx}px`,
-            marginLeft: "calc(50% - 50dvw - 3px)",
-            marginRight: "calc(50% - 50dvw - 3px)",
+            width: "calc(var(--viewport-w) + 6px)",
+            marginLeft: "calc(50% - (var(--viewport-w) / 2) - 3px)",
+            marginRight: "calc(50% - (var(--viewport-w) / 2) - 3px)",
             touchAction: "pan-x",
             willChange: "transform",
           }}
@@ -1731,13 +1738,13 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       <div
         className="fixed z-[90] flex -translate-x-1/2 flex-col items-center"
         style={{
-          left: "50dvw",
+          left: "calc(var(--viewport-w) / 2)",
           bottom: `${wheelDockBottomPx}px`,
         }}
       >
         {hasCategoryMenu && isCategoryMenuVisible ? (
           <div
-            className={`absolute left-1/2 z-[92] flex w-fit max-w-[min(88vw,680px)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0 overflow-hidden rounded-[16px] border border-line bg-[#F5F5F6] px-[2px] py-[2px] backdrop-blur-[6px] transition-[opacity,transform,filter,clip-path] ${
+            className={`absolute left-1/2 z-[92] flex w-fit max-w-[min(88vw,680px)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0 overflow-hidden rounded-[18px] border-[0.5px] border-[#E4E6EB] bg-[#F3F3F4] px-[3px] py-[3px] backdrop-blur-[6px] transition-[opacity,transform,filter,clip-path] ${
               categoryMenuPhase === "open"
                 ? "pointer-events-auto translate-y-0 scale-100 opacity-100 blur-0"
                 : categoryMenuPhase === "opening"
@@ -1755,13 +1762,13 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
                   : "cubic-bezier(0.2, 0.88, 0.28, 1)",
               clipPath:
                 categoryMenuPhase === "open"
-                  ? "inset(0% 0% 0% 0% round 16px)"
+                  ? "inset(0% 0% 0% 0% round 18px)"
                   : categoryMenuPhase === "opening"
-                    ? "inset(26% 4% 0% 4% round 14px)"
-                    : "inset(18% 3% 0% 3% round 14px)",
+                    ? "inset(26% 4% 0% 4% round 16px)"
+                    : "inset(18% 3% 0% 3% round 16px)",
               boxShadow: `
-                0 1px 2px rgba(0, 0, 0, 0.04),
-                inset 0 1px 0 rgba(255, 255, 255, 0.4),
+                0 0.5px 1px rgba(0, 0, 0, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.42),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.02)
               `,
               willChange: "transform, opacity, filter, clip-path",
@@ -1818,12 +1825,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
                     selectCategory(entry.key);
                   }}
                   disabled={isDisabled}
-                  className={`relative z-[1] h-[27px] rounded-full border px-[11px] font-ui text-[10px] font-medium uppercase tracking-[0.05em] transition-[color,background-color,border-color,box-shadow,transform,opacity,filter] ${
+                  className={`relative z-[1] h-[27px] rounded-full px-[11px] font-ui text-[10px] font-medium uppercase tracking-[0.05em] transition-[color,background-color,border-color,box-shadow,transform,opacity,filter] ${
                     isActive
                       ? activeCategoryPillClass
                       : isDisabled
-                        ? "cursor-not-allowed border-transparent bg-transparent text-inactive/80"
-                        : "border-transparent bg-transparent text-meta hover:bg-[rgba(255,255,255,0.78)] hover:text-ink"
+                        ? "cursor-not-allowed bg-transparent text-inactive/80"
+                        : "bg-transparent text-meta hover:text-ink"
                   }`}
                   style={pillMotionStyle}
                   aria-current={isActive ? "true" : "false"}

@@ -10,7 +10,20 @@
   --archiveColor: #fefefd;
   --accent: #35237a;
   --sticky-h: 156px;
-  --viewport-h: max(100dvh, 450px);
+  --viewport-h: max(100vh, 450px);
+  --viewport-w: 100vw;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --viewport-h: max(100dvh, 450px);
+  }
+}
+
+@supports (width: 100dvw) {
+  :root {
+    --viewport-w: 100dvw;
+  }
 }
 
 @theme inline {
@@ -34,6 +47,11 @@ body {
   color: var(--ink);
   font-family: var(--font-ui-sans), sans-serif;
   min-height: var(--viewport-h);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  font-synthesis-weight: none;
+  font-synthesis-style: none;
   overscroll-behavior: none;
   overscroll-behavior-x: none;
   overscroll-behavior-y: none;
@@ -42,9 +60,63 @@ body {
 html {
   scrollbar-gutter: stable;
   min-height: 450px;
+  -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
   overscroll-behavior-x: none;
   overscroll-behavior-y: none;
+}
+
+html[data-browser="safari"] body {
+  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+html[data-browser="safari"] [data-mode-pill-root="true"] {
+  border-width: 1px;
+}
+
+html[data-browser="safari"] [data-mode-pill-root="true"] [data-name="Segment Gallery"],
+html[data-browser="safari"] [data-mode-pill-root="true"] [data-name="Segment Archive"] {
+  min-width: 96px;
+}
+
+html[data-browser="safari"] [data-sticky-logo-wrap="true"] span {
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+html[data-browser="safari"] [data-sticky-beta="true"] {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+html[data-browser="safari"] [data-sticky-burger="true"] span {
+  height: 1px;
+}
+
+html[data-browser="safari"] [data-sticky-divider="true"] {
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+html[data-browser="safari"] [data-gallery-edit-nav="true"] button::after {
+  height: 1px !important;
+}
+
+html[data-browser="safari"] [data-archive-capsule-nav="true"] button[class*="font-semibold"] {
+  font-weight: 500;
+}
+
+a {
+  text-underline-offset: 0.14em;
+  text-decoration-thickness: from-font;
+  -webkit-text-decoration-skip: ink;
+  text-decoration-skip-ink: auto;
+}
+
+*,
+*::before,
+*::after {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .newsreader-vertical-trim {

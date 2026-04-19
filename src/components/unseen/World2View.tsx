@@ -215,7 +215,11 @@ function buildSunflowerItems(items: World2ViewItem[]) {
   };
 }
 
-export function World2View({ items, showCategoryNav = true, mode = "gallery" }: World2ViewProps) {
+export function World2View({
+  items,
+  showCategoryNav = true,
+  mode = "gallery",
+}: World2ViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<number | null>(null);
   const suppressClickRef = useRef(false);

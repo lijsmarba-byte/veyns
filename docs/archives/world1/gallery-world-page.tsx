@@ -1,6 +1,6 @@
 import { StickyShell } from "@/components/unseen/StickyShell";
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
-import { WorldViewClient } from "@/components/unseen/WorldViewClient";
+import { WorldViewClient } from "./WorldViewClient";
 import { sections } from "@/data/mockCatalog";
 
 type WorldCategoryKey = "OUTER" | "UPPER" | "LOWER" | "SILHOUETTE" | "GROUND" | "ARTIFACTS";
@@ -17,7 +17,7 @@ export default function GalleryWorldPage() {
   return (
     <main data-return-root="true" className="min-h-screen bg-paper" style={{ minHeight: "var(--viewport-h)" }}>
       <ReturnScrollRestore />
-      <StickyShell mode="gallery" view="world" />
+      <StickyShell mode="gallery" view="world2" />
       <section
         data-world-root="true"
         className="flex w-full items-stretch justify-center"

@@ -47,9 +47,9 @@ const HEIGHT = 410;
 const CONTOUR_BLEED_BOTTOM = 130;
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const OVERLAY_CARD_WIDTH_BASE = 620;
-const OVERLAY_CARD_HEIGHT_BASE = 290;
+const OVERLAY_CARD_HEIGHT_BASE = 220;
 const OVERLAY_CARD_WIDTH_EXPANDED = 700;
-const OVERLAY_CARD_HEIGHT_EXPANDED = 340;
+const OVERLAY_CARD_HEIGHT_EXPANDED = 260;
 const OVERLAY_CARD_PADDING = 14;
 const OVERLAY_TITLE_ANCHOR_Y = 44;
 const HOVER_EXPAND_DELAY_MS = 500;
@@ -297,12 +297,16 @@ export function ProfileSignatureContourInline({ user }: { user: MockUserProfile 
   const [activeClusterId, setActiveClusterId] = useState<string | null>(null);
   const [hoveredClusterId, setHoveredClusterId] = useState<string | null>(null);
   const [isOverlayExpanded, setIsOverlayExpanded] = useState(false);
+  const [heatmapContainerWidth, setHeatmapContainerWidth] = useState(WIDTH);
+  const heatmapContainerRef = useRef<HTMLDivElement | null>(null);
   const hoverExpandTimerRef = useRef<number | null>(null);
 
   const data = useMemo(() => buildClusters(user.tasteAttributes.clusters ?? [], user.userId), [user]);
   const activeCluster = data.clusters.find((cluster) => cluster.id === activeClusterId) ?? null;
   const overlayCardWidth = isOverlayExpanded ? OVERLAY_CARD_WIDTH_EXPANDED : OVERLAY_CARD_WIDTH_BASE;
   const overlayCardHeight = isOverlayExpanded ? OVERLAY_CARD_HEIGHT_EXPANDED : OVERLAY_CARD_HEIGHT_BASE;
+  const heatmapScale = clamp(heatmapContainerWidth / WIDTH, 0.55, 1);
+  const overlayResponsiveScale = clamp(0.92, 0.84 + heatmapScale * 0.16, 1);
 
   const clearHoverExpandTimer = () => {
     if (hoverExpandTimerRef.current !== null) {
@@ -335,6 +339,20 @@ export function ProfileSignatureContourInline({ user }: { user: MockUserProfile 
     };
   }, []);
 
+  useEffect(() => {
+    const node = heatmapContainerRef.current;
+    if (!node) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width;
+      if (typeof nextWidth !== "number" || Number.isNaN(nextWidth)) return;
+      setHeatmapContainerWidth((current) => (Math.abs(current - nextWidth) > 0.5 ? nextWidth : current));
+    });
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   const contourPoints = useMemo(() => {
     const centers = data.clusters.map((cluster) => ({
       id: `center-${cluster.id}`,
@@ -359,7 +377,7 @@ export function ProfileSignatureContourInline({ user }: { user: MockUserProfile 
       .weight((d) => d.weight)
       .size([WIDTH, HEIGHT + CONTOUR_BLEED_BOTTOM])
       .bandwidth(34)
-      .thresholds(9)(contourPoints);
+      .thresholds(11)(contourPoints);
   }, [contourPoints]);
 
   const focusAttributes = useMemo(() => buildFocusAttributeLayout(activeCluster), [activeCluster]);
@@ -380,7 +398,7 @@ export function ProfileSignatureContourInline({ user }: { user: MockUserProfile 
 
   return (
     <div className="w-full">
-      <div className="relative w-full">
+      <div ref={heatmapContainerRef} className="relative w-full">
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           className="h-auto w-full"
@@ -463,12 +481,14 @@ export function ProfileSignatureContourInline({ user }: { user: MockUserProfile 
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
             <div
-              className="pointer-events-auto absolute p-8"
+              className="pointer-events-auto absolute rounded-[6px] p-8"
               style={{
                 left: `${activeCardPlacement.leftPercent}%`,
                 top: `${activeCardPlacement.topPercent}%`,
                 width: `${(overlayCardWidth / WIDTH) * 100}%`,
                 maxWidth: `${overlayCardWidth}px`,
+                transform: `scale(${overlayResponsiveScale})`,
+                transformOrigin: "top center",
               }}
               onMouseLeave={() => {
                 setActiveClusterId(null);
@@ -479,6 +499,7 @@ export function ProfileSignatureContourInline({ user }: { user: MockUserProfile 
                 aria-hidden
                 className="pointer-events-none absolute -inset-[18px]"
                 style={{
+                  borderRadius: "10px",
                   background: OVERLAY_SOFT_BACKGROUND,
                   boxShadow: OVERLAY_SOFT_SHADOW,
                 }}
@@ -497,7 +518,7 @@ export function ProfileSignatureContourInline({ user }: { user: MockUserProfile 
                   {thesisText}
                 </p>
 
-                <div className="mx-auto mt-6 flex max-w-[470px] flex-wrap justify-center gap-x-4 gap-y-3">
+                <div className="mx-auto mt-6 flex max-w-[470px] flex-wrap justify-center gap-x-[14px] gap-y-[10px]">
                   {focusAttributes.map((word) => (
                     <span
                       key={`detail-tag-${word.id}`}

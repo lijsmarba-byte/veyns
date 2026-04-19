@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { StickyShell } from "@/components/unseen/StickyShell";
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
 import { World2ViewClient } from "@/components/unseen/World2ViewClient";
+import { RouteShellFallback } from "@/components/unseen/RouteShellFallback";
 import { sections } from "@/data/mockCatalog";
 
 type World2CategoryKey = "OUTER" | "UPPER" | "LOWER" | "SILHOUETTE" | "GROUND" | "ARTIFACTS";
@@ -28,19 +30,23 @@ export default async function GalleryWorld2Page({ searchParams }: GalleryWorld2P
 
   return (
     <main data-return-root="true" className="relative min-h-screen bg-paper" style={{ minHeight: "var(--viewport-h)" }}>
-      <ReturnScrollRestore />
-      <StickyShell mode="gallery" view="world2" />
-      <section
-        data-world2-root="true"
-        className="relative flex w-full items-stretch justify-center"
-        style={{
-          height: "var(--viewport-h)",
-          minHeight: "var(--viewport-h)",
-          marginTop: "calc(var(--sticky-h) * -1)",
-        }}
+      <Suspense
+        fallback={<RouteShellFallback />}
       >
-        <World2ViewClient key={world2ViewKey} items={worldItems} mode="gallery" />
-      </section>
+        <ReturnScrollRestore />
+        <StickyShell mode="gallery" view="world2" />
+        <section
+          data-world2-root="true"
+          className="relative flex w-full items-stretch justify-center"
+          style={{
+            height: "var(--viewport-h)",
+            minHeight: "var(--viewport-h)",
+            marginTop: "calc(var(--sticky-h) * -1)",
+          }}
+        >
+          <World2ViewClient key={world2ViewKey} items={worldItems} mode="gallery" />
+        </section>
+      </Suspense>
     </main>
   );
 }

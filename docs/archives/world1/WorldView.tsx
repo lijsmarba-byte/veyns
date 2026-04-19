@@ -70,6 +70,7 @@ const CAMERA_EPS_PAN = 0.08;
 const CAMERA_EPS_ZOOM = 0.0006;
 const MIN_ZOOM = 0.12;
 const MAX_ZOOM = 4.0;
+const CAMERA_ZOOM_WHEEL_STRENGTH = 0.012;
 
 function clamp(min: number, value: number, max: number) {
   return Math.min(max, Math.max(min, value));

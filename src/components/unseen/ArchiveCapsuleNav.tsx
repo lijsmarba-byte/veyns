@@ -39,7 +39,6 @@ const SVG_X_OVERSCAN = TAB_CURVE_OUTSET + 6;
 const DIVIDER_COLOR = "#ECEDEF";
 const DIVIDER_SHADOW_COLOR = "rgba(0,0,0,0.045)";
 const DIVIDER_SHADOW_OFFSET_Y = 1;
-const DIVIDER_SHADOW_BLUR_PX = 0.8;
 const CURVE_HANDLE_BASE_MAX = 24;
 const CURVE_HANDLE_TOP_MAX = 34;
 const CURVE_HANDLE_BASE_RATIO = 0.62;
@@ -58,8 +57,8 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function roundToHalfPixel(value: number) {
-  return Math.round(value * 2) / 2;
+function roundToPixel(value: number) {
+  return Math.round(value);
 }
 
 function buildArchiveTabPaths(
@@ -69,10 +68,10 @@ function buildArchiveTabPaths(
   targetDividerY: number,
   activeTop: number,
 ): ArchiveTabPaths {
-  const baselineY = roundToHalfPixel(Math.max(0.5, targetDividerY - activeTop));
-  const topY = roundToHalfPixel(Math.max(0.5, baselineY - TAB_CURVE_HEIGHT));
-  const minX = roundToHalfPixel(-SVG_X_OVERSCAN);
-  const maxX = roundToHalfPixel(containerWidth + SVG_X_OVERSCAN);
+  const baselineY = roundToPixel(Math.max(1, targetDividerY - activeTop));
+  const topY = roundToPixel(Math.max(1, baselineY - TAB_CURVE_HEIGHT));
+  const minX = roundToPixel(-SVG_X_OVERSCAN);
+  const maxX = roundToPixel(containerWidth + SVG_X_OVERSCAN);
   const clampedActiveLeft = clamp(activeLeft, 0.5, containerWidth - 0.5);
   const clampedActiveRight = clamp(activeRight, clampedActiveLeft + 1, containerWidth - 0.5);
   const leftBase = clamp(clampedActiveLeft - TAB_CURVE_OUTSET, minX, maxX);
@@ -147,9 +146,9 @@ export function ArchiveCapsuleNav({ tabs = defaultTabs, targetDividerY = 50 }: A
       const maxWidth = Math.max(1, Math.round(containerRect.width));
       const nextGeometry: TabGeometry = {
         containerWidth: maxWidth,
-        activeLeft: roundToHalfPixel(clamp(activeRect.left - containerRect.left, 0.5, maxWidth - 0.5)),
-        activeRight: roundToHalfPixel(clamp(activeRect.right - containerRect.left, 0.5, maxWidth - 0.5)),
-        activeTop: roundToHalfPixel(Math.max(0, activeRect.top - containerRect.top)),
+        activeLeft: roundToPixel(clamp(activeRect.left - containerRect.left, 1, maxWidth - 1)),
+        activeRight: roundToPixel(clamp(activeRect.right - containerRect.left, 1, maxWidth - 1)),
+        activeTop: roundToPixel(Math.max(0, activeRect.top - containerRect.top)),
       };
 
       setTabGeometry((current) => {
@@ -196,10 +195,9 @@ export function ArchiveCapsuleNav({ tabs = defaultTabs, targetDividerY = 50 }: A
   }, [tabGeometry, targetDividerY]);
 
   const fillGradientId = `${svgIdPrefix}-archive-tab-fill`;
-  const shadowFilterId = `${svgIdPrefix}-archive-tab-shadow`;
 
   return (
-    <div ref={containerRef} className="relative z-30 w-full">
+    <div ref={containerRef} className="relative z-30 w-full" data-archive-capsule-nav="true">
       {tabGeometry && tabPaths ? (
         <svg
           className="pointer-events-none absolute left-0 z-10 overflow-visible"
@@ -223,9 +221,6 @@ export function ArchiveCapsuleNav({ tabs = defaultTabs, targetDividerY = 50 }: A
               <stop offset="74%" stopColor="#FCFCFC" stopOpacity="0.42" />
               <stop offset="100%" stopColor="#FEFEFD" stopOpacity="0.08" />
             </linearGradient>
-            <filter id={shadowFilterId} x="-5%" y="0%" width="110%" height="190%">
-              <feGaussianBlur stdDeviation={String(DIVIDER_SHADOW_BLUR_PX)} />
-            </filter>
           </defs>
 
           <path d={tabPaths.fillPath} fill={`url(#${fillGradientId})`} />
@@ -238,7 +233,6 @@ export function ArchiveCapsuleNav({ tabs = defaultTabs, targetDividerY = 50 }: A
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
             transform={`translate(0 ${DIVIDER_SHADOW_OFFSET_Y})`}
-            filter={`url(#${shadowFilterId})`}
           />
           <path
             d={tabPaths.strokePath}

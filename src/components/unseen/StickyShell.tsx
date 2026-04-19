@@ -61,7 +61,7 @@ const ARCHIVE_STICKY_BACKDROP_HEIGHT_PX = 188;
 const GALLERY_STICKY_STACK_HEIGHT_PX = 203;
 const ARCHIVE_STICKY_STACK_HEIGHT_PX = 188;
 const DIVIDER_COLOR = "#ECEDEF";
-const DIVIDER_SHADOW_FILTER = "drop-shadow(0 1px 0.8px rgba(0,0,0,0.045))";
+const DIVIDER_SHADOW = "0 1px 0.8px rgba(0,0,0,0.045)";
 
 function ProfileIdCard() {
   const activeUser = mockUsers[0];
@@ -160,14 +160,14 @@ function ReferenceSetsContent({ user }: { user: (typeof mockUsers)[number] }) {
   return (
     <div className="px-10">
       <p className="max-w-[760px] font-ui text-[13px] font-normal leading-[1.8] tracking-[0.02em] text-meta">
-        A visual representation of your taste. Below, you&apos;ll find the reference sets corresponding to your edits.
+        A visual representation of the taste. Below, you&apos;ll find the reference sets corresponding to each edit.
       </p>
 
       <div className="mt-5 flex w-full max-w-[760px] items-end gap-5">
         <div className="w-[220px] shrink-0 self-end pb-2">
           <div className="flex items-baseline gap-3">
             <p className="font-ui text-[26px] font-medium leading-none tracking-[-0.03em] text-ink">MAIN EDIT</p>
-            <p className="font-ui text-[12px] font-normal leading-4 tracking-[0.02em] text-meta">30 References</p>
+            <p className="font-ui text-[13px] font-normal leading-4 tracking-[0.02em] text-meta">30 References</p>
           </div>
         </div>
 
@@ -261,7 +261,12 @@ function formatCalibrationDate(value: string): string {
   return parsed.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemCount }: StickyShellProps) {
+export function StickyShell({
+  mode,
+  view,
+  issueNumber = "04",
+  archiveActiveItemCount,
+}: StickyShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -377,21 +382,20 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
           data-node-id={isGallery ? "768:2169" : "770:2181"}
         >
           <div
-            className={`absolute h-[34px] w-[198px] -translate-x-1/2 ${
-              isGallery ? "left-[calc(50%+10.5px)]" : "left-[calc(50%+10px)]"
-            }`}
+            className="absolute left-[calc(50%+10px)] h-[34px] w-[198px] -translate-x-1/2 max-[760px]:left-1/2"
             style={{ top: `${MODE_SWITCH_TOP_PX}px` }}
           >
             <ModePill selected={isGallery ? "gallery" : "archive"} />
           </div>
 
-          <div className="absolute right-10 top-[23px] h-[26px] w-[161px]">
-            <div className="relative h-[26px] w-[161px]">
-              <p className="absolute left-0 top-0 w-[94px] text-right text-ink leading-none">
-                <span className="font-ui text-[14px] font-semibold leading-[26px] tracking-[-0.04em]">seenless</span>
+          <div className="absolute right-4 top-[23px] md:right-10" data-sticky-brand-row="true">
+            <div className="flex h-[26px] items-center gap-[6px]">
+              <p className="hidden h-[26px] items-center text-right text-ink leading-none min-[700px]:inline-flex" data-sticky-logo-wrap="true">
+                <span className="font-ui text-[18px] font-semibold leading-[18px] tracking-[-0.04em]">cenoir</span>
               </p>
               <div
-                className={`absolute left-[100px] top-[7px] flex h-3 items-center justify-center rounded-[2px] px-1 py-[3px] ${
+                data-sticky-beta="true"
+                className={`hidden h-[12px] min-w-[26px] items-center justify-center rounded-[2px] px-[4px] min-[700px]:inline-flex ${
                   isGallery ? "bg-ink" : "bg-accent"
                 }`}
               >
@@ -402,24 +406,24 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
               <button
                 type="button"
                 aria-label="Open profile"
-                data-show-around-target="profile-button"
                 onClick={handleProfileOpen}
-                className="group absolute left-[146px] top-[7px] inline-flex h-[11px] w-[15px] items-center justify-center transition-opacity duration-300 ease-out pointer-events-auto opacity-100 focus-visible:outline-none"
+                data-sticky-burger="true"
+                className="group relative ml-[10px] inline-flex h-[12px] w-[16px] items-center justify-center transition-opacity duration-300 ease-out pointer-events-auto opacity-100 focus-visible:outline-none"
               >
                 <span
-                  className={`absolute block h-[1.5px] w-[15px] rounded-full bg-meta transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+                  className={`absolute block h-px w-[16px] rounded-full bg-meta transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
                     isProfileEntryFromClose
                       ? "translate-y-0 rotate-45"
                       : "-translate-y-[4px] rotate-0 group-hover:scale-x-[1.04]"
                   }`}
                 />
                 <span
-                  className={`absolute block h-[1.5px] w-[15px] rounded-full bg-meta transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+                  className={`absolute block h-px w-[16px] rounded-full bg-meta transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
                     isProfileEntryFromClose ? "opacity-0" : "opacity-100 group-hover:scale-x-[0.96]"
                   }`}
                 />
                 <span
-                  className={`absolute block h-[1.5px] w-[15px] rounded-full bg-meta transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+                  className={`absolute block h-px w-[16px] rounded-full bg-meta transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
                     isProfileEntryFromClose
                       ? "translate-y-0 -rotate-45"
                       : "translate-y-[4px] rotate-0 group-hover:scale-x-[1.03]"
@@ -433,10 +437,7 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
             <div className="group flex items-end gap-[10px] pb-0">
               <div className="flex h-[45px] items-end">
                 {isGallery ? (
-                  <h1
-                    data-show-around-target="issue-heading"
-                    className={`inline-flex items-end text-[30px] leading-none ${headerColorClass}`}
-                  >
+                  <h1 className={`inline-flex items-end text-[30px] leading-none ${headerColorClass}`}>
                     <span className="font-ui font-normal tracking-[-0.06em]">Issue</span>
                     <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">-</span>
                     <span className="ml-[1px] font-instrument italic tracking-[0.01em]">
@@ -489,12 +490,7 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
           </div>
 
           {isGallery ? (
-            <div
-              data-show-around-target="edits-row"
-              aria-hidden="true"
-              className="pointer-events-none absolute left-[41px] right-[33px] z-10"
-              style={{ top: `${136 - lowerNavLiftPx}px`, height: "42px" }}
-            />
+            <div aria-hidden="true" className="pointer-events-none absolute left-[41px] right-[33px] z-10" style={{ top: `${136 - lowerNavLiftPx}px`, height: "42px" }} />
           ) : null}
 
           {isGallery ? (
@@ -514,12 +510,11 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
                 aria-label="Show edit actions"
                 aria-haspopup="menu"
                 aria-expanded={isEditActionMenuOpen}
-                data-show-around-target="edit-plus"
                 onClick={() => setIsEditActionMenuOpen(true)}
-                className={`font-ui inline-flex h-8 w-8 items-center justify-center rounded-full border text-[18px] font-medium leading-none tracking-[0.02em] transition-all duration-150 ease-out focus-visible:outline-none ${
+                className={`font-ui inline-flex h-[33px] w-[33px] items-center justify-center rounded-full border-[0.5px] text-[18px] font-medium leading-none tracking-[0.02em] transition-[opacity,color,border-color,background-color,box-shadow] duration-150 ease-out focus-visible:outline-none ${
                   isEditActionMenuOpen
-                    ? "pointer-events-none scale-[0.96] border-line/70 bg-mist/70 text-inactive opacity-0"
-                    : "scale-100 border-transparent bg-transparent text-inactive opacity-100 hover:border-line/80 hover:bg-[#F5F5F6] hover:text-[#6F7381] hover:shadow-[0_1px_2px_rgba(0,0,0,0.12)] focus-visible:border-line/80 focus-visible:bg-[#F5F5F6] focus-visible:text-[#6F7381] focus-visible:shadow-[0_1px_2px_rgba(0,0,0,0.12)]"
+                    ? "pointer-events-none border-[#ECECED] bg-mist/70 text-inactive opacity-0"
+                    : "border-transparent bg-transparent text-inactive opacity-100 shadow-none hover:border-[#F0F0F1] hover:bg-[#F5F5F6] hover:text-[#6F7381] hover:shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:border-[#F0F0F1] focus-visible:bg-[#F5F5F6] focus-visible:text-[#6F7381] focus-visible:shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]"
                 }`}
               >
                 +
@@ -539,7 +534,7 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
                   type="button"
                   role="menuitem"
                   onClick={handleCreateNewEdit}
-                  className="inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium focus-visible:font-medium hover:text-ink focus-visible:text-ink"
+                  className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink"
                 >
                   create
                 </button>
@@ -547,7 +542,7 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
                   type="button"
                   role="menuitem"
                   onClick={handleManageEdits}
-                  className="inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium focus-visible:font-medium hover:text-ink focus-visible:text-ink"
+                  className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink"
                 >
                   review
                 </button>
@@ -559,7 +554,8 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
             <>
               <div
                 className="pointer-events-none absolute left-10 right-10 z-10 h-[1px]"
-                style={{ top: `${dividerTopPx}px`, backgroundColor: DIVIDER_COLOR, filter: DIVIDER_SHADOW_FILTER }}
+                data-sticky-divider="true"
+                style={{ top: `${dividerTopPx}px`, backgroundColor: DIVIDER_COLOR, boxShadow: DIVIDER_SHADOW }}
               />
             </>
           )}
@@ -620,7 +616,7 @@ export function StickyShell({ mode, view, issueNumber = "04", archiveActiveItemC
 
               <div
                 className="pointer-events-none absolute left-0 top-[186px] h-px w-[35%]"
-                style={{ backgroundColor: DIVIDER_COLOR, filter: DIVIDER_SHADOW_FILTER }}
+                style={{ backgroundColor: DIVIDER_COLOR, boxShadow: DIVIDER_SHADOW }}
               />
             </div>
           </div>

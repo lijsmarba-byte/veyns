@@ -6,7 +6,7 @@ export default function EnterPage() {
       <section className="relative mx-auto flex w-full max-w-[1333px] min-h-[var(--viewport-h)] flex-col px-10 pb-10 pt-10">
         <div className="fixed right-10 top-[23px] z-30 h-[26px] w-[161px]">
           <p className="absolute left-0 top-0 w-[94px] text-right text-ink leading-none">
-            <span className="font-ui text-[14px] font-semibold leading-[26px] tracking-[-0.04em]">seenless</span>
+            <span className="font-ui text-[18px] font-semibold leading-[26px] tracking-[-0.04em]">cenoir</span>
           </p>
           <div className="absolute left-[100px] top-[7px] flex h-3 items-center justify-center rounded-[2px] bg-ink px-1 py-[3px]">
             <span className="font-ui text-[7px] font-bold leading-[7px] tracking-[-0.14px] text-paper">BETA</span>

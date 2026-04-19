@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { StickyShell } from "@/components/unseen/StickyShell";
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
 import { ImmersiveView } from "@/components/unseen/ImmersiveView";
+import { RouteShellFallback } from "@/components/unseen/RouteShellFallback";
 import { archiveCapsuleItems, type ArchiveCapsuleId } from "@/data/mockCatalog";
 import { redirect } from "next/navigation";
 
@@ -41,9 +43,13 @@ export default async function ArchiveImmersivePage({ searchParams }: ArchiveImme
         height: "var(--viewport-h)",
       }}
     >
-      <ReturnScrollRestore />
-      <StickyShell mode="archive" view="immersive" archiveActiveItemCount={activeCapsuleItemCount} />
-      <ImmersiveView mode="archive" />
+      <Suspense
+        fallback={<RouteShellFallback />}
+      >
+        <ReturnScrollRestore />
+        <StickyShell mode="archive" view="immersive" archiveActiveItemCount={activeCapsuleItemCount} />
+        <ImmersiveView mode="archive" />
+      </Suspense>
     </main>
   );
 }

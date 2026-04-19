@@ -48,7 +48,7 @@ export function ViewToggle({ mode, view, archiveActiveItemCount, archiveCapsuleI
   };
 
   return (
-    <div data-show-around-target="discovery-views" className="relative isolate inline-flex items-end gap-4">
+    <div className="relative isolate inline-flex items-end gap-4">
       <span
         aria-hidden="true"
         className="pointer-events-none absolute -left-[64px] -right-[34px] top-[-18px] h-[46px] -z-10"

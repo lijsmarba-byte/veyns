@@ -87,10 +87,9 @@ export default async function ProductViewPage({
   const productTitleToneClass = isArchiveMode ? "text-accent" : "text-ink";
   const backHref = backParam?.startsWith("/") ? backParam : mode === "archive" ? "/archive" : "/gallery";
   const leftStickyTop = "calc(var(--sticky-h) + (var(--viewport-h) - var(--sticky-h)) / 2 - 260px)";
-  const rightRailTop = "calc(var(--sticky-h) + (var(--viewport-h) - var(--sticky-h)) / 2 - 220px)";
 
   return (
-    <main className="font-ui min-h-screen bg-paper text-ink">
+    <main className="font-ui min-h-screen bg-paper text-ink" style={{ minHeight: "var(--viewport-h)" }}>
       <section data-pv-shell="true" className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
         <ProductViewCloseButton
           backHref={backHref}
@@ -99,7 +98,10 @@ export default async function ProductViewPage({
           className="fixed right-10 top-[30px] z-50 inline-flex h-[11px] w-[15px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none"
         />
 
-        <div className="grid grid-cols-1 gap-12 lg:min-h-[calc(100vh-120px)] lg:grid-cols-[1.03fr_0.97fr] lg:items-start lg:gap-24">
+        <div
+          className="grid grid-cols-1 gap-16 lg:grid-cols-[1.03fr_0.97fr] lg:items-start lg:gap-24"
+          style={{ minHeight: "calc(var(--viewport-h) - 120px)" }}
+        >
           <ProductInfoTransition
             productId={current.item.id}
             className="pt-8 sm:pt-12 md:pt-16 lg:sticky lg:self-start lg:pt-0"
@@ -143,8 +145,11 @@ export default async function ProductViewPage({
           </ProductInfoTransition>
 
           <div
-            className="relative flex pt-2 lg:min-h-[calc(100vh-120px)] lg:items-start lg:justify-center lg:pt-0"
-            style={{ paddingTop: rightRailTop }}
+            className="relative flex pt-0 lg:items-start lg:justify-center"
+            style={{
+              minHeight: "calc(var(--viewport-h) - 120px)",
+              paddingTop: "calc(var(--sticky-h) + (var(--viewport-h) - var(--sticky-h)) / 2 - 220px)",
+            }}
           >
             <ProductImageRail
               images={imageRail}

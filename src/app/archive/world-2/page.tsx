@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { StickyShell } from "@/components/unseen/StickyShell";
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
 import { World2ViewClient } from "@/components/unseen/World2ViewClient";
+import { RouteShellFallback } from "@/components/unseen/RouteShellFallback";
 import { archiveCapsuleItems, sections, type ArchiveCapsuleId } from "@/data/mockCatalog";
 import { redirect } from "next/navigation";
 
@@ -63,19 +65,23 @@ export default async function ArchiveWorld2Page({ searchParams }: ArchiveWorld2P
       className="relative h-[var(--viewport-h)] w-full overflow-hidden bg-paper"
       style={{ height: "var(--viewport-h)" }}
     >
-      <ReturnScrollRestore />
-      <StickyShell mode="archive" view="world2" archiveActiveItemCount={activeCapsuleItemCount} />
-      <section
-        data-world2-root="true"
-        className="relative flex w-full items-stretch justify-center"
-        style={{
-          height: "var(--viewport-h)",
-          minHeight: "var(--viewport-h)",
-          marginTop: "calc(var(--sticky-h) * -1)",
-        }}
+      <Suspense
+        fallback={<RouteShellFallback />}
       >
-        <World2ViewClient key={activeCapsule} items={worldItems} mode="archive" showCategoryNav={false} />
-      </section>
+        <ReturnScrollRestore />
+        <StickyShell mode="archive" view="world2" archiveActiveItemCount={activeCapsuleItemCount} />
+        <section
+          data-world2-root="true"
+          className="relative flex w-full items-stretch justify-center"
+          style={{
+            height: "var(--viewport-h)",
+            minHeight: "var(--viewport-h)",
+            marginTop: "calc(var(--sticky-h) * -1)",
+          }}
+        >
+          <World2ViewClient key={activeCapsule} items={worldItems} mode="archive" showCategoryNav={false} />
+        </section>
+      </Suspense>
     </main>
   );
 }

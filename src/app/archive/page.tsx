@@ -1,7 +1,9 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { StickyShell } from "@/components/unseen/StickyShell";
 import { ProductTile } from "@/components/unseen/ProductTile";
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
+import { RouteShellFallback } from "@/components/unseen/RouteShellFallback";
 import { archiveCapsuleItems, type ArchiveCapsuleId } from "@/data/mockCatalog";
 
 type ArchivePageProps = {
@@ -27,32 +29,36 @@ export default async function ArchivePage({ searchParams }: ArchivePageProps) {
 
   return (
     <main data-return-root="true" className="min-h-screen bg-paper" style={{ minHeight: "var(--viewport-h)" }}>
-      <ReturnScrollRestore />
-      <StickyShell mode="archive" view="grid" archiveActiveItemCount={sectionItems.length} />
-      <section data-grid-root="true" className="mx-auto max-w-[1333px] pb-24 pl-10 pr-10 pt-[64px]">
-        {isCapsule2Empty ? (
-          <div className="mx-auto flex w-full max-w-[560px] flex-col items-start gap-4 pt-[86px]">
-            <h2 className="font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-accent">
-              Capsule not yet formed
-            </h2>
-            <p className="font-ui text-[14px] font-normal leading-6 tracking-[0.02em] text-meta">
-              Saved selections from the paired Edit will appear here. None have been added yet.
-            </p>
-            <Link
-              href={capsule2EditHref}
-              className="inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium hover:text-ink focus-visible:font-medium focus-visible:text-ink focus-visible:outline-none"
-            >
-              Open paired Edit
-            </Link>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-y-[132px] md:grid-cols-2 md:gap-x-[64px] lg:grid-cols-3 lg:gap-x-[72px]">
-            {sectionItems.map((item) => (
-              <ProductTile key={item.id} item={item} mode="archive" issueNumber={issueLabel} />
-            ))}
-          </div>
-        )}
-      </section>
+      <Suspense
+        fallback={<RouteShellFallback />}
+      >
+        <ReturnScrollRestore />
+        <StickyShell mode="archive" view="grid" archiveActiveItemCount={sectionItems.length} />
+        <section data-grid-root="true" className="mx-auto max-w-[1333px] pb-24 pl-10 pr-10 pt-[64px]">
+          {isCapsule2Empty ? (
+            <div className="mx-auto flex w-full max-w-[560px] flex-col items-center gap-4 pt-[86px] text-center">
+              <h2 className="font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-accent">
+                Capsule not yet formed
+              </h2>
+              <p className="font-ui text-[14px] font-normal leading-6 tracking-[0.02em] text-meta">
+                Saved selections from the paired edit will appear here. None have been added yet.
+              </p>
+              <Link
+                href={capsule2EditHref}
+                className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
+              >
+                open paired edit
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-y-[132px] md:grid-cols-2 md:gap-x-[64px] lg:grid-cols-3 lg:gap-x-[72px]">
+              {sectionItems.map((item) => (
+                <ProductTile key={item.id} item={item} mode="archive" issueNumber={issueLabel} />
+              ))}
+            </div>
+          )}
+        </section>
+      </Suspense>
     </main>
   );
 }

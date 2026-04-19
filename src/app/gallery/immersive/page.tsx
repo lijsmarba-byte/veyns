@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { StickyShell } from "@/components/unseen/StickyShell";
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
 import { ImmersiveView } from "@/components/unseen/ImmersiveView";
+import { RouteShellFallback } from "@/components/unseen/RouteShellFallback";
 
 export default function GalleryImmersivePage() {
   return (
@@ -11,9 +13,13 @@ export default function GalleryImmersivePage() {
         height: "var(--viewport-h)",
       }}
     >
-      <ReturnScrollRestore />
-      <StickyShell mode="gallery" view="immersive" />
-      <ImmersiveView mode="gallery" />
+      <Suspense
+        fallback={<RouteShellFallback />}
+      >
+        <ReturnScrollRestore />
+        <StickyShell mode="gallery" view="immersive" />
+        <ImmersiveView mode="gallery" />
+      </Suspense>
     </main>
   );
 }

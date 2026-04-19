@@ -2,31 +2,29 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalibrationLayout } from "@/components/unseen/CalibrationLayout";
-import { ReferenceUploadDropzone } from "@/components/unseen/ReferenceUploadDropzone";
 
 const MIN_REFERENCE_IMAGES = 30;
 const MAX_REFERENCE_IMAGES = 150;
 const GALLERY_ENTRY_ARRIVAL_KEY = "unseen:gallery-entry-arrival";
 const GALLERY_ARRIVAL_ACTIVE_KEY = "unseen:gallery-arrival-active";
-const PROCESSING_MESSAGES = [
-  "Reading references.",
-  "Mapping silhouette, material, finish.",
-  "Distilling palette and proportion.",
-  "Resolving the Signature.",
-  "Composing the Main Edit.",
-  "Placing Issue 01.",
+const CALIBRATION_DOT_COUNT = 8;
+
+const CALIBRATION_LINES = [
+  "Reading silhouette",
+  "Reading material and finish",
+  "Noting palette direction",
+  "Observing proportion and cut",
+  "Mapping reference relationships",
+  "Shaping the Signature",
+  "Preparing the first Edit of the current Issue",
 ] as const;
 
-const DEFAULT_MAIN_EDIT_NAME = "mainEdit";
-const DEFAULT_MAIN_CAPSULE_NAME = "mainCapsule";
-
-type OnboardingStep = "invitation" | "account" | "references" | "processing";
+type StepKey = "account" | "references" | "calibration";
 
 type StepMeta = {
-  key: OnboardingStep;
+  key: StepKey;
   label: string;
 };
 
@@ -36,29 +34,11 @@ type ReferenceImage = {
   previewUrl: string;
 };
 
-function getProcessingMessageIndex(progress: number): number {
-  if (progress < 16) return 0;
-  if (progress < 33) return 1;
-  if (progress < 50) return 2;
-  if (progress < 66) return 3;
-  if (progress < 83) return 4;
-  return 5;
-}
-
 const STEP_META: StepMeta[] = [
-  { key: "invitation", label: "Access" },
   { key: "account", label: "Account" },
   { key: "references", label: "References" },
-  { key: "processing", label: "Entry" },
+  { key: "calibration", label: "Calibration" },
 ];
-
-const CALIBRATION_SPACING = {
-  A: "mt-12",
-  B: "mt-7",
-  C: "mt-8",
-  D: "mt-5",
-  E: "mt-8",
-} as const;
 
 function randomId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -69,19 +49,6 @@ function randomId(prefix: string): string {
 
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function isValidPhone(value: string): boolean {
-  const compact = value.replace(/[^\d+]/g, "");
-  return /^\+?\d{7,15}$/.test(compact);
-}
-
-function getReferencePreviewColumns(viewportWidth: number): number {
-  if (viewportWidth >= 1900) return 8;
-  if (viewportWidth >= 1600) return 7;
-  if (viewportWidth >= 1300) return 6;
-  if (viewportWidth >= 1050) return 5;
-  return 4;
 }
 
 function UnseenBetaMark() {
@@ -97,117 +64,206 @@ function UnseenBetaMark() {
   );
 }
 
+function ActionPill({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-meta shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none"
+    >
+      {label}
+    </button>
+  );
+}
+
 export function OnboardingFlow() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const passwordInputRef = useRef<HTMLInputElement | null>(null);
+  const previewRowRef = useRef<HTMLDivElement | null>(null);
   const referencesRef = useRef<ReferenceImage[]>([]);
-  const uploadPulseTimeoutRef = useRef<number | null>(null);
+  const calibrationTimerRef = useRef<number | null>(null);
+  const calibrationHoldRef = useRef<number | null>(null);
+  const routeTimerRef = useRef<number | null>(null);
 
   const [stepIndex, setStepIndex] = useState(0);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [phone, setPhone] = useState("");
-  const [phoneCodeInput, setPhoneCodeInput] = useState("");
-  const [phoneVerificationCode, setPhoneVerificationCode] = useState("");
-  const [isPhoneCodeSent, setIsPhoneCodeSent] = useState(false);
-  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
-  const [references, setReferences] = useState<ReferenceImage[]>([]);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [isReferenceUploading, setIsReferenceUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [processingProgress, setProcessingProgress] = useState(0);
-  const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1440));
+  const [isPasswordHovered, setIsPasswordHovered] = useState(false);
+  const [revealEmail, setRevealEmail] = useState(false);
+  const [revealPassword, setRevealPassword] = useState(false);
 
-  const currentStep = STEP_META[stepIndex]?.key ?? "invitation";
+  const [references, setReferences] = useState<ReferenceImage[]>([]);
+  const [showAllReferences, setShowAllReferences] = useState(false);
+  const [previewItemsPerRow, setPreviewItemsPerRow] = useState(5);
+  const [isReferenceUploading, setIsReferenceUploading] = useState(false);
+  const [calibrationLineIndex, setCalibrationLineIndex] = useState(0);
+  const [calibrationPercent, setCalibrationPercent] = useState(0);
+  const [calibrationSpinTick, setCalibrationSpinTick] = useState(0);
+
+  const [error, setError] = useState<string | null>(null);
+
+  const currentStep = STEP_META[stepIndex]?.key ?? "account";
+  const hasName = name.trim().length > 0;
+  const hasValidEmail = isValidEmail(email);
+  const hasPassword = password.trim().length > 0;
+  const canProceed = hasName && hasValidEmail && hasPassword;
+  const canCalibrate = references.length >= MIN_REFERENCE_IMAGES;
+  const stepProgressPercent = ((stepIndex + 1) / STEP_META.length) * 100;
+  const completedDotCount =
+    calibrationPercent >= 100 ? CALIBRATION_DOT_COUNT : Math.floor((calibrationPercent / 100) * CALIBRATION_DOT_COUNT);
+  const remainingDotCount = Math.max(0, CALIBRATION_DOT_COUNT - completedDotCount);
+  const spinningDotIndex =
+    remainingDotCount > 0 ? completedDotCount + (calibrationSpinTick % remainingDotCount) : -1;
 
   useEffect(() => {
     referencesRef.current = references;
   }, [references]);
 
   useEffect(() => {
-    const handleResize = () => setViewportWidth(window.innerWidth);
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  useEffect(() => {
     return () => {
       referencesRef.current.forEach((entry) => {
         URL.revokeObjectURL(entry.previewUrl);
       });
-      if (uploadPulseTimeoutRef.current !== null) {
-        window.clearTimeout(uploadPulseTimeoutRef.current);
-      }
+      if (calibrationTimerRef.current !== null) window.clearTimeout(calibrationTimerRef.current);
+      if (calibrationHoldRef.current !== null) window.clearTimeout(calibrationHoldRef.current);
+      if (routeTimerRef.current !== null) window.clearTimeout(routeTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
-    if (currentStep !== "processing") return;
+    if (hasName) setRevealEmail(true);
+  }, [hasName]);
 
+  useEffect(() => {
+    if (revealEmail && hasValidEmail) setRevealPassword(true);
+  }, [hasValidEmail, revealEmail]);
+
+  useEffect(() => {
+    if (currentStep !== "account") return;
+    const rafId = window.requestAnimationFrame(() => {
+      nameInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [currentStep]);
+
+  useEffect(() => {
+    if (currentStep !== "calibration") return;
+
+    setCalibrationLineIndex(0);
+    setCalibrationPercent(0);
+    setCalibrationSpinTick(0);
+    const totalDurationMs = (CALIBRATION_LINES.length - 1) * 7400 + 2000;
     const startedAt = performance.now();
-    const durationMs = 30000;
     let rafId = 0;
 
-    const tick = (now: number) => {
-      const raw = Math.min((now - startedAt) / durationMs, 1);
-      const eased = 1 - Math.pow(1 - raw, 3);
-      setProcessingProgress(Math.round(eased * 100));
-      if (raw < 1) {
-        rafId = window.requestAnimationFrame(tick);
+    const tickPercent = (now: number) => {
+      const elapsed = Math.max(0, now - startedAt);
+      const progress = Math.min(100, Math.round((elapsed / totalDurationMs) * 100));
+      setCalibrationPercent(progress);
+      if (progress < 100) {
+        rafId = window.requestAnimationFrame(tickPercent);
       }
     };
 
-    rafId = window.requestAnimationFrame(tick);
+    rafId = window.requestAnimationFrame(tickPercent);
 
-    const completeTimer = window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(
-          "unseen:onboarding-profile",
-          JSON.stringify({
-            name: name.trim(),
-            email: email.trim(),
-            phone: phone.trim(),
-            phoneVerified: phone.trim().length > 0 ? isPhoneVerified : false,
-            mainEditName: DEFAULT_MAIN_EDIT_NAME,
-            mainCapsuleName: DEFAULT_MAIN_CAPSULE_NAME,
-            referenceCount: references.length,
-            referenceFileNames: references.map((entry) => entry.file.name),
-            completedAt: new Date().toISOString(),
-          }),
-        );
-        window.localStorage.setItem("unseen:onboarding-complete", "1");
-        window.sessionStorage.setItem(
-          GALLERY_ENTRY_ARRIVAL_KEY,
-          JSON.stringify({
-            source: "onboarding",
-            at: new Date().toISOString(),
-          }),
-        );
-        window.sessionStorage.setItem(GALLERY_ARRIVAL_ACTIVE_KEY, "1");
-      } catch {
-        // Ignore local storage failures.
+    const runLine = (index: number) => {
+      if (index >= CALIBRATION_LINES.length - 1) {
+        calibrationHoldRef.current = window.setTimeout(() => {
+          try {
+            window.localStorage.setItem(
+              "unseen:onboarding-profile",
+              JSON.stringify({
+                name: name.trim(),
+                email: email.trim(),
+                referenceCount: references.length,
+                referenceFileNames: references.map((entry) => entry.file.name),
+                completedAt: new Date().toISOString(),
+              }),
+            );
+            window.localStorage.setItem("unseen:onboarding-complete", "1");
+            window.sessionStorage.setItem(
+              GALLERY_ENTRY_ARRIVAL_KEY,
+              JSON.stringify({
+                source: "onboarding",
+                at: new Date().toISOString(),
+              }),
+            );
+            window.sessionStorage.setItem(GALLERY_ARRIVAL_ACTIVE_KEY, "1");
+          } catch {
+            // Ignore local storage failures.
+          }
+          router.push("/gallery?entry=signup");
+        }, 4200);
+        return;
       }
-      router.push("/gallery?entry=signup");
-    }, durationMs);
+
+      calibrationTimerRef.current = window.setTimeout(() => {
+        setCalibrationLineIndex(index + 1);
+        runLine(index + 1);
+      }, 7400);
+    };
+
+    runLine(0);
 
     return () => {
       window.cancelAnimationFrame(rafId);
-      window.clearTimeout(completeTimer);
+      if (calibrationTimerRef.current !== null) {
+        window.clearTimeout(calibrationTimerRef.current);
+        calibrationTimerRef.current = null;
+      }
+      if (calibrationHoldRef.current !== null) {
+        window.clearTimeout(calibrationHoldRef.current);
+        calibrationHoldRef.current = null;
+      }
+      if (routeTimerRef.current !== null) {
+        window.clearTimeout(routeTimerRef.current);
+        routeTimerRef.current = null;
+      }
     };
-  }, [currentStep, email, isPhoneVerified, name, phone, references, router]);
+  }, [currentStep, email, name, references, router]);
 
-  const allReferenceItems = useMemo(() => references, [references]);
-  const referencePreviewColumns = getReferencePreviewColumns(viewportWidth);
-  const processingMessageIndex = getProcessingMessageIndex(processingProgress);
+  useEffect(() => {
+    if (currentStep !== "calibration") return;
+    const intervalId = window.setInterval(() => {
+      setCalibrationSpinTick((current) => current + 1);
+    }, 170);
+    return () => window.clearInterval(intervalId);
+  }, [currentStep]);
 
-  const actionPillPrimaryClass =
-    "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium hover:text-ink focus-visible:font-medium focus-visible:text-ink focus-visible:outline-none";
-  const actionPillStandardInkClass =
-    "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-ink shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium focus-visible:font-medium focus-visible:outline-none";
-  const inputClass =
-    "h-[34px] w-full border-0 bg-transparent px-0 font-ui text-[14px] font-normal leading-5 text-ink outline-none placeholder:text-inactive";
-  const onboardingTitleClass = "inline-flex items-end text-[30px] leading-none text-ink";
+  useEffect(() => {
+    if (currentStep !== "references" || showAllReferences) return;
+    const node = previewRowRef.current;
+    if (!node) return;
+
+    const tileSize = 120;
+    const gapSize = 8;
+    const update = () => {
+      const width = node.clientWidth;
+      const next = Math.max(1, Math.floor((width + gapSize) / (tileSize + gapSize)));
+      setPreviewItemsPerRow(next);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [currentStep, showAllReferences, references.length]);
 
   const appendReferences = (incomingFiles: File[]) => {
     const imageFiles = incomingFiles.filter((file) => file.type.startsWith("image/"));
@@ -228,8 +284,10 @@ export function OnboardingFlow() {
         file,
         previewUrl: URL.createObjectURL(file),
       }));
+
       const droppedCount = imageFiles.length - accepted.length;
       setError(droppedCount > 0 ? `Added ${accepted.length} images. ${droppedCount} exceeded the 150-image limit.` : null);
+
       return [...current, ...accepted];
     });
   };
@@ -237,22 +295,16 @@ export function OnboardingFlow() {
   const removeReference = (id: string) => {
     setReferences((current) => {
       const target = current.find((entry) => entry.id === id);
-      if (target) {
-        URL.revokeObjectURL(target.previewUrl);
-      }
+      if (target) URL.revokeObjectURL(target.previewUrl);
       return current.filter((entry) => entry.id !== id);
     });
   };
 
   const pulseReferenceUploading = () => {
     setIsReferenceUploading(true);
-    if (uploadPulseTimeoutRef.current !== null) {
-      window.clearTimeout(uploadPulseTimeoutRef.current);
-    }
-    uploadPulseTimeoutRef.current = window.setTimeout(() => {
+    window.setTimeout(() => {
       setIsReferenceUploading(false);
-      uploadPulseTimeoutRef.current = null;
-    }, 280);
+    }, 220);
   };
 
   const handleIncomingReferences = (incomingFiles: File[]) => {
@@ -261,447 +313,440 @@ export function OnboardingFlow() {
     appendReferences(incomingFiles);
   };
 
-  const moveToAccount = () => {
+  const moveToReferences = () => {
+    if (!canProceed) {
+      setError("Please complete the account fields.");
+      return;
+    }
     setError(null);
     setStepIndex(1);
   };
 
-  const handlePhoneChange = (value: string) => {
-    setPhone(value);
-    setIsPhoneCodeSent(false);
-    setIsPhoneVerified(false);
-    setPhoneCodeInput("");
-    setPhoneVerificationCode("");
-  };
-
-  const sendPhoneCode = () => {
-    const trimmedPhone = phone.trim();
-    if (!isValidPhone(trimmedPhone)) {
-      setError("Please enter a valid phone number.");
-      return;
-    }
-
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setPhoneVerificationCode(code);
-    setIsPhoneCodeSent(true);
-    setIsPhoneVerified(false);
-    setPhoneCodeInput("");
-    setError(null);
-  };
-
-  const confirmPhoneCode = () => {
-    if (!isPhoneCodeSent || !phoneVerificationCode) {
-      setError("Send a code first.");
-      return;
-    }
-    if (phoneCodeInput.trim() !== phoneVerificationCode) {
-      setError("Incorrect code. Please try again.");
-      return;
-    }
-    setIsPhoneVerified(true);
-    setError(null);
-  };
-
-  const moveToReferences = () => {
-    const trimmedName = name.trim();
-    const trimmedEmail = email.trim();
-    const trimmedPhone = phone.trim();
-
-    if (trimmedName.length < 2) {
-      setError("Please enter a name.");
-      return;
-    }
-
-    const hasEmail = trimmedEmail.length > 0;
-    const hasPhone = trimmedPhone.length > 0;
-
-    if (!hasEmail && !hasPhone) {
-      setError("Enter either email or phone number.");
-      return;
-    }
-
-    if (hasEmail && !isValidEmail(trimmedEmail)) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-
-    if (hasEmail && password.trim().length < 8) {
-      setError("Password should be at least 8 characters for email login.");
-      return;
-    }
-
-    if (hasPhone && !isValidPhone(trimmedPhone)) {
-      setError("Please enter a valid phone number.");
-      return;
-    }
-
-    if (hasPhone && !isPhoneVerified) {
-      setError("Confirm phone number with code to continue.");
-      return;
-    }
-
-    setError(null);
-    setStepIndex(2);
-  };
-
-  const moveToProcessing = () => {
-    if (references.length < MIN_REFERENCE_IMAGES) {
+  const moveToCalibration = () => {
+    if (!canCalibrate) {
       setError(`Please add at least ${MIN_REFERENCE_IMAGES} reference images.`);
       return;
     }
     setError(null);
-    setProcessingProgress(0);
-    setStepIndex(3);
+    setStepIndex(2);
+  };
+
+  const visibleReferences = showAllReferences ? references : references.slice(0, previewItemsPerRow);
+  const collapsedVisibleCount = Math.min(references.length, previewItemsPerRow);
+  const collapsedTrackWidthPx =
+    collapsedVisibleCount > 0 ? collapsedVisibleCount * 120 + Math.max(0, collapsedVisibleCount - 1) * 8 : 0;
+
+  const inputClass =
+    "mt-1 block h-[30px] w-full select-text border-0 bg-transparent px-0 text-center font-ui text-[13px] font-normal leading-6 text-ink outline-none placeholder:text-inactive";
+
+  const focusEmailField = () => {
+    window.requestAnimationFrame(() => {
+      emailInputRef.current?.focus();
+    });
+  };
+
+  const focusPasswordField = () => {
+    window.requestAnimationFrame(() => {
+      passwordInputRef.current?.focus();
+    });
+  };
+
+  const handleNameEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!hasName) return;
+    setRevealEmail(true);
+    focusEmailField();
+  };
+
+  const handleEmailEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!hasValidEmail) return;
+    setRevealPassword(true);
+    focusPasswordField();
+  };
+
+  const handlePasswordEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
   };
 
   return (
-    <section className="font-ui min-h-screen bg-paper text-ink">
+    <section className="select-none font-ui min-h-screen bg-paper text-ink">
       <div className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
         <UnseenBetaMark />
 
         <div className="pt-[92px]">
-          <nav aria-label="Onboarding steps" className="relative mx-auto w-full max-w-[920px]">
-            <ol className="relative flex items-center justify-between gap-2">
-              {STEP_META.map((step, index) => {
-                const isActive = index === stepIndex;
-                const isPast = index < stepIndex;
-                return (
-                  <li key={step.key}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isPast) {
-                          setError(null);
-                          setStepIndex(index);
-                        }
-                      }}
-                      disabled={!isPast}
-                      className={`inline-flex h-[29px] items-center justify-center whitespace-nowrap rounded-[999px] border px-[11px] font-ui text-[13px] font-normal leading-[18px] tracking-[-0.03em] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 ${
-                        isActive
-                          ? "border-ink bg-ink text-paper"
-                          : isPast
-                            ? "cursor-pointer border-line/80 bg-[#F5F5F6] text-ink hover:font-medium focus-visible:font-medium"
-                            : "cursor-default border-line/80 bg-paper text-inactive"
-                      }`}
-                    >
-                      {step.label}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </nav>
-
           <div className="mx-auto w-full max-w-[920px]">
-            <CalibrationLayout className={CALIBRATION_SPACING.A}>
-              <AnimatePresence mode="wait">
-              {currentStep === "invitation" ? (
-                <motion.div
-                  key="invitation"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.22, ease: "easeOut" }}
-                >
-                  <h1 className={onboardingTitleClass}>
-                    <span className="font-ui font-normal tracking-[-0.06em]">Private</span>
-                    <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">-</span>
-                    <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Beta</span>
-                  </h1>
-
-                  <div className={`${CALIBRATION_SPACING.B} w-full`}>
-                    <div>
-                      <p className="text-left font-ui text-[14px] leading-[1.9] tracking-[0.02em] text-ink">
-                        Some recommendations may still be resolving. Certain links or functions remain in progress.
-                        Feedback shapes what comes next. Thank you for being here this early.
-                      </p>
-                      <p className="mt-6 text-left font-ui text-[13px] leading-[1.8] tracking-[0.02em] text-ink">
-                        Best,
-                      </p>
-                      <p className="mt-4 font-belmonte text-[28px] leading-none italic text-accent">
-                        Jil &amp; Nick
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className={`${CALIBRATION_SPACING.E} flex flex-wrap items-center justify-start gap-3`}>
-                    <button type="button" onClick={moveToAccount} className={actionPillStandardInkClass}>
-                      enter
-                    </button>
-                  </div>
-                </motion.div>
-              ) : null}
-
-              {currentStep === "account" ? (
-                <motion.div
-                  key="account"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.22, ease: "easeOut" }}
-                >
-                  <h1 className={onboardingTitleClass}>
-                    <span className="font-ui font-normal tracking-[-0.06em]">Account</span>
-                    <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">-</span>
-                    <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Details</span>
-                  </h1>
-
-                  <div className={`${CALIBRATION_SPACING.C} w-full space-y-11`}>
-                    <label className="block">
-                      <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">Name</span>
-                      <input
-                        type="text"
-                        value={name}
-                        onChange={(event) => setName(event.target.value)}
-                        placeholder="Name"
-                        className={`${inputClass} mt-2`}
-                      />
-                    </label>
-
-                    <label className="block">
-                      <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">Email</span>
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                        placeholder="you@example.com"
-                        className={`${inputClass} mt-2`}
-                      />
-                    </label>
-
-                    <label className="block">
-                      <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
-                        Password
-                      </span>
-                      <input
-                        type="password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        placeholder="For email login"
-                        className={`${inputClass} mt-2`}
-                      />
-                    </label>
-
-                    <label className="block">
-                      <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
-                        Phone <span className="font-normal">(optional)</span>
-                      </span>
-                      <input
-                        type="tel"
-                        value={phone}
-                        onChange={(event) => handlePhoneChange(event.target.value)}
-                        placeholder="+41 79 123 45 67"
-                        className={`${inputClass} mt-2`}
-                      />
-                    </label>
-                  </div>
-
-                  <p className={`${CALIBRATION_SPACING.D} font-ui text-[12px] leading-[1.8] tracking-[0.02em] text-meta`}>
-                    Email or phone required. Phone access uses a one-time code.
-                  </p>
-
-                  {phone.trim().length > 0 ? (
-                    <div className={`${CALIBRATION_SPACING.D} w-full`}>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button type="button" onClick={sendPhoneCode} className={actionPillPrimaryClass}>
-                          {isPhoneCodeSent ? "resend code" : "send code"}
-                        </button>
-                        {isPhoneVerified ? (
-                          <span className="font-ui text-[12px] font-medium leading-5 tracking-[0.02em] text-meta">
-                            phone confirmed
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {isPhoneCodeSent && !isPhoneVerified ? (
-                        <div className="mt-4 w-full">
-                          <label className="block">
-                            <span className="font-ui text-[11px] font-medium uppercase tracking-[0.08em] text-meta">
-                              Verification Code
-                            </span>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              value={phoneCodeInput}
-                              onChange={(event) => setPhoneCodeInput(event.target.value.replace(/[^\d]/g, "").slice(0, 6))}
-                              placeholder="6-digit code"
-                              className={`${inputClass} mt-2`}
-                            />
-                          </label>
-                          <div className="mt-4 flex items-center justify-start">
-                            <button type="button" onClick={confirmPhoneCode} className={actionPillPrimaryClass}>
-                              confirm code
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {isPhoneCodeSent && !isPhoneVerified ? (
-                        <p className="mt-3 font-ui text-[11px] leading-5 tracking-[0.02em] text-meta">
-                          Beta preview code: {phoneVerificationCode}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  <div className={`${CALIBRATION_SPACING.E} flex flex-wrap items-center justify-start gap-3`}>
-                    <button type="button" onClick={moveToReferences} className={actionPillPrimaryClass}>
-                      proceed
-                    </button>
-                  </div>
-                </motion.div>
-              ) : null}
-
-              {currentStep === "references" ? (
-                <motion.div
-                  key="references"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.22, ease: "easeOut" }}
-                >
-                  <h1 className={onboardingTitleClass}>
-                    <span className="font-ui font-normal tracking-[-0.06em]">Reference</span>
-                    <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">-</span>
-                    <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Sets</span>
-                  </h1>
-
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(event) => {
-                      handleIncomingReferences(Array.from(event.target.files ?? []));
-                      event.currentTarget.value = "";
-                    }}
-                  />
-
-                  {allReferenceItems.length === 0 ? (
-                    <>
-                      <div className={`${CALIBRATION_SPACING.B} w-full`}>
-                        <p className="font-ui text-[13px] leading-[1.8] tracking-[0.02em] text-meta">
-                          Add visual references that define the aesthetic direction. The selection shapes the
-                          Signature and anchors the Main Edit.
-                        </p>
-                      </div>
-
-                      <ReferenceUploadDropzone
-                        register="accent"
-                        align="left"
-                        isUploading={isReferenceUploading}
-                        onClick={() => fileInputRef.current?.click()}
-                        onFilesDrop={handleIncomingReferences}
-                        className={CALIBRATION_SPACING.C}
-                      />
-                    </>
-                  ) : (
+            <div className="mx-auto w-full max-w-[900px] rounded-[6px] bg-paper px-8 py-10 shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-14 md:py-14">
+              <div className="w-full">
+                <nav aria-label="Onboarding steps" className="w-full">
+                  <div className="relative mx-auto h-[33px] w-full max-w-[360px] overflow-hidden rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]">
                     <div
-                      className={`${CALIBRATION_SPACING.C} grid w-full gap-[6px]`}
-                      style={{ gridTemplateColumns: `repeat(${referencePreviewColumns}, minmax(0, 1fr))` }}
-                    >
-                      {allReferenceItems.map((entry) => (
-                        <div key={entry.id} className="group relative aspect-square w-full overflow-hidden rounded-[4px]">
-                          <Image
-                            src={entry.previewUrl}
-                            alt={entry.file.name}
-                            fill
-                            unoptimized
-                            sizes="(max-width: 768px) 50vw, (max-width: 1280px) 25vw, 16vw"
-                            className="object-cover"
-                            draggable={false}
-                          />
-                          <button
-                            type="button"
-                            aria-label={`Remove ${entry.file.name}`}
-                            onClick={() => removeReference(entry.id)}
-                            className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/45 font-ui text-[12px] leading-none text-paper opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
+                      className="absolute inset-y-0 left-0 rounded-[999px] bg-ink transition-[width] duration-300 ease-out"
+                      style={{ width: `${stepProgressPercent}%` }}
+                    />
+                    <ol className="relative z-[1] grid h-full w-full grid-cols-3">
+                      {STEP_META.map((step, index) => {
+                        const isCompletedOrActive = index <= stepIndex;
+                        const isCompleted = index < stepIndex;
+                        return (
+                          <li key={step.key} className="flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isCompleted) {
+                                  setError(null);
+                                  setStepIndex(index);
+                                }
+                              }}
+                              disabled={!isCompleted}
+                              className={`h-full w-full px-3 text-center font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] transition-colors duration-150 focus-visible:outline-none ${
+                                isCompleted ? "cursor-pointer" : "cursor-default"
+                              } ${isCompletedOrActive ? "text-paper" : "text-meta"}`}
+                            >
+                              {step.label}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                </nav>
 
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        onDragOver={(event) => {
-                          event.preventDefault();
-                          setIsDragOver(true);
-                        }}
-                        onDragLeave={() => setIsDragOver(false)}
+                <div className="mt-12 w-full">
+                <AnimatePresence mode="wait">
+                {currentStep === "account" ? (
+                  <motion.div
+                    key="account"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                  >
+                    <div className="mx-auto mt-12 w-full max-w-[360px]">
+                      <label className="relative block">
+                        <input
+                          ref={nameInputRef}
+                          type="text"
+                          value={name}
+                          onChange={(event) => setName(event.target.value)}
+                          onKeyDown={handleNameEnter}
+                          placeholder="first name"
+                          className={inputClass}
+                        />
+                      </label>
+
+                      <AnimatePresence>
+                        {revealEmail ? (
+                          <motion.label
+                            key="email"
+                            className="mt-5 block"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.22, ease: "easeOut" }}
+                          >
+                            <input
+                              ref={emailInputRef}
+                              type="email"
+                              value={email}
+                              onChange={(event) => setEmail(event.target.value)}
+                              onKeyDown={handleEmailEnter}
+                              placeholder="email"
+                              className={inputClass}
+                            />
+                          </motion.label>
+                        ) : null}
+                      </AnimatePresence>
+
+                      <AnimatePresence>
+                        {revealPassword ? (
+                          <motion.label
+                            key="password"
+                            className="mt-5 block"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.22, ease: "easeOut" }}
+                          >
+                            <div
+                              className="relative"
+                              onMouseEnter={() => setIsPasswordHovered(true)}
+                              onMouseLeave={() => setIsPasswordHovered(false)}
+                            >
+                              <input
+                                ref={passwordInputRef}
+                                type={password.trim().length > 0 && isPasswordHovered ? "text" : "password"}
+                                value={password}
+                                onChange={(event) => setPassword(event.target.value)}
+                                onKeyDown={handlePasswordEnter}
+                                placeholder="password"
+                                className={inputClass}
+                              />
+                            </div>
+                          </motion.label>
+                        ) : null}
+                      </AnimatePresence>
+                    </div>
+
+                    {canProceed ? (
+                      <div className="mt-12 flex justify-center">
+                        <ActionPill label="proceed" onClick={moveToReferences} />
+                      </div>
+                    ) : null}
+                  </motion.div>
+                ) : null}
+
+                {currentStep === "references" ? (
+                  <motion.div
+                    key="references"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(event) => {
+                        handleIncomingReferences(Array.from(event.target.files ?? []));
+                        event.currentTarget.value = "";
+                      }}
+                    />
+
+                    {references.length === 0 ? (
+                      <div
+                        className="group mt-12 flex w-full items-center gap-6 rounded-[12px] px-4 py-3"
+                        onDragOver={(event) => event.preventDefault()}
                         onDrop={(event) => {
                           event.preventDefault();
-                          setIsDragOver(false);
                           handleIncomingReferences(Array.from(event.dataTransfer.files));
                         }}
-                        className={`flex aspect-square w-full items-center justify-center bg-mist font-ui text-[32px] font-normal leading-none text-meta transition-colors duration-150 hover:text-ink ${
-                          isDragOver ? "text-accent" : ""
-                        }`}
-                        aria-label="Add visual references"
                       >
-                        +
-                      </button>
+                        <button
+                          type="button"
+                          aria-label="Upload visual references"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line/80 bg-paper shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink focus-visible:outline-none"
+                        >
+                          <span className="font-ui text-[18px] leading-none text-meta transition-colors duration-150 group-hover:text-paper">
+                            ↑
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="text-left focus-visible:outline-none"
+                        >
+                          <p className="font-ui text-[14px] font-normal leading-[1.7] text-meta transition-colors duration-150 group-hover:text-ink">
+                            Upload visual references that define the aesthetic direction. Use screenshots, saved
+                            images, or Pinterest captures (on the Pinterest app, Compact board view gives the cleanest
+                            grid to screenshot). Around 30 to 150 images gives the cleanest read — silhouette,
+                            material, finish, and palette are registered across each image.
+                          </p>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-12">
+                        {showAllReferences ? (
+                          <>
+                            <div className="mb-2 flex w-full justify-end">
+                              <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
+                                <span aria-hidden="true">|</span>
+                                <span className="px-[2px]">{references.length} references</span>
+                                <span aria-hidden="true">|</span>
+                              </span>
+                            </div>
+                            <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                            {visibleReferences.map((entry) => (
+                              <div key={entry.id} className="group relative aspect-square w-full overflow-hidden rounded-[4px] bg-mist">
+                                <Image
+                                  src={entry.previewUrl}
+                                  alt={entry.file.name}
+                                  fill
+                                  unoptimized
+                                  sizes="120px"
+                                  className="object-cover"
+                                  draggable={false}
+                                />
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${entry.file.name}`}
+                                  onClick={() => removeReference(entry.id)}
+                                  className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-paper/92 font-ui text-[12px] leading-none text-meta opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+
+                            <button
+                              type="button"
+                              aria-label="Add visual references"
+                              onClick={() => fileInputRef.current?.click()}
+                              onDragOver={(event) => event.preventDefault()}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                handleIncomingReferences(Array.from(event.dataTransfer.files));
+                              }}
+                              className="group inline-flex aspect-square w-full flex-col items-center justify-center gap-2 border-0 bg-transparent transition-colors duration-180 focus-visible:outline-none"
+                            >
+                              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[16px] font-medium leading-none text-meta shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink group-hover:text-paper">
+                                ↑
+                              </span>
+                              <span className="font-ui text-[11px] font-medium leading-4 tracking-[0.02em] text-meta transition-colors duration-150 group-hover:text-ink">
+                                add more
+                              </span>
+                              {references.length < MIN_REFERENCE_IMAGES ? (
+                                <span className="font-ui text-[11px] font-medium leading-4 tracking-[0.02em] text-meta transition-colors duration-150 group-hover:text-ink">
+                                  (upload at least {MIN_REFERENCE_IMAGES} images)
+                                </span>
+                              ) : null}
+                            </button>
+                            </div>
+                          </>
+                        ) : (
+                          <div ref={previewRowRef} className="flex w-full flex-nowrap justify-start gap-2 overflow-hidden">
+                            {visibleReferences.map((entry) => (
+                              <div
+                                key={entry.id}
+                                className="group relative h-[120px] w-[120px] shrink-0 overflow-hidden rounded-[4px] bg-mist"
+                              >
+                                <Image
+                                  src={entry.previewUrl}
+                                  alt={entry.file.name}
+                                  fill
+                                  unoptimized
+                                  sizes="120px"
+                                  className="object-cover"
+                                  draggable={false}
+                                />
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${entry.file.name}`}
+                                  onClick={() => removeReference(entry.id)}
+                                  className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-paper/92 font-ui text-[12px] leading-none text-meta opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {references.length > 0 ? (
+                      <div
+                        className={`mt-2 flex items-center justify-between ${showAllReferences ? "w-full" : ""}`}
+                        style={
+                          showAllReferences
+                            ? undefined
+                            : {
+                                width: `${collapsedTrackWidthPx}px`,
+                                maxWidth: "100%",
+                              }
+                        }
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          {!showAllReferences ? (
+                            <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
+                              <span aria-hidden="true">|</span>
+                              <span className="px-[2px]">{references.length} references</span>
+                              <span aria-hidden="true">|</span>
+                            </span>
+                          ) : null}
+                        </div>
+                        {references.length > previewItemsPerRow && !showAllReferences ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowAllReferences(true)}
+                            className="inline-flex items-center gap-2 border-0 bg-transparent p-0 font-ui text-[13px] leading-5 tracking-[0.02em] text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none"
+                          >
+                            view all
+                            <span aria-hidden="true">▾</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {canCalibrate ? (
+                      <div className="mt-12 flex justify-center">
+                        <ActionPill label="calibrate" onClick={moveToCalibration} />
+                      </div>
+                    ) : null}
+
+                  </motion.div>
+                ) : null}
+
+                {currentStep === "calibration" ? (
+                  <motion.div
+                    key="calibration"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                  >
+                    <div className="mt-20 flex min-h-[240px] flex-col items-center justify-start gap-14 pt-3">
+                      <div className="relative h-[60px] w-[60px]" aria-hidden="true">
+                        {Array.from({ length: CALIBRATION_DOT_COUNT }).map((_, dotIndex) => {
+                          const angleDeg = (360 / CALIBRATION_DOT_COUNT) * dotIndex;
+                          const dotColor =
+                            dotIndex < completedDotCount
+                              ? "#111111"
+                              : dotIndex === spinningDotIndex
+                                ? "#6F7381"
+                                : "#D8D8DA";
+                          return (
+                            <span
+                              key={dotIndex}
+                              className="absolute left-1/2 top-1/2 h-[8px] w-[8px] -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors duration-150 ease-out"
+                              style={{
+                                transform: `translate(-50%, -50%) rotate(${angleDeg}deg) translateY(-24px)`,
+                                transformOrigin: "center",
+                                backgroundColor: dotColor,
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                      <AnimatePresence mode="wait">
+                        <motion.div
+                          key={calibrationLineIndex}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.6, ease: "easeOut" }}
+                          className="relative text-center"
+                        >
+                          <p className="font-ui text-[14px] font-normal leading-6 tracking-[0.01em] text-meta">
+                            {CALIBRATION_LINES[calibrationLineIndex]}
+                          </p>
+                          <motion.p
+                            aria-hidden="true"
+                            initial={{ clipPath: "inset(0 100% 0 0)" }}
+                            animate={{ clipPath: "inset(0 0 0 0)" }}
+                            transition={{ duration: 5.2, ease: [0.22, 0.72, 0.22, 1] }}
+                            className="pointer-events-none absolute inset-0 font-ui text-[14px] font-normal leading-6 tracking-[0.01em] text-ink"
+                          >
+                            {CALIBRATION_LINES[calibrationLineIndex]}
+                          </motion.p>
+                        </motion.div>
+                      </AnimatePresence>
                     </div>
-                  )}
+                  </motion.div>
+                ) : null}
+                </AnimatePresence>
 
-                  <p className={`${CALIBRATION_SPACING.D} font-ui text-[12px] leading-5 tracking-[0.02em] text-meta`}>
-                    {references.length} selected · min {MIN_REFERENCE_IMAGES} · max {MAX_REFERENCE_IMAGES}
-                  </p>
-
-                  <div className={`${CALIBRATION_SPACING.E} flex flex-wrap items-center justify-start gap-3`}>
-                    <button type="button" onClick={moveToProcessing} className={actionPillStandardInkClass}>
-                      calibrate
-                    </button>
-                  </div>
-                </motion.div>
-              ) : null}
-
-              {currentStep === "processing" ? (
-                <motion.div
-                  key="processing"
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.22, ease: "easeOut" }}
-                  className="w-full"
-                >
-                  <h1 className={onboardingTitleClass}>
-                    <span className="font-ui font-normal tracking-[-0.06em]">Entering</span>
-                    <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">–</span>
-                    <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Cenoir</span>
-                  </h1>
-
-                  <AnimatePresence mode="wait">
-                    <motion.p
-                      key={processingMessageIndex}
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -5 }}
-                      transition={{ duration: 0.2, ease: "easeOut" }}
-                      className={`${CALIBRATION_SPACING.B} font-ui text-[14px] leading-7 text-meta`}
-                    >
-                      {PROCESSING_MESSAGES[processingMessageIndex]}
-                    </motion.p>
-                  </AnimatePresence>
-
-                  <div className={`${CALIBRATION_SPACING.C} h-px w-full overflow-hidden`}>
-                    <motion.div
-                      className="h-px w-full bg-ink"
-                      animate={{ scaleX: processingProgress / 100 }}
-                      transition={{ duration: 0.15, ease: "easeOut" }}
-                      style={{ transformOrigin: "left" }}
-                    />
-                  </div>
-                </motion.div>
-              ) : null}
-              </AnimatePresence>
-
-              {error ? (
-                <p className="mt-6 font-ui text-[13px] leading-6 text-[#B22929]">{error}</p>
-              ) : null}
-            </CalibrationLayout>
+                {error ? <p className="mt-6 font-ui text-[13px] leading-6 text-[#B22929]">{error}</p> : null}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -71,7 +71,7 @@ export function World2CategoryNav({
     236 + Math.max(0, options.length - 6) * expandedRowStepPx;
   const markerLeftInsetPx = 16;
   const markerGapPx = 16;
-  const markerWidthPx = 1;
+  const markerWidthPx = 1.5;
   const inactiveTextLeftPx = markerLeftInsetPx + markerGapPx + markerWidthPx;
   const markerHeightPx = isExpanded ? expandedMarkerHeightPx : collapsedMarkerHeightPx;
   const markerCenterOffsetPx = isExpanded
@@ -178,8 +178,9 @@ export function World2CategoryNav({
             </button>
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute left-0 top-1/2 block w-px bg-ink transition-[height,transform] ease-out motion-reduce:transition-none"
+              className="pointer-events-none absolute left-0 top-1/2 block bg-ink transition-[height,transform] ease-out motion-reduce:transition-none"
               style={{
+                width: `${markerWidthPx}px`,
                 height: `${markerHeightPx}px`,
                 transform: `translateY(calc(-50% + ${markerCenterOffsetPx}px))`,
                 transitionDuration: `${motionDurationMs}ms`,

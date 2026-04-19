@@ -181,20 +181,20 @@ export function GalleryHoverActions({
     capsuleOptions.find((option) => option.id === selectedCapsuleId)?.label ?? capsuleOptions[0].label;
   const otherCapsules = capsuleOptions.filter((option) => option.id !== selectedCapsuleId);
   const baseActionButtonClass =
-    "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium focus-visible:font-medium";
+    "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150";
   const acquireButtonClass =
     mode === "archive"
       ? `${baseActionButtonClass} hover:text-accent focus-visible:text-accent`
       : `${baseActionButtonClass} hover:text-ink focus-visible:text-ink`;
   const saveButtonClass = `${baseActionButtonClass} hover:text-ink focus-visible:text-ink`;
   const savePillBaseClass =
-    "relative inline-flex h-[33px] w-auto items-center overflow-visible rounded-[999px] border border-line/80 bg-[#E6E6E8] pl-[12px] pr-0 font-ui text-[13px] leading-5 tracking-[-0.03em] shadow-[0_1px_2px_rgba(0,0,0,0.12)]";
+    "relative inline-flex h-[33px] w-auto items-center overflow-visible rounded-[999px] border-[0.5px] border-[#DDDDDF] bg-[#E6E6E8] pl-[12px] pr-0 font-ui text-[13px] leading-5 tracking-[-0.03em] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]";
   const dropdownItemClass =
     "w-full rounded-[10px] px-[10px] py-[6px] text-left font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-accent focus-visible:outline-none";
   const archiveDeletePillClass =
-    "inline-flex h-[33px] items-center overflow-hidden rounded-[999px] border border-accent bg-accent shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-[width] duration-220 ease-out";
+    "inline-flex h-[33px] items-center overflow-hidden rounded-[999px] border-[0.5px] border-accent bg-accent shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-[width] duration-220 ease-out";
   const archiveMinusCircleClass =
-    "inline-flex h-[33px] w-[33px] shrink-0 items-center justify-center rounded-full border border-accent bg-accent shadow-[0_1px_2px_rgba(0,0,0,0.12)] focus-visible:outline-none";
+    "inline-flex h-[33px] w-[33px] shrink-0 items-center justify-center rounded-full border-[0.5px] border-accent bg-accent shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none";
   const dropdownPositionClass = dropdownDirection === "up" ? "bottom-[39px]" : "top-[39px]";
 
   return (
@@ -244,7 +244,7 @@ export function GalleryHoverActions({
           <button
             type="button"
             onClick={clearSavedState}
-            className="inline-flex h-[33px] items-center justify-center rounded-[999px] border border-accent bg-accent px-[16px] font-ui text-[13px] font-medium leading-5 tracking-[-0.03em] text-paper shadow-[0_1px_2px_rgba(0,0,0,0.12)] focus-visible:outline-none"
+            className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-accent bg-accent px-[16px] font-ui text-[13px] font-medium leading-5 tracking-[-0.03em] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none"
             aria-label="Remove from saved"
           >
             saved
@@ -277,9 +277,9 @@ export function GalleryHoverActions({
                 <span>{selectedCapsuleLabel}</span>
                 <span
                   aria-hidden="true"
-                  className={`inline-block text-[11px] leading-none transition-transform duration-150 ${isDropdownOpen ? "-rotate-90" : "rotate-90"}`}
+                  className="inline-block text-[11px] leading-none"
                 >
-                  {">"}
+                  {isDropdownOpen ? "▴" : "▾"}
                 </span>
               </button>
 
@@ -315,7 +315,7 @@ export function GalleryHoverActions({
 
             {isDropdownVisible ? (
               <div
-                className={`absolute left-0 ${dropdownPositionClass} z-20 min-w-full rounded-[14px] border border-line bg-paper shadow-[0_8px_20px_rgba(17,17,17,0.14)] transition-all duration-[180ms] ease-out ${
+                className={`absolute left-0 ${dropdownPositionClass} z-20 min-w-full rounded-[14px] border-[0.5px] border-[#F0F0F1] bg-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-all duration-[180ms] ease-out ${
                   isDropdownOpen
                     ? "translate-y-0 scale-100 opacity-100"
                     : "-translate-y-[4px] scale-[0.985] opacity-0 pointer-events-none"

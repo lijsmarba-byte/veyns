@@ -1,25 +1,21 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 
 const GALLERY_ENTRY_ARRIVAL_KEY = "unseen:gallery-entry-arrival";
 const GALLERY_ARRIVAL_ACTIVE_KEY = "unseen:gallery-arrival-active";
+const DEMO_LOGIN_PASSWORD = "sunnysunny123";
 
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function isValidPhone(value: string): boolean {
-  const compact = value.replace(/[^\d+]/g, "");
-  return /^\+?\d{7,15}$/.test(compact);
 }
 
 function UnseenBetaMark() {
   return (
     <div className="fixed right-10 top-[23px] z-30 h-[26px] w-[161px]">
       <p className="absolute left-0 top-0 w-[94px] text-right text-ink leading-none">
-        <span className="font-ui text-[14px] font-semibold leading-[26px] tracking-[-0.04em]">seenless</span>
+        <span className="font-ui text-[18px] font-semibold leading-[26px] tracking-[-0.04em]">cenoir</span>
       </p>
       <div className="absolute left-[100px] top-[7px] flex h-3 items-center justify-center rounded-[2px] bg-ink px-1 py-[3px]">
         <span className="font-ui text-[7px] font-bold leading-[7px] tracking-[-0.14px] text-paper">BETA</span>
@@ -28,139 +24,83 @@ function UnseenBetaMark() {
   );
 }
 
+function ActionPill({
+  label,
+  onClick,
+  type = "button",
+}: {
+  label: string;
+  onClick?: () => void;
+  type?: "button" | "submit";
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-meta shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none"
+    >
+      {label}
+    </button>
+  );
+}
+
 export function LoginFlow() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const methodParam = searchParams.get("method");
-  const [loginMethod, setLoginMethod] = useState<"email" | "phone" | null>(null);
-  const [isMethodChooserOpen, setIsMethodChooserOpen] = useState(false);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const passwordInputRef = useRef<HTMLInputElement | null>(null);
+
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [phoneCodeInput, setPhoneCodeInput] = useState("");
-  const [phoneVerificationCode, setPhoneVerificationCode] = useState("");
-  const [isPhoneCodeSent, setIsPhoneCodeSent] = useState(false);
+  const [isPasswordHovered, setIsPasswordHovered] = useState(false);
+  const [revealPassword, setRevealPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const actionPillPrimaryClass =
-    "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium hover:text-ink focus-visible:font-medium focus-visible:text-ink focus-visible:outline-none";
-  const inputClass =
-    "h-[34px] w-full border-0 border-b border-line bg-transparent px-0 font-ui text-[14px] font-normal leading-5 text-ink outline-none placeholder:text-inactive focus:border-ink";
+  const hasValidEmail = isValidEmail(email);
+  const hasPassword = password.trim().length > 0;
+  const canEnter = hasValidEmail && hasPassword;
 
   useEffect(() => {
-    if (methodParam === "email" || methodParam === "phone") {
-      const timer = window.setTimeout(() => {
-        setLoginMethod(methodParam);
-        setIsMethodChooserOpen(false);
-        setError(null);
-      }, 0);
-      return () => {
-        window.clearTimeout(timer);
-      };
+    const rafId = window.requestAnimationFrame(() => {
+      emailInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, []);
+
+  useEffect(() => {
+    if (hasValidEmail) {
+      setRevealPassword(true);
     }
-  }, [methodParam]);
-
-  const openMethodChooser = () => {
-    setIsMethodChooserOpen(true);
-    setError(null);
-  };
-
-  const selectMethod = (nextMethod: "email" | "phone") => {
-    setLoginMethod(nextMethod);
-    setIsMethodChooserOpen(false);
-    setError(null);
-  };
-
-  const resetMethodChoice = () => {
-    setLoginMethod(null);
-    setIsMethodChooserOpen(true);
-    setEmail("");
-    setPhone("");
-    setPassword("");
-    setPhoneCodeInput("");
-    setPhoneVerificationCode("");
-    setIsPhoneCodeSent(false);
-    setError(null);
-  };
-
-  const handlePhoneChange = (value: string) => {
-    setPhone(value);
-    setIsPhoneCodeSent(false);
-    setPhoneCodeInput("");
-    setPhoneVerificationCode("");
-  };
-
-  const sendPhoneCode = () => {
-    const trimmedPhone = phone.trim();
-    if (!isValidPhone(trimmedPhone)) {
-      setError("Please enter a valid phone number.");
-      return;
-    }
-
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setPhoneVerificationCode(code);
-    setIsPhoneCodeSent(true);
-    setPhoneCodeInput("");
-    setError(null);
-  };
+  }, [hasValidEmail]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const trimmedPassword = password.trim();
     const trimmedEmail = email.trim();
-    const trimmedPhone = phone.trim();
+    const trimmedPassword = password.trim();
 
-    if (!loginMethod) {
-      setError("Choose email or phone first.");
+    if (!trimmedEmail || !isValidEmail(trimmedEmail)) {
+      setError("Please enter a valid email address.");
       return;
     }
 
-    if (loginMethod === "email") {
-      if (!trimmedEmail) {
-        setError("Enter your email address.");
-        return;
-      }
-
-      if (!isValidEmail(trimmedEmail)) {
-        setError("Please enter a valid email address.");
-        return;
-      }
-
-      if (trimmedPassword.length < 8) {
-        setError("Password should be at least 8 characters.");
-        return;
-      }
+    if (!trimmedPassword) {
+      setError("Please enter the password.");
+      return;
     }
 
-    if (loginMethod === "phone") {
-      if (!trimmedPhone) {
-        setError("Enter your phone number.");
-        return;
-      }
-
-      if (!isValidPhone(trimmedPhone)) {
-        setError("Please enter a valid phone number.");
-        return;
-      }
-
-      if (!isPhoneCodeSent || !phoneVerificationCode) {
-        setError("Send a code first.");
-        return;
-      }
-
-      if (phoneCodeInput.trim() !== phoneVerificationCode) {
-        setError("Incorrect code. Please try again.");
-        return;
-      }
+    if (trimmedPassword !== DEMO_LOGIN_PASSWORD) {
+      setError("Incorrect password. Please try again.");
+      setShowForgotPassword(true);
+      return;
     }
 
     try {
       window.localStorage.setItem(
         "unseen:last-login",
         JSON.stringify({
-          method: loginMethod,
-          identifier: loginMethod === "email" ? trimmedEmail : trimmedPhone,
+          method: "email",
+          identifier: trimmedEmail,
           at: new Date().toISOString(),
         }),
       );
@@ -177,7 +117,40 @@ export function LoginFlow() {
     }
 
     setError(null);
+    setShowForgotPassword(false);
     router.push("/gallery");
+  };
+
+  const handleForgotPassword = () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !isValidEmail(trimmedEmail)) {
+      setError("Enter a valid email first.");
+      return;
+    }
+    setShowForgotPassword(false);
+    setError("Password reset is in progress. Please check your email.");
+  };
+
+  const inputClass =
+    "mt-1 block h-[30px] w-full select-text border-0 bg-transparent px-0 text-center font-ui text-[13px] font-normal leading-6 text-ink outline-none placeholder:text-inactive";
+
+  const focusPasswordField = () => {
+    window.requestAnimationFrame(() => {
+      passwordInputRef.current?.focus();
+    });
+  };
+
+  const handleEmailEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!hasValidEmail) return;
+    setRevealPassword(true);
+    focusPasswordField();
+  };
+
+  const handlePasswordEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
   };
 
   return (
@@ -186,144 +159,76 @@ export function LoginFlow() {
         <UnseenBetaMark />
 
         <div className="pt-[92px]">
-          <div className="mx-auto w-full max-w-[620px]">
-            <h1 className="inline-flex items-end text-[30px] leading-none text-ink">
-              <span className="font-ui font-normal tracking-[-0.06em]">Log</span>
-              <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">-</span>
-              <span className="ml-[1px] font-instrument italic tracking-[0.01em]">In</span>
-            </h1>
+          <div className="mx-auto w-full max-w-[920px]">
+            <div className="mx-auto w-full max-w-[460px] rounded-[6px] bg-paper px-6 py-8 shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-10 md:py-10">
+              <div className="w-full">
+                <nav aria-label="Login" className="flex w-full justify-center">
+                  <div className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-ink bg-ink px-3 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]">
+                    log in
+                  </div>
+                </nav>
 
-            <p className="mt-6 font-ui text-[13px] leading-[1.8] tracking-[0.02em] text-meta">
-              Use your existing account details to enter your space.
-            </p>
+                <form onSubmit={handleSubmit} className="mt-12 w-full">
+                  <div className="mx-auto mt-12 w-full max-w-[220px]">
+                    <label className="relative block">
+                      <input
+                        ref={emailInputRef}
+                        type="email"
+                        autoComplete="username"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        onKeyDown={handleEmailEnter}
+                        placeholder="email"
+                        className={inputClass}
+                      />
+                    </label>
 
-            <form id="login-form" onSubmit={handleSubmit} className="mt-8 w-full space-y-5">
-              {loginMethod === "email" ? (
-                <>
-                  <label className="grid min-h-[60px] grid-cols-1 items-center gap-2 md:grid-cols-[140px_minmax(0,1fr)] md:gap-6">
-                    <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">Email</span>
-                    <input
-                      type="email"
-                      autoComplete="username"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      placeholder="you@example.com"
-                      className={inputClass}
-                    />
-                  </label>
-
-                  <label className="grid min-h-[60px] grid-cols-1 items-center gap-2 md:grid-cols-[140px_minmax(0,1fr)] md:gap-6">
-                    <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
-                      Password
-                    </span>
-                    <input
-                      type="password"
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      placeholder="Your password"
-                      className={inputClass}
-                    />
-                  </label>
-                </>
-              ) : null}
-
-              {loginMethod === "phone" ? (
-                <>
-                  <label className="grid min-h-[60px] grid-cols-1 items-center gap-2 md:grid-cols-[140px_minmax(0,1fr)] md:gap-6">
-                    <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">Phone</span>
-                    <input
-                      type="tel"
-                      autoComplete="tel"
-                      value={phone}
-                      onChange={(event) => handlePhoneChange(event.target.value)}
-                      placeholder="+41 79 123 45 67"
-                      className={inputClass}
-                    />
-                  </label>
-
-                  <div className="md:pl-[146px]">
-                    <button
-                      type="button"
-                      onClick={sendPhoneCode}
-                      className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none"
-                    >
-                      {isPhoneCodeSent ? "resend code" : "send code"}
-                    </button>
+                    {revealPassword ? (
+                      <label className="mt-5 block">
+                        <div
+                          className="relative"
+                          onMouseEnter={() => setIsPasswordHovered(true)}
+                          onMouseLeave={() => setIsPasswordHovered(false)}
+                        >
+                          <input
+                            ref={passwordInputRef}
+                            type={password.trim().length > 0 && isPasswordHovered ? "text" : "password"}
+                            autoComplete="current-password"
+                            value={password}
+                            onChange={(event) => setPassword(event.target.value)}
+                            onKeyDown={handlePasswordEnter}
+                            placeholder="password"
+                            className={inputClass}
+                          />
+                        </div>
+                      </label>
+                    ) : null}
                   </div>
 
-                  <label className="grid min-h-[60px] grid-cols-1 items-center gap-2 md:grid-cols-[140px_minmax(0,1fr)] md:gap-6">
-                    <span className="font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">Code</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={phoneCodeInput}
-                      onChange={(event) => setPhoneCodeInput(event.target.value.replace(/[^\d]/g, "").slice(0, 6))}
-                      placeholder="6-digit code"
-                      className={inputClass}
-                    />
-                  </label>
-
-                  {isPhoneCodeSent ? (
-                    <p className="md:pl-[146px] font-ui text-[11px] leading-5 tracking-[0.02em] text-meta">
-                      Beta preview code: {phoneVerificationCode}
-                    </p>
+                  {error || showForgotPassword ? (
+                    <div className="mx-auto mt-6 w-full max-w-[220px] text-left">
+                      {error ? <p className="font-ui text-[13px] leading-6 text-[#B22929]">{error}</p> : null}
+                      {showForgotPassword ? (
+                        <div className="mt-1 flex justify-start">
+                          <button
+                            type="button"
+                            onClick={handleForgotPassword}
+                            className="font-ui text-[13px] leading-5 tracking-[0.02em] text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none"
+                          >
+                            Forgot password?
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   ) : null}
-                </>
-              ) : null}
-            </form>
 
-            {error ? <p className="mt-6 font-ui text-[13px] leading-6 text-[#B22929]">{error}</p> : null}
-
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <div className="relative h-[33px]">
-                <button
-                  type="button"
-                  onClick={openMethodChooser}
-                  aria-haspopup="menu"
-                  aria-expanded={isMethodChooserOpen && !loginMethod}
-                  className={`${actionPillPrimaryClass} transition-all duration-150 ease-out ${
-                    isMethodChooserOpen || loginMethod
-                      ? "pointer-events-none scale-[0.96] border-line/70 bg-mist/70 text-inactive opacity-0"
-                      : "pointer-events-auto scale-100 opacity-100"
-                  }`}
-                >
-                  log in
-                </button>
-
-                <div
-                  role="menu"
-                  aria-label="Login method actions"
-                  className={`absolute left-0 top-0 inline-flex h-[33px] items-center gap-[4px] transition-all duration-150 ease-out ${
-                    isMethodChooserOpen && !loginMethod
-                      ? "pointer-events-auto translate-x-0 opacity-100"
-                      : "pointer-events-none translate-x-[10px] opacity-0"
-                  }`}
-                  style={{ transformOrigin: "left center" }}
-                >
-                  <button type="button" role="menuitem" onClick={() => selectMethod("phone")} className={actionPillPrimaryClass}>
-                    phone
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => selectMethod("email")} className={actionPillPrimaryClass}>
-                    email
-                  </button>
-                </div>
+                  {canEnter ? (
+                    <div className="mt-12 flex justify-center">
+                      <ActionPill type="submit" label="enter" />
+                    </div>
+                  ) : null}
+                </form>
               </div>
-
-              {loginMethod ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={resetMethodChoice}
-                    className="font-ui text-[13px] font-normal leading-5 tracking-[0.02em] text-meta transition-colors duration-150 hover:text-ink"
-                  >
-                    change method
-                  </button>
-                  <button type="submit" form="login-form" className={actionPillPrimaryClass}>
-                    enter
-                  </button>
-                </>
-              ) : null}
             </div>
           </div>
         </div>

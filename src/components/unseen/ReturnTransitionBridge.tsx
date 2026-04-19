@@ -136,7 +136,8 @@ export function ReturnTransitionBridge() {
     <div
       ref={overlayRef}
       aria-hidden="true"
-      className="pointer-events-none fixed left-0 right-0 top-0 z-[170] h-[100dvh] bg-paper/90 opacity-0"
+      className="pointer-events-none fixed left-0 right-0 top-0 z-[170] bg-paper/90 opacity-0"
+      style={{ height: "var(--viewport-h)" }}
     />
   );
 }

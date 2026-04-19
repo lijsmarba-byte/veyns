@@ -5,12 +5,11 @@ import { motion } from "framer-motion";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProfileSignatureContourInline } from "@/components/unseen/ProfileSignatureContourInline";
-import { ReferenceUploadDropzone } from "@/components/unseen/ReferenceUploadDropzone";
 import type { MockReferenceVisual, MockTasteCluster } from "@/data/mockUsers";
 import { mockUsers } from "@/data/mockUsers";
 
 type ProfileTab = "signature" | "reference-sets" | "quiet-constraints" | "feedback" | "settings";
-type SettingsField = "email" | "phone" | "name" | "password";
+type SettingsField = "email" | "name" | "password";
 type QuietConstraintAction = "price" | "sizing";
 
 type ReferenceSet = {
@@ -19,8 +18,16 @@ type ReferenceSet = {
   images: MockReferenceVisual[];
 };
 
+type FeedbackEntry = {
+  sentAt: string;
+  clarity: string;
+  quality: string;
+  trust: string;
+};
+
 const NEW_EDIT_TARGET = "__new_edit__";
 const MAIN_EDIT_SET_ID = "main-edit";
+const MIN_NEW_EDIT_REFERENCES = 30;
 const RECALIBRATED_SIGNATURE_PREFIXES = [
   "Quiet",
   "Refined",
@@ -50,11 +57,6 @@ function isProfileTab(value: string | null): value is ProfileTab {
     value === "feedback" ||
     value === "settings"
   );
-}
-
-function isValidPhone(value: string): boolean {
-  const compact = value.replace(/[^\d+]/g, "");
-  return /^\+?\d{7,15}$/.test(compact);
 }
 
 function limitSentences(text: string, maxSentences: number): string {
@@ -88,11 +90,11 @@ function formatEditName(name: string): string {
 }
 
 function getReferencePreviewColumns(viewportWidth: number): number {
-  if (viewportWidth >= 1900) return 8;
-  if (viewportWidth >= 1600) return 7;
-  if (viewportWidth >= 1300) return 6;
-  if (viewportWidth >= 1050) return 5;
-  return 4;
+  if (viewportWidth >= 1900) return 9;
+  if (viewportWidth >= 1600) return 8;
+  if (viewportWidth >= 1300) return 7;
+  if (viewportWidth >= 1050) return 6;
+  return 5;
 }
 
 function buildSignatureTitle(
@@ -139,11 +141,12 @@ function buildRecalibratedMainEditSignature(images: MockReferenceVisual[], fallb
   return `${prefix} ${noun}`;
 }
 
-const PROFILE_HEADER_NAME_TOP_PX = 22;
+const PROFILE_HEADER_NAME_TOP_PX = 32;
 const PROFILE_HEADER_NAV_TOP_PX = 46;
-const PROFILE_HEADER_META_TOP_PX = 64;
+const PROFILE_HEADER_META_TOP_PX = 66;
 const PROFILE_HEADER_DIVIDER_TOP_PX = 96;
 const PROFILE_HEADER_HEIGHT_PX = 97;
+const PROFILE_HEADER_META_FOLD_BUFFER_PX = 38;
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -176,20 +179,18 @@ export default function ProfilePage() {
     trust: "",
   });
   const [lastFeedbackSentAt, setLastFeedbackSentAt] = useState<string | null>(null);
+  const [feedbackHistory, setFeedbackHistory] = useState<FeedbackEntry[]>([]);
+  const [isFeedbackHistoryOpen, setIsFeedbackHistoryOpen] = useState(false);
   const [profileSettings, setProfileSettings] = useState(() => ({
     email: activeUser?.email ?? "",
-    phone: "",
     name: activeUser?.name ?? "",
   }));
   const [isSettingsEditMode, setIsSettingsEditMode] = useState(false);
   const [activeSettingsField, setActiveSettingsField] = useState<SettingsField | null>(null);
   const [settingsFieldDraft, setSettingsFieldDraft] = useState("");
-  const [settingsPhoneCodeInput, setSettingsPhoneCodeInput] = useState("");
-  const [settingsPhoneVerificationCode, setSettingsPhoneVerificationCode] = useState("");
-  const [isSettingsPhoneCodeSent, setIsSettingsPhoneCodeSent] = useState(false);
-  const [isSettingsPhoneVerified, setIsSettingsPhoneVerified] = useState(false);
   const [activeConstraintHint, setActiveConstraintHint] = useState<QuietConstraintAction | null>(null);
   const [newEditName, setNewEditName] = useState("");
+  const [newEditReferences, setNewEditReferences] = useState<MockReferenceVisual[]>([]);
   const [renameDraft, setRenameDraft] = useState("");
   const [referenceSets, setReferenceSets] = useState<ReferenceSet[]>(
     () => buildReferenceSets(activeUser?.referenceSetForMainEdit ?? []),
@@ -198,16 +199,26 @@ export default function ProfilePage() {
   const [viewportWidth, setViewportWidth] = useState(1440);
   const [isCloseIconMorphed, setIsCloseIconMorphed] = useState(!shouldMorphCloseIcon);
   const [isClosingProfile, setIsClosingProfile] = useState(false);
+  const [shouldSplitCreateActionRow, setShouldSplitCreateActionRow] = useState(false);
+  const [shouldFoldHeaderMeta, setShouldFoldHeaderMeta] = useState(false);
   const createEditSectionRef = useRef<HTMLDivElement | null>(null);
   const createEditNameInputRef = useRef<HTMLInputElement | null>(null);
+  const feedbackClarityRef = useRef<HTMLTextAreaElement | null>(null);
+  const feedbackQualityRef = useRef<HTMLTextAreaElement | null>(null);
+  const feedbackTrustRef = useRef<HTMLTextAreaElement | null>(null);
   const hasAppliedInitialCreateFlowRef = useRef(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadTargetSetId, setUploadTargetSetId] = useState<string | null>(null);
   const [uploadMode, setUploadMode] = useState<"append" | "replace">("append");
   const fixedHeaderRef = useRef<HTMLDivElement | null>(null);
+  const headerMetaRef = useRef<HTMLParagraphElement | null>(null);
+  const headerNavRef = useRef<HTMLDivElement | null>(null);
+  const createActionRowRef = useRef<HTMLDivElement | null>(null);
+  const createActionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const primaryActionsRowRef = useRef<HTMLDivElement | null>(null);
   const constraintHintTimeoutRef = useRef<number | null>(null);
   const newEditUploadPulseTimeoutRef = useRef<number | null>(null);
-  const isSmallHeaderLayout = viewportWidth < 1120;
+  const isCompactHeaderLayout = viewportWidth < 980;
 
   const mainEditImages = useMemo(
     () => referenceSets.find((set) => set.id === MAIN_EDIT_SET_ID)?.images ?? [],
@@ -252,6 +263,10 @@ export default function ProfilePage() {
 
   useEffect(() => {
     return () => {
+      setNewEditReferences((prev) => {
+        prev.forEach((image) => URL.revokeObjectURL(image.publicPath));
+        return prev;
+      });
       if (constraintHintTimeoutRef.current !== null) {
         window.clearTimeout(constraintHintTimeoutRef.current);
       }
@@ -274,6 +289,70 @@ export default function ProfilePage() {
 
     return () => window.cancelAnimationFrame(raf);
   }, [activeTab, isCreateEditOpen, startsInCreateEditFlow]);
+
+  useEffect(() => {
+    if (activeTab !== "feedback") return;
+    const raf = window.requestAnimationFrame(() => {
+      feedbackClarityRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "reference-sets" || isCreateEditOpen) return;
+
+    const measureWrapNeed = () => {
+      const wrapper = createActionRowRef.current;
+      const createButton = createActionButtonRef.current;
+      const primaryActions = primaryActionsRowRef.current;
+      if (!wrapper || !createButton || !primaryActions) return;
+
+      const wrapperWidth = wrapper.clientWidth;
+      const createWidth = createButton.offsetWidth;
+      const primaryWidth = primaryActions.scrollWidth;
+      const gapPx = 12;
+      setShouldSplitCreateActionRow(createWidth + primaryWidth + gapPx > wrapperWidth);
+    };
+
+    const raf = window.requestAnimationFrame(measureWrapNeed);
+    window.addEventListener("resize", measureWrapNeed);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", measureWrapNeed);
+    };
+  }, [activeTab, isCreateEditOpen, referenceSets.length, expandedSetIds, editingSetIds]);
+
+  useEffect(() => {
+    const measureMetaFold = () => {
+      if (isCompactHeaderLayout) {
+        setShouldFoldHeaderMeta(true);
+        return;
+      }
+
+      const metaNode = headerMetaRef.current;
+      const navNode = headerNavRef.current;
+      if (!metaNode || !navNode) {
+        setShouldFoldHeaderMeta(false);
+        return;
+      }
+
+      const metaRect = metaNode.getBoundingClientRect();
+      const navRect = navNode.getBoundingClientRect();
+      const gapPx = navRect.left - metaRect.right;
+      setShouldFoldHeaderMeta(gapPx < PROFILE_HEADER_META_FOLD_BUFFER_PX);
+    };
+
+    const raf = window.requestAnimationFrame(measureMetaFold);
+    const resizeObserver = new ResizeObserver(measureMetaFold);
+    if (headerMetaRef.current) resizeObserver.observe(headerMetaRef.current);
+    if (headerNavRef.current) resizeObserver.observe(headerNavRef.current);
+    window.addEventListener("resize", measureMetaFold);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", measureMetaFold);
+    };
+  }, [isCompactHeaderLayout, activeTab]);
 
   const clusters = useMemo(
     () => [...(activeUser?.tasteAttributes.clusters ?? [])].sort((a, b) => clusterWeight(b) - clusterWeight(a)),
@@ -299,21 +378,28 @@ export default function ProfilePage() {
     dominantCluster?.cluster_name ?? null,
   );
   const signatureTitleDisplay = signatureTitle.replace(/[.!?]+$/g, "");
-  const sessionIdentity = profileSettings.email || profileSettings.phone || "No contact set";
   const settingsActionPillClass =
-    "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:font-medium focus-visible:font-medium hover:text-ink focus-visible:text-ink";
+    "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink";
   const settingsDeletePillClass =
-    "inline-flex h-[33px] items-center justify-center rounded-[999px] border border-line/80 bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.12)] outline-none transition-colors duration-150 hover:border-[#D94343] hover:bg-[#D94343] hover:text-paper focus:outline-none focus-visible:outline-none focus-visible:ring-0";
-  const metaDescriptionClass = "font-ui text-[14px] font-normal leading-[1.7] text-meta";
+    "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] outline-none transition-colors duration-150 hover:border-[#D94343] hover:bg-[#D94343] hover:text-paper focus:outline-none focus-visible:outline-none focus-visible:ring-0";
   const profileTabHoverPillClass =
-    "pointer-events-none absolute left-1/2 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center -translate-x-[calc(50%-8px)] translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381] bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-all duration-150 ease-out group-hover/tab:translate-y-0 group-hover/tab:opacity-100 group-focus-visible/tab:translate-y-0 group-focus-visible/tab:opacity-100";
+    "pointer-events-none absolute left-1/2 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center -translate-x-[calc(50%-8px)] translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381]/55 bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-all duration-150 ease-out group-hover/tab:translate-y-0 group-hover/tab:opacity-100 group-focus-visible/tab:translate-y-0 group-focus-visible/tab:opacity-100";
   const constraintHoverPillClass =
-    "pointer-events-none absolute bottom-[5px] left-full z-20 ml-[8px] inline-flex h-[29px] items-center justify-center translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381] bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-all duration-150 ease-out group-hover/constraint:translate-y-0 group-hover/constraint:opacity-100 group-focus-within/constraint:translate-y-0 group-focus-within/constraint:opacity-100";
+    "pointer-events-none absolute bottom-[5px] left-full z-20 ml-[8px] inline-flex h-[29px] items-center justify-center translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381]/55 bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-all duration-150 ease-out group-hover/constraint:translate-y-0 group-hover/constraint:opacity-100 group-focus-within/constraint:translate-y-0 group-focus-within/constraint:opacity-100";
+  const mainEditHoverPillClass =
+    "pointer-events-none absolute left-0 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381]/55 bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-all duration-150 ease-out group-hover/mainedit:translate-y-0 group-hover/mainedit:opacity-100 group-focus-within/mainedit:translate-y-0 group-focus-within/mainedit:opacity-100";
+  const expandTextButtonClass =
+    "inline-flex items-center gap-2 whitespace-nowrap border-0 bg-transparent p-0 font-ui text-[13px] leading-5 tracking-[0.02em] text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none";
   const isShortcutCreateFlowActive = isFocusedCreateFlow && isCreateEditOpen;
   const canSendFeedback =
     feedbackAnswers.clarity.trim().length > 0 ||
     feedbackAnswers.quality.trim().length > 0 ||
     feedbackAnswers.trust.trim().length > 0;
+  const pendingDoneSet = pendingDoneSetId ? referenceSets.find((set) => set.id === pendingDoneSetId) ?? null : null;
+  const isPendingDoneMainEdit = pendingDoneSet?.id === MAIN_EDIT_SET_ID;
+  const pendingRebuildSet = pendingRebuildSetId ? referenceSets.find((set) => set.id === pendingRebuildSetId) ?? null : null;
+  const isPendingRebuildMainEdit = pendingRebuildSet?.id === MAIN_EDIT_SET_ID;
+  const pendingDeleteSet = pendingDeleteSetId ? referenceSets.find((set) => set.id === pendingDeleteSetId) ?? null : null;
 
   const showConstraintHint = (target: QuietConstraintAction) => {
     setActiveConstraintHint(target);
@@ -338,6 +424,52 @@ export default function ProfilePage() {
     setMainEditRecalibrationCount((current) => current + 1);
   };
 
+  const autoResizeFeedbackField = (textarea: HTMLTextAreaElement) => {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  };
+
+  const handleFeedbackFieldChange = (field: "clarity" | "quality" | "trust", value: string, textarea: HTMLTextAreaElement) => {
+    setFeedbackAnswers((prev) => ({ ...prev, [field]: value }));
+    autoResizeFeedbackField(textarea);
+  };
+
+  const handleFeedbackFieldKeyDown = (
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+    field: "clarity" | "quality" | "trust",
+  ) => {
+    if (event.key === "Enter") {
+      // Keep Enter inside the current feedback field and avoid parent keyboard handlers.
+      event.stopPropagation();
+      return;
+    }
+
+    if (event.key !== "/") return;
+
+    const textarea = event.currentTarget;
+    const value = feedbackAnswers[field];
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    const before = value.slice(0, selectionStart);
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const linePrefix = before.slice(lineStart);
+
+    // Slash command for bullets in feedback only: typing "/" at line start inserts a bullet.
+    if (linePrefix.trim().length > 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const nextValue = `${value.slice(0, selectionStart)}• ${value.slice(selectionEnd)}`;
+    setFeedbackAnswers((prev) => ({ ...prev, [field]: nextValue }));
+    window.requestAnimationFrame(() => {
+      const nextCursor = selectionStart + 2;
+      textarea.selectionStart = nextCursor;
+      textarea.selectionEnd = nextCursor;
+      autoResizeFeedbackField(textarea);
+    });
+  };
+
   const openCreateEdit = ({ focused = false }: { focused?: boolean } = {}) => {
     setExpandedSetIds({});
     setEditingSetIds({});
@@ -348,9 +480,16 @@ export default function ProfilePage() {
     setRenameDraft("");
     setIsCreateEditOpen(true);
     setIsFocusedCreateFlow(focused);
+    window.requestAnimationFrame(() => {
+      createEditNameInputRef.current?.focus();
+    });
   };
 
   const closeCreateEdit = () => {
+    setNewEditReferences((prev) => {
+      prev.forEach((image) => URL.revokeObjectURL(image.publicPath));
+      return [];
+    });
     setIsCreateEditOpen(false);
     setNewEditName("");
     setUploadTargetSetId(null);
@@ -360,6 +499,10 @@ export default function ProfilePage() {
 
   const switchTab = (nextTab: ProfileTab) => {
     if (nextTab !== "reference-sets") {
+      setNewEditReferences((prev) => {
+        prev.forEach((image) => URL.revokeObjectURL(image.publicPath));
+        return [];
+      });
       setExpandedSetIds({});
       setEditingSetIds({});
       setPendingDoneSetId(null);
@@ -380,10 +523,9 @@ export default function ProfilePage() {
       setIsSettingsEditMode(false);
       setActiveSettingsField(null);
       setSettingsFieldDraft("");
-      setSettingsPhoneCodeInput("");
-      setSettingsPhoneVerificationCode("");
-      setIsSettingsPhoneCodeSent(false);
-      setIsSettingsPhoneVerified(false);
+    }
+    if (nextTab === "settings") {
+      setIsSettingsEditMode(true);
     }
     setActiveTab(nextTab);
   };
@@ -396,50 +538,12 @@ export default function ProfilePage() {
       setSettingsFieldDraft("");
       return;
     }
-    if (field === "phone") {
-      setSettingsPhoneCodeInput("");
-      setSettingsPhoneVerificationCode("");
-      setIsSettingsPhoneCodeSent(false);
-      setIsSettingsPhoneVerified(false);
-    }
     setSettingsFieldDraft(profileSettings[field]);
   };
 
   const cancelSettingsFieldEdit = () => {
     setActiveSettingsField(null);
     setSettingsFieldDraft("");
-    setSettingsPhoneCodeInput("");
-    setSettingsPhoneVerificationCode("");
-    setIsSettingsPhoneCodeSent(false);
-    setIsSettingsPhoneVerified(false);
-  };
-
-  const handleSettingsPhoneDraftChange = (value: string) => {
-    setSettingsFieldDraft(value);
-    setSettingsPhoneCodeInput("");
-    setSettingsPhoneVerificationCode("");
-    setIsSettingsPhoneCodeSent(false);
-    setIsSettingsPhoneVerified(false);
-  };
-
-  const sendSettingsPhoneCode = () => {
-    if (activeSettingsField !== "phone") return;
-    const trimmed = settingsFieldDraft.trim();
-    if (!isValidPhone(trimmed)) {
-      return;
-    }
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setSettingsPhoneVerificationCode(code);
-    setSettingsPhoneCodeInput("");
-    setIsSettingsPhoneCodeSent(true);
-    setIsSettingsPhoneVerified(false);
-  };
-
-  const confirmSettingsPhoneCode = () => {
-    if (activeSettingsField !== "phone") return;
-    if (!isSettingsPhoneCodeSent || !settingsPhoneVerificationCode) return;
-    if (settingsPhoneCodeInput.trim() !== settingsPhoneVerificationCode) return;
-    setIsSettingsPhoneVerified(true);
   };
 
   const saveSettingsFieldEdit = () => {
@@ -450,15 +554,7 @@ export default function ProfilePage() {
       return;
     }
     const trimmed = settingsFieldDraft.trim();
-    if (activeSettingsField === "phone") {
-      if (!trimmed) {
-        setProfileSettings((prev) => ({ ...prev, phone: "" }));
-        cancelSettingsFieldEdit();
-        return;
-      }
-      if (!isValidPhone(trimmed)) return;
-      if (trimmed !== profileSettings.phone && !isSettingsPhoneVerified) return;
-    } else if (!trimmed) {
+    if (!trimmed) {
       return;
     }
     setProfileSettings((prev) => ({
@@ -567,12 +663,16 @@ export default function ProfilePage() {
     setRenameDraft("");
   };
 
-  const startRenameSet = (setId: string, currentName: string) => {
+  const startRenameSet = (setId: string) => {
     setPendingDoneSetId(null);
     setPendingRebuildSetId(null);
     setPendingDeleteSetId(null);
     setRenamingSetId(setId);
-    setRenameDraft(currentName);
+    setRenameDraft("");
+    window.requestAnimationFrame(() => {
+      const renamePanel = document.getElementById(`rename-panel-${setId}`);
+      renamePanel?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   };
 
   const cancelRenameSet = () => {
@@ -602,6 +702,26 @@ export default function ProfilePage() {
     return trimmed.length > 0 ? trimmed : `Edit ${index}`;
   };
 
+  const appendNewEditReferences = (incomingFiles: File[]) => {
+    const files = incomingFiles.filter((file) => file.type.startsWith("image/"));
+    if (files.length === 0) return;
+    pulseNewEditUploading();
+    const nextImages = files.map((file, index) => ({
+      id: `upload-${Date.now()}-${index}`,
+      fileName: file.name,
+      publicPath: URL.createObjectURL(file),
+    }));
+    setNewEditReferences((prev) => [...prev, ...nextImages]);
+  };
+
+  const removeNewEditReference = (imageId: string) => {
+    setNewEditReferences((prev) => {
+      const target = prev.find((image) => image.id === imageId);
+      if (target) URL.revokeObjectURL(target.publicPath);
+      return prev.filter((image) => image.id !== imageId);
+    });
+  };
+
   const pulseNewEditUploading = () => {
     setIsNewEditUploading(true);
     if (newEditUploadPulseTimeoutRef.current !== null) {
@@ -623,17 +743,7 @@ export default function ProfilePage() {
     }));
 
     if (uploadTargetSetId === NEW_EDIT_TARGET) {
-      pulseNewEditUploading();
-      setReferenceSets((prev) => [
-        ...prev,
-        {
-          id: `edit-${Date.now()}`,
-          name: resolveNewEditName(prev.length),
-          images: nextImages,
-        },
-      ]);
-      closeCreateEdit();
-      setPendingRebuildSetId(null);
+      appendNewEditReferences(Array.from(files));
     } else if (uploadMode === "replace") {
       setReferenceSets((prev) =>
         prev.map((set) =>
@@ -697,53 +807,141 @@ export default function ProfilePage() {
   };
 
   const handleNewEditUploadFiles = (incomingFiles: File[]) => {
-    const files = incomingFiles.filter((file) => file.type.startsWith("image/"));
-    if (files.length === 0) return;
-    pulseNewEditUploading();
+    appendNewEditReferences(incomingFiles);
+  };
 
-    const nextImages = files.map((file, index) => ({
-      id: `upload-${Date.now()}-${index}`,
-      fileName: file.name,
-      publicPath: URL.createObjectURL(file),
-    }));
+  const canProceedNewEdit = newEditReferences.length >= MIN_NEW_EDIT_REFERENCES;
+  const visibleNewEditReferences = newEditReferences;
 
+  const proceedCreateEdit = () => {
+    if (!canProceedNewEdit) return;
     setReferenceSets((prev) => [
       ...prev,
       {
         id: `edit-${Date.now()}`,
         name: resolveNewEditName(prev.length),
-        images: nextImages,
+        images: newEditReferences,
       },
     ]);
-    closeCreateEdit();
+    setIsCreateEditOpen(false);
+    setNewEditName("");
+    setNewEditReferences([]);
+    setUploadTargetSetId(null);
+    setUploadMode("append");
+    setIsFocusedCreateFlow(false);
+    setPendingRebuildSetId(null);
   };
 
   const createEditComposer = (
     <div className="mx-auto mt-2 w-full max-w-[640px]">
-      <div className="flex items-center gap-4 rounded-[18px] border border-line/95 bg-[#FCFCFB] px-5 py-[11px] shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-        <p className="whitespace-nowrap font-ui text-[12px] font-medium uppercase leading-5 tracking-[0.08em] text-meta">
-          Edit Name
-        </p>
+      <div className="mx-auto w-full max-w-[280px]">
         <input
           ref={createEditNameInputRef}
           type="text"
           value={newEditName}
           onChange={(event) => setNewEditName(event.target.value)}
-          placeholder="e.g. Summer Edit"
-          className="w-full border-0 bg-transparent py-0 font-ui text-[15px] font-normal leading-5 text-ink outline-none placeholder:text-inactive"
+          placeholder="Edit name, e.g. Summer Edit"
+          className="mt-1 block h-[30px] w-full border-0 bg-transparent px-0 text-center font-ui text-[14px] font-normal leading-6 text-ink outline-none placeholder:text-inactive"
         />
       </div>
 
-      <ReferenceUploadDropzone
-        register="ink"
-        isUploading={isNewEditUploading}
-        onClick={() => requestUpload(NEW_EDIT_TARGET)}
-        onFilesDrop={handleNewEditUploadFiles}
-      />
+      {newEditReferences.length === 0 ? (
+        <div
+          className="mt-8 flex w-full items-center justify-center px-0 py-2"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            handleNewEditUploadFiles(Array.from(event.dataTransfer.files));
+          }}
+        >
+          <button
+            type="button"
+            aria-label="Upload visual references"
+            onClick={() => requestUpload(NEW_EDIT_TARGET)}
+            className={`group inline-flex flex-col items-center justify-center gap-2 border-0 bg-transparent focus-visible:outline-none ${
+              isNewEditUploading ? "text-ink" : ""
+            }`}
+          >
+            <span
+              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[18px] leading-none shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink ${
+                isNewEditUploading ? "border-ink bg-ink text-paper" : "text-meta group-hover:text-paper"
+              }`}
+            >
+              ↑
+            </span>
+          </button>
+        </div>
+      ) : (
+        <div className="mt-5">
+          <div className="mb-2 flex w-full justify-end">
+            <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[12px] font-medium leading-5 tracking-[0.02em] text-meta">
+              <span aria-hidden="true">|</span>
+              <span className="px-[2px]">{newEditReferences.length} references</span>
+              <span aria-hidden="true">|</span>
+            </span>
+          </div>
+          <div
+            className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              handleNewEditUploadFiles(Array.from(event.dataTransfer.files));
+            }}
+          >
+            {visibleNewEditReferences.map((image) => (
+              <div key={image.id} className="group relative aspect-square w-full overflow-hidden rounded-[4px] bg-mist">
+                <Image
+                  src={image.publicPath}
+                  alt={image.fileName}
+                  fill
+                  unoptimized
+                  sizes="120px"
+                  className="object-cover"
+                  draggable={false}
+                />
+                <button
+                  type="button"
+                  aria-label="Remove uploaded reference"
+                  onClick={() => removeNewEditReference(image.id)}
+                  className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-paper/92 font-ui text-[12px] leading-none text-meta opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              aria-label="Upload visual references"
+              onClick={() => requestUpload(NEW_EDIT_TARGET)}
+              className="group inline-flex aspect-square w-full flex-col items-center justify-center gap-2 border-0 bg-transparent transition-colors duration-180 focus-visible:outline-none"
+            >
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[16px] font-medium leading-none text-meta shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink group-hover:text-paper">
+                ↑
+              </span>
+              <span className="font-ui text-[11px] font-medium leading-4 tracking-[0.02em] text-meta transition-colors duration-150 group-hover:text-ink">
+                add more
+              </span>
+              {!canProceedNewEdit ? (
+                <span className="font-ui text-[11px] font-medium leading-4 tracking-[0.02em] text-meta transition-colors duration-150 group-hover:text-ink">
+                  (upload at least {MIN_NEW_EDIT_REFERENCES} images)
+                </span>
+              ) : null}
+            </button>
+          </div>
+        </div>
+      )}
 
-      <div className="mt-4 flex justify-end">
+      <div className="mt-8 flex items-center justify-center gap-3">
         <button type="button" onClick={closeCreateEdit} className={settingsActionPillClass}>
           cancel
+        </button>
+        <button
+          type="button"
+          onClick={proceedCreateEdit}
+          disabled={!canProceedNewEdit}
+          className={`${settingsActionPillClass} ${!canProceedNewEdit ? "cursor-not-allowed opacity-50 hover:text-[#6F7381]" : ""}`}
+        >
+          proceed
         </button>
       </div>
     </div>
@@ -815,7 +1013,7 @@ export default function ProfilePage() {
           <div className="relative h-full w-full">
             <div className="absolute left-0 top-0 text-left">
               <h1
-                className="text-left font-ui text-[24px] leading-none tracking-[-0.03em] text-ink sm:text-[30px]"
+                className="text-left font-ui text-[20px] leading-none tracking-[-0.03em] text-ink sm:text-[26px]"
                 style={{
                   fontFamily: "var(--font-meta-mono), monospace",
                   position: "absolute",
@@ -826,25 +1024,27 @@ export default function ProfilePage() {
               >
                 {activeUser.name}
               </h1>
-              {!isSmallHeaderLayout ? (
-                <p
-                  className="text-left font-ui text-[13px] leading-5 tracking-[0.02em] text-meta"
-                  style={{
-                    fontFamily: "var(--font-meta-mono), monospace",
-                    position: "absolute",
-                    top: `${PROFILE_HEADER_META_TOP_PX}px`,
-                    left: 0,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  ID {userIdLabel} · CALIBRATION {calibrationMonth} · ISSUE {issueLabel}
-                </p>
-              ) : null}
+              <p
+                ref={headerMetaRef}
+                aria-hidden={shouldFoldHeaderMeta}
+                className="text-left font-ui text-[12px] leading-4 tracking-[0.02em] text-meta"
+                style={{
+                  fontFamily: "var(--font-meta-mono), monospace",
+                  position: "absolute",
+                  top: `${PROFILE_HEADER_META_TOP_PX}px`,
+                  left: 0,
+                  whiteSpace: "nowrap",
+                  visibility: shouldFoldHeaderMeta ? "hidden" : "visible",
+                }}
+              >
+                ID {userIdLabel} · CALIBRATION {calibrationMonth} · ISSUE {issueLabel}
+              </p>
             </div>
 
             <div
+              ref={headerNavRef}
               className={`absolute z-20 flex h-12 items-end gap-x-4 sm:gap-x-7 md:gap-x-[47px] ${
-                isSmallHeaderLayout ? "inset-x-0 justify-start overflow-x-auto pr-14" : "right-0 justify-end"
+                isCompactHeaderLayout ? "inset-x-0 justify-start overflow-x-auto pr-14" : "right-0 justify-end"
               }`}
               style={{ top: `${PROFILE_HEADER_NAV_TOP_PX}px` }}
             >
@@ -853,7 +1053,7 @@ export default function ProfilePage() {
                   onClick={() => switchTab("signature")}
                   className={`group/tab font-ui relative inline-flex h-10 items-center whitespace-nowrap border-0 bg-transparent px-0 text-[13px] leading-5 tracking-[0.28px] outline-none transition-colors focus-visible:outline-none focus-visible:ring-0 md:text-[14px] ${
                     activeTab === "signature"
-                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-px after:w-full after:bg-black after:content-['']"
+                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
                       : "font-medium text-inactive hover:text-meta"
                   }`}
                 >
@@ -867,7 +1067,7 @@ export default function ProfilePage() {
                   onClick={() => switchTab("reference-sets")}
                   className={`group/tab font-ui relative inline-flex h-10 items-center whitespace-nowrap border-0 bg-transparent px-0 text-[13px] leading-5 tracking-[0.28px] outline-none transition-colors focus-visible:outline-none focus-visible:ring-0 md:text-[14px] ${
                     activeTab === "reference-sets"
-                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-px after:w-full after:bg-black after:content-['']"
+                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
                       : "font-medium text-inactive hover:text-meta"
                   }`}
                 >
@@ -881,7 +1081,7 @@ export default function ProfilePage() {
                   onClick={() => switchTab("quiet-constraints")}
                   className={`group/tab font-ui relative inline-flex h-10 items-center whitespace-nowrap border-0 bg-transparent px-0 text-[13px] leading-5 tracking-[0.28px] outline-none transition-colors focus-visible:outline-none focus-visible:ring-0 md:text-[14px] ${
                     activeTab === "quiet-constraints"
-                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-px after:w-full after:bg-black after:content-['']"
+                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
                       : "font-medium text-inactive hover:text-meta"
                   }`}
                 >
@@ -895,7 +1095,7 @@ export default function ProfilePage() {
                   onClick={() => switchTab("feedback")}
                   className={`group/tab font-ui relative inline-flex h-10 items-center whitespace-nowrap border-0 bg-transparent px-0 text-[13px] leading-5 tracking-[0.28px] outline-none transition-colors focus-visible:outline-none focus-visible:ring-0 md:text-[14px] ${
                     activeTab === "feedback"
-                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-px after:w-full after:bg-black after:content-['']"
+                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
                       : "font-medium text-inactive hover:text-meta"
                   }`}
                 >
@@ -909,7 +1109,7 @@ export default function ProfilePage() {
                   onClick={() => switchTab("settings")}
                   className={`font-ui relative inline-flex h-10 items-center whitespace-nowrap border-0 bg-transparent px-0 text-[13px] leading-5 tracking-[0.28px] outline-none transition-colors focus-visible:outline-none focus-visible:ring-0 md:text-[14px] ${
                     activeTab === "settings"
-                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-px after:w-full after:bg-black after:content-['']"
+                      ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
                       : "font-medium text-inactive hover:text-meta"
                   }`}
                 >
@@ -964,268 +1164,301 @@ export default function ProfilePage() {
                 const isEditing = Boolean(editingSetIds[set.id]);
                 const isExpanded = Boolean(expandedSetIds[set.id]);
                 const isLastSet = setIndex === referenceSets.length - 1;
-                const hasPendingDoneConfirmation = pendingDoneSetId === set.id;
-                const hasPendingRebuildConfirmation = pendingRebuildSetId === set.id;
-                const hasPendingDeleteConfirmation = pendingDeleteSetId === set.id;
                 const isRenaming = renamingSetId === set.id;
                 const isMainEdit = set.id === MAIN_EDIT_SET_ID;
                 const previewColumns = getReferencePreviewColumns(viewportWidth);
-                const defaultPreviewRows = isMainEdit && referenceSets.length === 1 ? 2 : viewportWidth >= 1680 ? 2 : 1;
-                const previewRows = isCreateEditOpen ? 1 : defaultPreviewRows;
+                const previewRows = 1;
                 const previewCount = previewColumns * previewRows;
                 const visibleImages = isExpanded ? set.images : set.images.slice(0, previewCount);
 
                 return (
-                  <div key={set.id} className={setIndex === 0 ? "mt-12" : "mt-4"}>
-                    <div className="flex items-start justify-between gap-8">
-                      <div>
-                        <h3 className="inline-flex items-baseline leading-none text-ink">
-                          <span className="font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">The</span>
-                          <span className="-ml-[1px] font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">
-                            –
-                          </span>
-                          <span className="ml-[2px] font-instrument text-[25px] italic leading-none tracking-[0.01em]">
-                            {set.name}
-                          </span>
-                        </h3>
+                  <div key={set.id} className={setIndex === 0 ? "mt-12" : "mt-8"}>
+                    <div className="flex items-center justify-between gap-8">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className={`${isMainEdit ? "group/mainedit relative" : ""}`}>
+                          <h3 className="inline-flex items-baseline leading-none text-ink">
+                            <span className="font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">The</span>
+                            <span className="-ml-[1px] font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">
+                              –
+                            </span>
+                            <span className="ml-[2px] font-instrument text-[25px] italic leading-none tracking-[0.01em]">
+                              {set.name}
+                            </span>
+                          </h3>
+                          {isMainEdit ? (
+                            <span aria-hidden="true" className={mainEditHoverPillClass}>
+                              This is the core reference set behind the Main Edit. The personal Signature is shaped
+                              from it. Additional Edits exist for distinct contexts.
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                      <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-meta">
+                      <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
                         <span aria-hidden="true">|</span>
                         <span className="px-[2px]">{set.images.length} References</span>
                         <span aria-hidden="true">|</span>
                       </span>
                     </div>
-                    {isMainEdit ? (
-                      <p className={`mt-3 w-full ${metaDescriptionClass}`}>
-                        This is the core reference set behind the Main Edit. The personal Signature is shaped from it.
-                        Additional Edits exist only for distinct contexts.
-                      </p>
-                    ) : null}
-
-                    <div
-                      className="mt-6 grid gap-[6px]"
-                      style={{ gridTemplateColumns: `repeat(${previewColumns}, minmax(0, 1fr))` }}
-                    >
-                      {visibleImages.map((image) => (
+                    {!isCreateEditOpen ? (
+                      <>
                         <div
-                          key={image.id}
-                          className="relative aspect-square w-full overflow-hidden rounded-[4px]"
-                          onMouseEnter={() => setHoveredImageId(image.id)}
-                          onMouseLeave={() => setHoveredImageId(null)}
+                          className="mt-6 grid gap-[6px]"
+                          style={{ gridTemplateColumns: `repeat(${previewColumns}, minmax(0, 1fr))` }}
                         >
-                          <Image
-                            src={image.publicPath}
-                            alt={image.fileName}
-                            fill
-                            unoptimized
-                            sizes="(max-width: 1024px) 100vw, 220px"
-                            className="object-cover"
-                          />
-                          {isEditing && hoveredImageId === image.id ? (
+                          {visibleImages.map((image) => (
+                            <div
+                              key={image.id}
+                              className="relative aspect-square w-full overflow-hidden rounded-[4px]"
+                              onMouseEnter={() => setHoveredImageId(image.id)}
+                              onMouseLeave={() => setHoveredImageId(null)}
+                            >
+                              <Image
+                                src={image.publicPath}
+                                alt={image.fileName}
+                                fill
+                                unoptimized
+                                sizes="(max-width: 1024px) 100vw, 220px"
+                                className="object-cover"
+                              />
+                              {isEditing && hoveredImageId === image.id ? (
+                                <button
+                                  type="button"
+                                  aria-label="Remove reference"
+                                  onClick={() => removeImage(set.id, image.id)}
+                                  className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-paper/92 font-ui text-[12px] leading-none text-meta"
+                                >
+                                  ×
+                                </button>
+                              ) : null}
+                            </div>
+                          ))}
+
+                          {isExpanded && isEditing ? (
                             <button
                               type="button"
-                              aria-label="Remove reference"
-                              onClick={() => removeImage(set.id, image.id)}
-                              className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/50 font-ui text-[12px] leading-none text-paper"
+                              onClick={() => requestUpload(set.id)}
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                setDragOverSetId(set.id);
+                              }}
+                              onDragLeave={() => setDragOverSetId((current) => (current === set.id ? null : current))}
+                              onDrop={(event) => handleSetDrop(set.id, event)}
+                              className={`group inline-flex aspect-square w-full flex-col items-center justify-center gap-2 border-0 bg-transparent transition-colors duration-180 focus-visible:outline-none ${
+                                dragOverSetId === set.id ? "text-ink" : ""
+                              }`}
                             >
-                              ×
+                              <span
+                                className={`inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[16px] font-medium leading-none text-meta shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink group-hover:text-paper ${
+                                  dragOverSetId === set.id ? "border-ink bg-ink text-paper" : ""
+                                }`}
+                              >
+                                ↑
+                              </span>
+                              <span
+                                className={`font-ui text-[11px] font-medium leading-4 tracking-[0.02em] text-meta transition-colors duration-150 group-hover:text-ink ${
+                                  dragOverSetId === set.id ? "text-ink" : ""
+                                }`}
+                              >
+                                add more
+                              </span>
                             </button>
                           ) : null}
                         </div>
-                      ))}
 
-                      {isExpanded && isEditing ? (
-                        <button
-                          type="button"
-                          onClick={() => requestUpload(set.id)}
-                          onDragOver={(event) => {
-                            event.preventDefault();
-                            setDragOverSetId(set.id);
-                          }}
-                          onDragLeave={() => setDragOverSetId((current) => (current === set.id ? null : current))}
-                          onDrop={(event) => handleSetDrop(set.id, event)}
-                          className={`flex aspect-square w-full items-center justify-center bg-mist font-ui text-[32px] font-normal leading-none text-meta transition-colors duration-150 hover:text-ink ${
-                            dragOverSetId === set.id ? "text-ink" : ""
+                        <div
+                          ref={isLastSet && !isCreateEditOpen ? createActionRowRef : null}
+                          className={`mt-4 ${
+                            isLastSet && !isCreateEditOpen
+                              ? shouldSplitCreateActionRow
+                                ? "grid grid-cols-1 items-start gap-3"
+                                : "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3"
+                              : "flex justify-end"
                           }`}
                         >
-                          +
-                        </button>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-4 flex items-center justify-end">
-                      {!isExpanded ? (
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setExpandedSetIds((current) => ({
-                                ...current,
-                                [set.id]: true,
-                              }));
-                              setEditingSetIds((current) => ({
-                                ...current,
-                                [set.id]: true,
-                              }));
-                              setPendingDoneSetId((current) => (current === set.id ? null : current));
-                              setPendingRebuildSetId((current) => (current === set.id ? null : current));
-                              setPendingDeleteSetId((current) => (current === set.id ? null : current));
-                              setRenamingSetId((current) => (current === set.id ? null : current));
-                            }}
-                            className={settingsActionPillClass}
-                          >
-                            {isEditing ? "done" : "review"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => requestRebuildConfirmation(set.id)}
-                            className={settingsActionPillClass}
-                          >
-                            rebuild
-                          </button>
-                          {!isMainEdit ? (
-                            <>
+                          {!isExpanded ? (
+                            <div
+                              ref={isLastSet && !isCreateEditOpen ? primaryActionsRowRef : null}
+                              className={`flex flex-wrap items-center gap-3 ${
+                                isLastSet && !isCreateEditOpen
+                                  ? shouldSplitCreateActionRow
+                                    ? "col-start-1 row-start-1 w-full justify-end"
+                                    : "col-start-2 row-start-1 justify-self-end"
+                                  : ""
+                              }`}
+                            >
                               <button
                                 type="button"
-                                onClick={() => startRenameSet(set.id, set.name)}
+                                onClick={() => {
+                                  setExpandedSetIds((current) => ({
+                                    ...current,
+                                    [set.id]: true,
+                                  }));
+                                  setEditingSetIds((current) => ({
+                                    ...current,
+                                    [set.id]: true,
+                                  }));
+                                  setPendingDoneSetId((current) => (current === set.id ? null : current));
+                                  setPendingRebuildSetId((current) => (current === set.id ? null : current));
+                                  setPendingDeleteSetId((current) => (current === set.id ? null : current));
+                                  setRenamingSetId((current) => (current === set.id ? null : current));
+                                }}
                                 className={settingsActionPillClass}
                               >
-                                rename
+                                {isEditing ? "done" : "review"}
                               </button>
                               <button
                                 type="button"
-                                onClick={() => requestDeleteSetConfirmation(set.id)}
-                                className={settingsDeletePillClass}
-                              >
-                                delete
-                              </button>
-                            </>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedSetIds((current) => ({
-                                ...current,
-                                [set.id]: true,
-                              }))
-                            }
-                            className={settingsActionPillClass}
-                          >
-                            view all →
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (isEditing) {
-                                requestDoneConfirmation(set.id);
-                                return;
-                              }
-                              setPendingRebuildSetId((current) => (current === set.id ? null : current));
-                              setPendingDeleteSetId((current) => (current === set.id ? null : current));
-                              setRenamingSetId((current) => (current === set.id ? null : current));
-                              toggleEditSet(set.id);
-                            }}
-                            className={settingsActionPillClass}
-                          >
-                            {isEditing ? "done" : "review"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => requestRebuildConfirmation(set.id)}
-                            className={settingsActionPillClass}
-                          >
-                            rebuild
-                          </button>
-                          {!isMainEdit ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => startRenameSet(set.id, set.name)}
+                                onClick={() => requestRebuildConfirmation(set.id)}
                                 className={settingsActionPillClass}
                               >
-                                rename
+                                rebuild
+                              </button>
+                              {!isMainEdit ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => startRenameSet(set.id)}
+                                    className={settingsActionPillClass}
+                                  >
+                                    rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => requestDeleteSetConfirmation(set.id)}
+                                    className={settingsDeletePillClass}
+                                  >
+                                    delete
+                                  </button>
+                                </>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedSetIds((current) => ({
+                                    ...current,
+                                    [set.id]: true,
+                                  }))
+                                }
+                                className={expandTextButtonClass}
+                              >
+                                view all
+                                <span aria-hidden="true">▾</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              ref={isLastSet && !isCreateEditOpen ? primaryActionsRowRef : null}
+                              className={`flex flex-wrap items-center gap-3 ${
+                                isLastSet && !isCreateEditOpen
+                                  ? shouldSplitCreateActionRow
+                                    ? "col-start-1 row-start-1 w-full justify-end"
+                                    : "col-start-2 row-start-1 justify-self-end"
+                                  : ""
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isEditing) {
+                                    requestDoneConfirmation(set.id);
+                                    return;
+                                  }
+                                  setPendingRebuildSetId((current) => (current === set.id ? null : current));
+                                  setPendingDeleteSetId((current) => (current === set.id ? null : current));
+                                  setRenamingSetId((current) => (current === set.id ? null : current));
+                                  toggleEditSet(set.id);
+                                }}
+                                className={settingsActionPillClass}
+                              >
+                                {isEditing ? "done" : "review"}
                               </button>
                               <button
                                 type="button"
-                                onClick={() => requestDeleteSetConfirmation(set.id)}
-                                className={settingsDeletePillClass}
+                                onClick={() => requestRebuildConfirmation(set.id)}
+                                className={settingsActionPillClass}
                               >
-                                delete
+                                rebuild
                               </button>
-                            </>
+                              {!isMainEdit ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => startRenameSet(set.id)}
+                                    className={settingsActionPillClass}
+                                  >
+                                    rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => requestDeleteSetConfirmation(set.id)}
+                                    className={settingsDeletePillClass}
+                                  >
+                                    delete
+                                  </button>
+                                </>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setExpandedSetIds((current) => ({
+                                    ...current,
+                                    [set.id]: false,
+                                  }));
+                                  setEditingSetIds((current) => ({
+                                    ...current,
+                                    [set.id]: false,
+                                  }));
+                                  setPendingDoneSetId((current) => (current === set.id ? null : current));
+                                  setPendingRebuildSetId((current) => (current === set.id ? null : current));
+                                  setPendingDeleteSetId((current) => (current === set.id ? null : current));
+                                  setRenamingSetId((current) => (current === set.id ? null : current));
+                                }}
+                                className={expandTextButtonClass}
+                              >
+                                show less
+                                <span aria-hidden="true">▴</span>
+                              </button>
+                            </div>
+                          )}
+                          {isLastSet && !isCreateEditOpen ? (
+                            <div
+                              className={`flex items-center ${
+                                shouldSplitCreateActionRow
+                                  ? "col-start-1 row-start-2 w-full justify-center"
+                                  : "col-start-1 row-start-1"
+                              }`}
+                            >
+                              <button
+                                ref={createActionButtonRef}
+                                type="button"
+                                onClick={() => openCreateEdit()}
+                                className={settingsActionPillClass}
+                              >
+                                create new
+                              </button>
+                            </div>
                           ) : null}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setExpandedSetIds((current) => ({
-                                ...current,
-                                [set.id]: false,
-                              }));
-                              setEditingSetIds((current) => ({
-                                ...current,
-                                [set.id]: false,
-                              }));
-                              setPendingDoneSetId((current) => (current === set.id ? null : current));
-                              setPendingRebuildSetId((current) => (current === set.id ? null : current));
-                              setPendingDeleteSetId((current) => (current === set.id ? null : current));
-                              setRenamingSetId((current) => (current === set.id ? null : current));
-                            }}
-                            className={settingsActionPillClass}
-                          >
-                            show less
-                          </button>
                         </div>
-                      )}
-                    </div>
-
-                  {hasPendingDoneConfirmation ? (
-                    <div className="mt-6 max-w-[480px]">
-                      <p className="font-ui text-[10px] font-medium uppercase leading-none tracking-[0.08em] text-inactive">
-                        disclaimer
-                      </p>
-                      <p className={`mt-2 ${metaDescriptionClass}`}>
-                        {isMainEdit
-                          ? "Proceeding will make this the active reference set for the Main Edit and Signature. The Signature and current Issue will recalibrate immediately."
-                          : `This reference set becomes the active reference for the ${formatEditName(set.name)}.`}
-                      </p>
-                      <div className="mt-4 flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={cancelDoneConfirmation}
-                          className={settingsActionPillClass}
-                        >
-                          cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => confirmDoneForSet(set.id)}
-                          className={settingsActionPillClass}
-                        >
-                          proceed
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
+                      </>
+                    ) : (
+                      <div className="mt-4 w-full border-t border-line/80" />
+                    )}
 
                   {isRenaming && !isMainEdit ? (
-                    <div className="mt-6 max-w-[360px]">
-                      <p className="font-ui text-[10px] font-medium uppercase leading-none tracking-[0.08em] text-inactive">
-                        rename
-                      </p>
-                      <div className="mt-3">
-                        <p className="font-ui text-[14px] font-normal text-ink">Edit Name</p>
-                        <input
-                          type="text"
-                          value={renameDraft}
-                          onChange={(event) => setRenameDraft(event.target.value)}
-                          placeholder="e.g. Summer"
-                          className="mt-[6px] w-full border-0 border-b border-line bg-transparent py-2 font-ui text-[14px] font-normal text-ink outline-none placeholder:text-inactive focus:border-ink"
-                        />
+                    <div id={`rename-panel-${set.id}`} className="mx-auto mt-6 w-full max-w-[640px]">
+                      <div className="mx-auto w-full max-w-[280px]">
+                        <div className="mt-1 h-[30px] w-full">
+                          <input
+                            type="text"
+                            value={renameDraft}
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            placeholder="Edit name, e.g. Summer Edit"
+                            className="block h-[30px] w-full border-0 bg-transparent px-0 text-center font-ui text-[14px] font-normal leading-6 text-ink outline-none placeholder:text-inactive"
+                            autoFocus
+                          />
+                        </div>
                       </div>
-                      <div className="mt-4 flex items-center gap-3">
+                      <div className="mt-5 flex items-center justify-center gap-3">
                         <button
                           type="button"
                           onClick={cancelRenameSet}
@@ -1238,87 +1471,27 @@ export default function ProfilePage() {
                           onClick={() => confirmRenameSet(set.id)}
                           className={settingsActionPillClass}
                         >
-                          save
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {hasPendingRebuildConfirmation ? (
-                    <div className="mt-6 max-w-[480px]">
-                      <p className="font-ui text-[10px] font-medium uppercase leading-none tracking-[0.08em] text-inactive">
-                        disclaimer
-                      </p>
-                      <p className={`mt-2 ${metaDescriptionClass}`}>
-                        {isMainEdit
-                          ? "Rebuilding this Main Edit replaces the current reference set with a new one. The Signature and current Issue recalibrate immediately once the new set is in place."
-                          : "Rebuilding this edit deletes the current reference set and lets you upload a whole new reference set in its place."}
-                      </p>
-                      <div className="mt-4 flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={cancelRebuildConfirmation}
-                          className={settingsActionPillClass}
-                        >
-                          cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => confirmRebuildForSet(set.id)}
-                          className={settingsActionPillClass}
-                        >
                           proceed
                         </button>
                       </div>
                     </div>
                   ) : null}
 
-                  {hasPendingDeleteConfirmation && !isMainEdit ? (
-                    <div className="mt-6 max-w-[480px]">
-                      <p className="font-ui text-[10px] font-medium uppercase leading-none tracking-[0.08em] text-inactive">
-                        delete
-                      </p>
-                      <p className={`mt-2 ${metaDescriptionClass}`}>
-                        This permanently removes {formatEditName(set.name)}, its reference set, and its paired Capsule in the Archive.
-                      </p>
-                      <div className="mt-4 flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={cancelDeleteSetConfirmation}
-                          className={settingsActionPillClass}
-                        >
-                          cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => confirmDeleteSet(set.id)}
-                          className={settingsDeletePillClass}
-                        >
-                          delete
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-4 w-full border-t border-line/80" />
-
                   {isLastSet ? (
                     <div
                       ref={createEditSectionRef}
-                      className={`w-full ${isCreateEditOpen ? "mt-2" : "mt-4"}`}
+                      className={`w-full ${isCreateEditOpen ? "mt-2 pb-12" : "mt-4"}`}
                       style={{ scrollMarginTop: `${PROFILE_HEADER_HEIGHT_PX + 28}px` }}
                     >
-                      <div className="flex justify-end">
-                        {!isCreateEditOpen ? (
-                          <button type="button" onClick={() => openCreateEdit()} className={settingsActionPillClass}>
-                            create
-                          </button>
-                        ) : null}
-                      </div>
+                      {isCreateEditOpen ? (
+                        <p className="font-ui text-[14px] font-normal leading-6 text-meta">/ New Edit</p>
+                      ) : null}
 
                       <div
-                        className={`overflow-hidden transition-[max-height,opacity,margin-top] duration-200 ease-in-out ${
-                          isCreateEditOpen ? "mt-3 max-h-[620px] opacity-100" : "mt-0 max-h-0 opacity-0"
+                        className={`transition-[max-height,opacity,margin-top] duration-200 ease-in-out ${
+                          isCreateEditOpen
+                            ? "mt-3 max-h-[5000px] overflow-visible opacity-100"
+                            : "mt-0 max-h-0 overflow-hidden opacity-0"
                         }`}
                       >
                         {createEditComposer}
@@ -1332,70 +1505,150 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
+        {activeTab === "reference-sets" && pendingRebuildSet ? (
+          <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
+            <button
+              type="button"
+              aria-label="Close rebuild disclaimer"
+              onClick={cancelRebuildConfirmation}
+              className="absolute inset-0 bg-paper/72"
+            />
+            <div className="relative w-full max-w-[460px] rounded-[6px] bg-paper px-6 py-8 shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-10 md:py-10">
+              <p className="font-ui text-[14px] font-normal leading-[1.7] text-ink">
+                {isPendingRebuildMainEdit
+                  ? "Rebuilding this Main Edit replaces the current reference set with a new one. The Signature and current Issue recalibrate immediately once the new set is in place."
+                  : "Rebuilding this edit deletes the current reference set and lets you upload a whole new reference set in its place."}
+              </p>
+              <div className="mt-6 flex items-center justify-center gap-3">
+                <button type="button" onClick={cancelRebuildConfirmation} className={settingsActionPillClass}>
+                  cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmRebuildForSet(pendingRebuildSet.id)}
+                  className={settingsActionPillClass}
+                >
+                  proceed
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "reference-sets" && pendingDoneSet ? (
+          <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
+            <button
+              type="button"
+              aria-label="Close done disclaimer"
+              onClick={cancelDoneConfirmation}
+              className="absolute inset-0 bg-paper/72"
+            />
+            <div className="relative w-full max-w-[460px] rounded-[6px] bg-paper px-6 py-8 shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-10 md:py-10">
+              <p className="font-ui text-[14px] font-normal leading-[1.7] text-ink">
+                {isPendingDoneMainEdit
+                  ? "Proceeding will make this the active reference set for the Main Edit and Signature. The Signature and current Issue will recalibrate immediately."
+                  : `This reference set becomes the active reference for the ${formatEditName(pendingDoneSet.name)}.`}
+              </p>
+              <div className="mt-6 flex items-center justify-center gap-3">
+                <button type="button" onClick={cancelDoneConfirmation} className={settingsActionPillClass}>
+                  cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmDoneForSet(pendingDoneSet.id)}
+                  className={settingsActionPillClass}
+                >
+                  proceed
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "reference-sets" && pendingDeleteSet && pendingDeleteSet.id !== MAIN_EDIT_SET_ID ? (
+          <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
+            <button
+              type="button"
+              aria-label="Close delete disclaimer"
+              onClick={cancelDeleteSetConfirmation}
+              className="absolute inset-0 bg-paper/72"
+            />
+            <div className="relative w-full max-w-[460px] rounded-[6px] bg-paper px-6 py-8 shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-10 md:py-10">
+              <p className="font-ui text-[14px] font-normal leading-[1.7] text-ink">
+                This permanently removes {formatEditName(pendingDeleteSet.name)}, its reference set, and its paired
+                Capsule in the Archive.
+              </p>
+              <div className="mt-6 flex items-center justify-center gap-3">
+                <button type="button" onClick={cancelDeleteSetConfirmation} className={settingsActionPillClass}>
+                  cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmDeleteSet(pendingDeleteSet.id)}
+                  className={settingsDeletePillClass}
+                >
+                  delete
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {activeTab === "quiet-constraints" ? (
           <div className="mx-[calc(50%-50vw)] px-10">
-            <section className="mt-12 max-w-[980px]">
-              <div>
-                <h3 className="inline-flex items-end text-[25px] leading-none text-ink">
-                  <span className="font-ui font-normal tracking-[-0.06em]">Quiet</span>
-                  <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">–</span>
-                  <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Constraints</span>
-                </h3>
-                <p className={`mt-2 max-w-[620px] ${metaDescriptionClass}`}>
-                  Set soft boundaries for what enters each Edit. Coming soon.
-                </p>
-              </div>
-
-              <div className="mt-7">
-                <div className="grid min-h-[72px] grid-cols-[110px_minmax(0,1fr)_auto] items-center gap-6 border-y border-line py-4">
-                  <p className="font-ui text-[14px] font-normal leading-none text-meta">PRICE</p>
-                  <p className="font-ui text-[14px] font-normal text-meta">
-                    Set a preferred price range by category.
-                  </p>
-                  <div
-                    className="group/constraint relative inline-flex"
-                    onMouseLeave={() => hideConstraintHint("price")}
-                  >
-                    <button
-                      type="button"
-                      className={settingsActionPillClass}
-                      onClick={() => showConstraintHint("price")}
+            <section className="mt-12 w-full">
+              <div className="w-full space-y-5">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="min-w-0">
+                      <p className="font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                        Preferred <span className="font-ui font-medium text-ink">price range</span> by category
+                      </p>
+                    </div>
+                    <div
+                      className="group/constraint relative inline-flex"
+                      onMouseLeave={() => hideConstraintHint("price")}
                     >
-                      set range
-                    </button>
-                    <span
-                      aria-hidden="true"
-                      className={`${constraintHoverPillClass} ${activeConstraintHint === "price" ? "translate-y-0 opacity-100" : ""}`}
-                    >
-                      coming soon
-                    </span>
+                      <button
+                        type="button"
+                        className={settingsActionPillClass}
+                        onClick={() => showConstraintHint("price")}
+                      >
+                        set range
+                      </button>
+                      <span
+                        aria-hidden="true"
+                        className={`${constraintHoverPillClass} ${activeConstraintHint === "price" ? "translate-y-0 opacity-100" : ""}`}
+                      >
+                        coming soon
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                <div className="grid min-h-[72px] grid-cols-[110px_minmax(0,1fr)_auto] items-center gap-6 border-b border-line py-4">
-                  <p className="font-ui text-[14px] font-normal leading-none text-meta">SIZING</p>
-                  <p className="font-ui text-[14px] font-normal text-meta">
-                    Set sizing preferences and flexibility.
-                  </p>
-                  <div
-                    className="group/constraint relative inline-flex"
-                    onMouseLeave={() => hideConstraintHint("sizing")}
-                  >
-                    <button
-                      type="button"
-                      className={settingsActionPillClass}
-                      onClick={() => showConstraintHint("sizing")}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="min-w-0">
+                      <p className="font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                        Preferred <span className="font-ui font-medium text-ink">sizing</span> and fit flexibility
+                      </p>
+                    </div>
+                    <div
+                      className="group/constraint relative inline-flex"
+                      onMouseLeave={() => hideConstraintHint("sizing")}
                     >
-                      set sizing
-                    </button>
-                    <span
-                      aria-hidden="true"
-                      className={`${constraintHoverPillClass} ${activeConstraintHint === "sizing" ? "translate-y-0 opacity-100" : ""}`}
-                    >
-                      coming soon
-                    </span>
+                      <button
+                        type="button"
+                        className={settingsActionPillClass}
+                        onClick={() => showConstraintHint("sizing")}
+                      >
+                        set sizing
+                      </button>
+                      <span
+                        aria-hidden="true"
+                        className={`${constraintHoverPillClass} ${activeConstraintHint === "sizing" ? "translate-y-0 opacity-100" : ""}`}
+                      >
+                        coming soon
+                      </span>
+                    </div>
                   </div>
-                </div>
               </div>
             </section>
           </div>
@@ -1403,394 +1656,253 @@ export default function ProfilePage() {
 
         {activeTab === "settings" ? (
           <div className="mx-[calc(50%-50vw)] px-10">
-            <section className="mt-12 max-w-[980px]">
-              <div className="flex flex-wrap items-end justify-between gap-4">
+            <section className="mt-12 w-full">
+              <div className="grid w-full gap-8">
                 <div>
-                  <h3 className="inline-flex items-end text-[25px] leading-none text-ink">
-                    <span className="font-ui font-normal tracking-[-0.06em]">Profile</span>
-                    <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">–</span>
-                    <span className="ml-[1px] font-instrument italic tracking-[0.01em]">Details</span>
-                  </h3>
-                  <p className={`mt-2 ${metaDescriptionClass}`}>
-                    {isSettingsEditMode ? "Click a value to edit one field at a time." : "Details are currently read-only."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isSettingsEditMode) {
-                      setIsSettingsEditMode(false);
-                      cancelSettingsFieldEdit();
-                      return;
-                    }
-                    setIsDeleteProfileDisclaimerOpen(false);
-                    setIsSettingsEditMode(true);
-                  }}
-                  className={settingsActionPillClass}
-                >
-                  {isSettingsEditMode ? "done" : "edit profile"}
-                </button>
-              </div>
-
-              <div className="mt-6 space-y-1">
-                <div className="grid min-h-[72px] grid-cols-[110px_minmax(0,1fr)_auto] items-center gap-6 py-2">
-                  <p className="font-ui text-[14px] font-normal leading-none text-meta">EMAIL</p>
-                  {activeSettingsField === "email" ? (
-                    <input
-                      type="email"
-                      value={settingsFieldDraft}
-                      onChange={(event) => setSettingsFieldDraft(event.target.value)}
-                      className="h-10 w-full rounded-[12px] border border-line bg-paper px-3 font-ui text-[14px] font-normal text-ink outline-none placeholder:text-inactive focus:border-meta/60"
-                      placeholder="Email"
-                      autoFocus
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => beginSettingsFieldEdit("email")}
-                      className={`w-full text-left font-ui text-[14px] font-normal text-ink outline-none transition-colors duration-150 ${
-                        isSettingsEditMode ? "cursor-pointer hover:text-meta" : "cursor-default"
-                      }`}
-                      disabled={!isSettingsEditMode}
-                    >
-                      {profileSettings.email}
-                    </button>
-                  )}
-                  <div className="flex min-w-[146px] items-center justify-end gap-2">
-                    {activeSettingsField === "email" ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={cancelSettingsFieldEdit}
-                          className={settingsActionPillClass}
-                        >
-                          cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={saveSettingsFieldEdit}
-                          className={settingsActionPillClass}
-                        >
-                          save
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="grid min-h-[72px] grid-cols-[110px_minmax(0,1fr)_auto] items-center gap-6 py-2">
-                  <p className="font-ui text-[14px] font-normal leading-none text-meta">PHONE</p>
-                  {activeSettingsField === "phone" ? (
-                    <div className="w-full">
+                  {activeSettingsField === "name" ? (
+                    <>
                       <input
-                        type="tel"
+                        type="text"
                         value={settingsFieldDraft}
-                        onChange={(event) => handleSettingsPhoneDraftChange(event.target.value)}
-                        className="h-10 w-full rounded-[12px] border border-line bg-paper px-3 font-ui text-[14px] font-normal text-ink outline-none placeholder:text-inactive focus:border-meta/60"
-                        placeholder="+41 79 123 45 67"
+                        onChange={(event) => setSettingsFieldDraft(event.target.value)}
+                        className="mt-2 h-10 w-full border-0 bg-transparent px-0 font-ui text-[13px] font-normal text-ink outline-none placeholder:text-inactive"
+                        placeholder="name"
                         autoFocus
                       />
-                      <p className="mt-2 font-ui text-[12px] font-normal leading-5 text-meta">
-                        Phone login uses a one-time code.
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={sendSettingsPhoneCode}
-                          className={settingsActionPillClass}
-                          disabled={!isValidPhone(settingsFieldDraft.trim())}
-                        >
-                          {isSettingsPhoneCodeSent ? "resend code" : "send code"}
-                        </button>
-                        {isSettingsPhoneVerified ? (
-                          <span className="font-ui text-[12px] font-normal leading-5 text-meta">phone confirmed</span>
-                        ) : null}
-                      </div>
-                      {isSettingsPhoneCodeSent && !isSettingsPhoneVerified ? (
-                        <div className="mt-2 flex flex-wrap items-end gap-2">
-                          <label className="min-w-[180px] flex-1">
-                            <span className="font-ui text-[11px] font-medium uppercase tracking-[0.08em] text-meta">
-                              Verification Code
-                            </span>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              value={settingsPhoneCodeInput}
-                              onChange={(event) => setSettingsPhoneCodeInput(event.target.value.replace(/[^\d]/g, "").slice(0, 6))}
-                              className="mt-1 h-10 w-full rounded-[12px] border border-line bg-paper px-3 font-ui text-[14px] font-normal text-ink outline-none placeholder:text-inactive focus:border-meta/60"
-                              placeholder="6-digit code"
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            onClick={confirmSettingsPhoneCode}
-                            className={settingsActionPillClass}
-                            disabled={settingsPhoneCodeInput.length !== 6}
-                          >
-                            confirm code
-                          </button>
-                        </div>
-                      ) : null}
-                      {isSettingsPhoneCodeSent && !isSettingsPhoneVerified ? (
-                        <p className="mt-2 font-ui text-[11px] font-normal leading-5 text-meta">
-                          Beta preview code: {settingsPhoneVerificationCode}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => beginSettingsFieldEdit("phone")}
-                      className={`w-full text-left font-ui text-[14px] font-normal text-ink outline-none transition-colors duration-150 ${
-                        isSettingsEditMode ? "cursor-pointer hover:text-meta" : "cursor-default"
-                      }`}
-                      disabled={!isSettingsEditMode}
-                    >
-                      {profileSettings.phone || "—"}
-                    </button>
-                  )}
-                  <div className="flex min-w-[146px] items-center justify-end gap-2">
-                    {activeSettingsField === "phone" ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={cancelSettingsFieldEdit}
-                          className={settingsActionPillClass}
-                        >
+                      <div className="mt-3 flex items-center gap-2">
+                        <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
                           cancel
                         </button>
-                        <button
-                          type="button"
-                          onClick={saveSettingsFieldEdit}
-                          className={settingsActionPillClass}
-                        >
+                        <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
                           save
                         </button>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="grid min-h-[72px] grid-cols-[110px_minmax(0,1fr)_auto] items-center gap-6 py-2">
-                  <p className="font-ui text-[14px] font-normal leading-none text-meta">NAME</p>
-                  {activeSettingsField === "name" ? (
-                    <input
-                      type="text"
-                      value={settingsFieldDraft}
-                      onChange={(event) => setSettingsFieldDraft(event.target.value)}
-                      className="h-10 w-full rounded-[12px] border border-line bg-paper px-3 font-ui text-[14px] font-normal text-ink outline-none placeholder:text-inactive focus:border-meta/60"
-                      placeholder="Name"
-                      autoFocus
-                    />
+                      </div>
+                    </>
                   ) : (
                     <button
                       type="button"
                       onClick={() => beginSettingsFieldEdit("name")}
-                      className={`w-full text-left font-ui text-[14px] font-normal text-ink outline-none transition-colors duration-150 ${
-                        isSettingsEditMode ? "cursor-pointer hover:text-meta" : "cursor-default"
-                      }`}
-                      disabled={!isSettingsEditMode}
+                      className="mt-2 w-full border-0 pb-2 text-left font-ui text-[13px] font-normal text-ink outline-none transition-colors duration-150 hover:text-meta"
                     >
                       {profileSettings.name}
                     </button>
                   )}
-                  <div className="flex min-w-[146px] items-center justify-end gap-2">
-                    {activeSettingsField === "name" ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={cancelSettingsFieldEdit}
-                          className={settingsActionPillClass}
-                        >
-                          cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={saveSettingsFieldEdit}
-                          className={settingsActionPillClass}
-                        >
-                          save
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
                 </div>
 
-                <div className="grid min-h-[72px] grid-cols-[110px_minmax(0,1fr)_auto] items-center gap-6 py-2">
-                  <p className="font-ui text-[14px] font-normal leading-none text-meta">PASSWORD</p>
+                <div>
+                  {activeSettingsField === "email" ? (
+                    <>
+                      <input
+                        type="email"
+                        value={settingsFieldDraft}
+                        onChange={(event) => setSettingsFieldDraft(event.target.value)}
+                        className="mt-2 h-10 w-full border-0 bg-transparent px-0 font-ui text-[13px] font-normal text-ink outline-none placeholder:text-inactive"
+                        placeholder="email"
+                        autoFocus
+                      />
+                      <div className="mt-3 flex items-center gap-2">
+                        <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
+                          cancel
+                        </button>
+                        <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
+                          save
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => beginSettingsFieldEdit("email")}
+                      className="mt-2 w-full border-0 pb-2 text-left font-ui text-[13px] font-normal text-ink outline-none transition-colors duration-150 hover:text-meta"
+                    >
+                      {profileSettings.email}
+                    </button>
+                  )}
+                </div>
+
+                <div>
                   {activeSettingsField === "password" ? (
-                    <input
-                      type="password"
-                      value={settingsFieldDraft}
-                      onChange={(event) => setSettingsFieldDraft(event.target.value)}
-                      className="h-10 w-full rounded-[12px] border border-line bg-paper px-3 font-ui text-[14px] font-normal text-ink outline-none placeholder:text-inactive focus:border-meta/60"
-                      placeholder="Set a new password"
-                      autoFocus
-                    />
+                    <>
+                      <input
+                        type="password"
+                        value={settingsFieldDraft}
+                        onChange={(event) => setSettingsFieldDraft(event.target.value)}
+                        className="mt-2 h-10 w-full border-0 bg-transparent px-0 font-ui text-[13px] font-normal text-ink outline-none placeholder:text-inactive"
+                        placeholder="new password"
+                        autoFocus
+                      />
+                      <div className="mt-3 flex items-center gap-2">
+                        <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
+                          cancel
+                        </button>
+                        <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
+                          save
+                        </button>
+                      </div>
+                    </>
                   ) : (
                     <button
                       type="button"
                       onClick={() => beginSettingsFieldEdit("password")}
-                      className={`w-full text-left font-ui text-[13px] font-normal tracking-[0.1em] text-meta outline-none transition-colors duration-150 ${
-                        isSettingsEditMode ? "cursor-pointer hover:text-[#6F7381]" : "cursor-default"
-                      }`}
-                      disabled={!isSettingsEditMode}
+                      className="mt-2 w-full border-0 pb-2 text-left font-ui text-[13px] font-normal tracking-[0.1em] text-meta outline-none transition-colors duration-150 hover:text-[#6F7381]"
                     >
                       ••••••
                     </button>
                   )}
-                  <div className="flex min-w-[146px] items-center justify-end gap-2">
-                    {activeSettingsField === "password" ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={cancelSettingsFieldEdit}
-                          className={settingsActionPillClass}
-                        >
-                          cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={saveSettingsFieldEdit}
-                          className={settingsActionPillClass}
-                        >
-                          save
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
                 </div>
               </div>
 
-              <div className="mt-7">
-                <div className="grid min-h-[72px] grid-cols-[110px_minmax(0,1fr)_auto] items-center gap-6 border-y border-line py-4">
-                  <p className="font-ui text-[14px] font-normal leading-none text-meta">SESSION</p>
-                  <p className="font-ui text-[14px] font-normal text-meta">Signed in as {sessionIdentity}</p>
-                  <button
-                    type="button"
-                    className={settingsActionPillClass}
-                  >
-                    log out
-                  </button>
-                </div>
-
-                <div className="grid min-h-[72px] grid-cols-[110px_minmax(0,1fr)_auto] items-center gap-6 border-b border-line py-4">
-                  <p className="font-ui text-[14px] font-normal leading-none text-meta">PROFILE</p>
-                  <div>
-                    <p className={metaDescriptionClass}>
-                      Permanently remove this account, including reference sets and signature state.
-                    </p>
-                    {isDeleteProfileDisclaimerOpen ? (
-                      <p className="mt-2 font-ui text-[13px] leading-[1.6] text-meta">
-                        This action cannot be undone.
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {isDeleteProfileDisclaimerOpen ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setIsDeleteProfileDisclaimerOpen(false)}
-                          className={settingsActionPillClass}
-                        >
-                          cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsDeleteProfileDisclaimerOpen(false)}
-                          className={settingsDeletePillClass}
-                        >
-                          confirm delete
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsSettingsEditMode(false);
-                          cancelSettingsFieldEdit();
-                          setIsDeleteProfileDisclaimerOpen(true);
-                        }}
-                        className={settingsDeletePillClass}
-                      >
-                        delete profile
-                      </button>
-                    )}
-                  </div>
-                </div>
+              <div className="mt-10 flex items-center gap-3">
+                <button type="button" className={settingsActionPillClass}>
+                  log out
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSettingsEditMode(false);
+                    cancelSettingsFieldEdit();
+                    setIsDeleteProfileDisclaimerOpen(true);
+                  }}
+                  className={settingsDeletePillClass}
+                >
+                  delete profile
+                </button>
               </div>
             </section>
           </div>
         ) : null}
 
+        {activeTab === "settings" && isDeleteProfileDisclaimerOpen ? (
+          <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
+            <button
+              type="button"
+              aria-label="Close delete profile disclaimer"
+              onClick={() => setIsDeleteProfileDisclaimerOpen(false)}
+              className="absolute inset-0 bg-paper/72"
+            />
+            <div className="relative w-full max-w-[460px] rounded-[6px] bg-paper px-6 py-8 shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-10 md:py-10">
+              <p className="font-ui text-[14px] font-normal leading-[1.7] text-ink">
+                Deleting your profile removes your settings, signature history, and saved references from this
+                account.
+              </p>
+              <div className="mt-6 flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteProfileDisclaimerOpen(false)}
+                  className={settingsActionPillClass}
+                >
+                  cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteProfileDisclaimerOpen(false)}
+                  className={settingsDeletePillClass}
+                >
+                  proceed
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {activeTab === "feedback" ? (
           <div className="mx-[calc(50%-50vw)] px-10">
-            <section className="mt-12 max-w-[980px]">
+            <section className="mt-12 w-full">
               <div>
-                <h3 className="inline-flex items-end text-[25px] leading-none text-ink">
-                  <span className="font-ui font-normal tracking-[-0.06em]">Beta–</span>
-                  <span className="font-instrument italic tracking-[0.01em]">Feedback</span>
-                </h3>
-                <p className={`mt-2 max-w-[720px] ${metaDescriptionClass}`}>
-                  Thank you for helping shape cenoir in beta. Notes shared here are anonymous, not linked to the
-                  account, and reviewed as part of the broader refinement process. At this stage, reflections on what
-                  felt clear, what felt off, and what would build more trust are especially valuable.
-                </p>
-                <p className="mt-6 font-ui text-[13px] leading-[1.8] tracking-[0.02em] text-meta">Best,</p>
-                <p className="mt-4 font-belmonte text-[28px] leading-none italic text-accent">
-                  Jil &amp; Nick
+                <p className="w-full font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                  Your notes are anonymous and used only to improve clarity, quality, and trust in the experience.
+                  Thank you for shaping cenoir.
                 </p>
               </div>
 
-              <div className="mt-7 space-y-5">
-                <label className="block">
-                  <span className="font-ui text-[12px] font-medium uppercase tracking-[0.08em] text-meta">
-                    1. What felt most clear and most useful?
-                  </span>
-                  <textarea
-                    value={feedbackAnswers.clarity}
-                    onChange={(event) => setFeedbackAnswers((prev) => ({ ...prev, clarity: event.target.value }))}
-                    className="mt-2 min-h-[88px] w-full resize-y rounded-[14px] border border-line bg-paper px-4 py-3 font-ui text-[14px] font-normal leading-[1.6] text-ink outline-none placeholder:text-inactive focus:border-meta/60"
-                    placeholder="Share the moments, elements, or interactions that worked especially well."
-                  />
+              <div className="mt-8 w-full space-y-7">
+                <label className="block w-full">
+                  <div className="flex w-full items-center gap-3">
+                    <span className="font-ui text-[14px] font-medium leading-[1.8] text-ink">
+                      What worked well?
+                    </span>
+                  </div>
+                  <div className="w-full">
+                    <textarea
+                      ref={feedbackClarityRef}
+                      rows={1}
+                      value={feedbackAnswers.clarity}
+                      onChange={(event) =>
+                        handleFeedbackFieldChange("clarity", event.target.value, event.currentTarget)
+                      }
+                      onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "clarity")}
+                      className="mt-2 h-[34px] w-full resize-none overflow-hidden rounded-[4px] border-0 bg-[#FBFBFA] px-3 py-2 font-ui text-[14px] font-normal leading-[1.6] text-meta outline-none"
+                    />
+                  </div>
                 </label>
 
-                <label className="block">
-                  <span className="font-ui text-[12px] font-medium uppercase tracking-[0.08em] text-meta">
-                    2. Where did the experience feel unclear, off, or incomplete?
-                  </span>
-                  <textarea
-                    value={feedbackAnswers.quality}
-                    onChange={(event) => setFeedbackAnswers((prev) => ({ ...prev, quality: event.target.value }))}
-                    className="mt-2 min-h-[88px] w-full resize-y rounded-[14px] border border-line bg-paper px-4 py-3 font-ui text-[14px] font-normal leading-[1.6] text-ink outline-none placeholder:text-inactive focus:border-meta/60"
-                    placeholder="Anything that felt confusing, missing, or slightly out of place is helpful to note."
-                  />
+                <label className="block w-full">
+                  <div className="flex w-full items-center gap-3">
+                    <span className="font-ui text-[14px] font-medium leading-[1.8] text-ink">
+                      What felt unclear and complete?
+                    </span>
+                  </div>
+                  <div className="w-full">
+                    <textarea
+                      ref={feedbackQualityRef}
+                      rows={1}
+                      value={feedbackAnswers.quality}
+                      onChange={(event) =>
+                        handleFeedbackFieldChange("quality", event.target.value, event.currentTarget)
+                      }
+                      onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "quality")}
+                      className="mt-2 h-[34px] w-full resize-none overflow-hidden rounded-[4px] border-0 bg-[#FBFBFA] px-3 py-2 font-ui text-[14px] font-normal leading-[1.6] text-meta outline-none"
+                    />
+                  </div>
                 </label>
 
-                <label className="block">
-                  <span className="font-ui text-[12px] font-medium uppercase tracking-[0.08em] text-meta">
-                    3. What should change first to earn more trust?
-                  </span>
-                  <textarea
-                    value={feedbackAnswers.trust}
-                    onChange={(event) => setFeedbackAnswers((prev) => ({ ...prev, trust: event.target.value }))}
-                    className="mt-2 min-h-[88px] w-full resize-y rounded-[14px] border border-line bg-paper px-4 py-3 font-ui text-[14px] font-normal leading-[1.6] text-ink outline-none placeholder:text-inactive focus:border-meta/60"
-                    placeholder="One honest suggestion is enough."
-                  />
+                <label className="block w-full">
+                  <div className="flex w-full items-center gap-3">
+                    <span className="font-ui text-[14px] font-medium leading-[1.8] text-ink">
+                      What should change first, or which feature would most improve the experience?
+                    </span>
+                  </div>
+                  <div className="w-full">
+                    <textarea
+                      ref={feedbackTrustRef}
+                      rows={1}
+                      value={feedbackAnswers.trust}
+                      onChange={(event) => handleFeedbackFieldChange("trust", event.target.value, event.currentTarget)}
+                      onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "trust")}
+                      className="mt-2 h-[34px] w-full resize-none overflow-hidden rounded-[4px] border-0 bg-[#FBFBFA] px-3 py-2 font-ui text-[14px] font-normal leading-[1.6] text-meta outline-none"
+                    />
+                  </div>
                 </label>
 
-                <div className="pt-2">
+                <div className="pt-1">
+                  <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => {
-                      setLastFeedbackSentAt(
-                        new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
-                      );
+                      const sentAt = new Date().toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      });
+                      setLastFeedbackSentAt(sentAt);
+                      setFeedbackHistory((prev) => [
+                        {
+                          sentAt,
+                          clarity: feedbackAnswers.clarity.trim(),
+                          quality: feedbackAnswers.quality.trim(),
+                          trust: feedbackAnswers.trust.trim(),
+                        },
+                        ...prev,
+                      ]);
                       setFeedbackAnswers({
                         clarity: "",
                         quality: "",
                         trust: "",
+                      });
+                      window.requestAnimationFrame(() => {
+                        if (feedbackClarityRef.current) autoResizeFeedbackField(feedbackClarityRef.current);
+                        if (feedbackQualityRef.current) autoResizeFeedbackField(feedbackQualityRef.current);
+                        if (feedbackTrustRef.current) autoResizeFeedbackField(feedbackTrustRef.current);
                       });
                     }}
                     disabled={!canSendFeedback}
@@ -1799,9 +1911,44 @@ export default function ProfilePage() {
                     send feedback
                   </button>
                   {lastFeedbackSentAt ? (
-                    <p className="mt-3 font-ui text-[13px] font-normal leading-5 text-meta">
+                    <p className="font-ui text-[13px] font-normal leading-5 text-meta">
                       Last feedback sent: {lastFeedbackSentAt}
                     </p>
+                  ) : null}
+                  {feedbackHistory.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsFeedbackHistoryOpen((current) => !current)}
+                      className={expandTextButtonClass}
+                    >
+                      {isFeedbackHistoryOpen ? "hide feedback" : "show feedback"}
+                      <span aria-hidden="true">{isFeedbackHistoryOpen ? "▴" : "▾"}</span>
+                    </button>
+                  ) : null}
+                  </div>
+                  {isFeedbackHistoryOpen && feedbackHistory.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {feedbackHistory.map((entry, index) => (
+                        <div key={`${entry.sentAt}-${index}`} className="rounded-[4px] bg-[#FBFBFA] px-3 py-3">
+                          <p className="font-ui text-[12px] font-normal leading-5 text-meta">{entry.sentAt}</p>
+                          {entry.clarity ? (
+                            <p className="mt-1 font-ui text-[13px] font-normal leading-[1.6] text-ink">
+                              {entry.clarity}
+                            </p>
+                          ) : null}
+                          {entry.quality ? (
+                            <p className="mt-1 font-ui text-[13px] font-normal leading-[1.6] text-ink">
+                              {entry.quality}
+                            </p>
+                          ) : null}
+                          {entry.trust ? (
+                            <p className="mt-1 font-ui text-[13px] font-normal leading-[1.6] text-ink">
+                              {entry.trust}
+                            </p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
                   ) : null}
                 </div>
               </div>

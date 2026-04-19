@@ -48,37 +48,34 @@ export function ModePill({ selected }: ModePillProps) {
 
   const sliderClass =
     selected === "archive"
-      ? "translate-x-[calc(100%+2px)] bg-[linear-gradient(180deg,#3a2580_0%,#312073_100%)] shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.08)]"
-      : "translate-x-0 bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] shadow-[0_1px_2px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)]";
+      ? "bg-[linear-gradient(180deg,#3a2580_0%,#312073_100%)] shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.06)]"
+      : "bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)]";
+  const sliderTranslatePx = selected === "archive" ? 98 : 0;
 
   return (
     <div
-      data-show-around-target="mode-switch"
-      className="content-stretch relative flex items-center justify-center rounded-[18px] border border-line border-solid bg-[#F5F5F6] p-[2px]"
+      className="content-stretch relative flex items-center justify-center rounded-[18px] border-[0.5px] border-[#F0F0F1] border-solid bg-[#F5F5F6] p-[2px]"
       data-name="Mode Switch"
+      data-mode-pill-root="true"
       style={{
-        boxShadow: `
-          0 1px 2px rgba(0, 0, 0, 0.04),
-          inset 0 1px 0 rgba(255, 255, 255, 0.4),
-          inset 0 -1px 0 rgba(0, 0, 0, 0.02)
-        `,
+        boxShadow: "0 0.5px 1px rgba(0, 0, 0, 0.05)",
       }}
     >
       <div className="pointer-events-none absolute inset-[2px] z-[1]">
         <div
-          className={`h-[32px] w-[calc((100%-2px)/2)] rounded-[16px] transition-[transform,background,box-shadow] duration-[540ms] ease-[cubic-bezier(0.22,0.9,0.24,1)] ${sliderClass}`}
+          className={`h-[32px] rounded-[16px] transition-[transform,background,box-shadow] duration-[540ms] ease-[cubic-bezier(0.22,0.9,0.24,1)] ${sliderClass}`}
+          style={{ width: "96px", transform: `translateX(${sliderTranslatePx}px)` }}
         />
       </div>
 
-      <div className="relative z-[2] grid grid-cols-2 gap-[2px]">
+      <div className="relative z-[2] grid w-[194px] grid-cols-2 gap-[2px]">
         <button
           type="button"
           aria-pressed={selected === "gallery"}
-          data-show-around-target="gallery-segment"
           onClick={() => navigateTo("gallery")}
           onMouseEnter={() => prefetchRoute(routeFor("gallery"))}
           onFocus={() => prefetchRoute(routeFor("gallery"))}
-          className="group content-stretch relative flex h-[32px] min-w-[90px] items-center justify-center overflow-hidden rounded-[16px] bg-transparent px-[20px] outline-none"
+          className="group content-stretch relative flex h-[32px] w-full items-center justify-center overflow-hidden rounded-[16px] bg-transparent px-[10px] outline-none"
           data-name="Segment Gallery"
         >
           <p
@@ -96,11 +93,10 @@ export function ModePill({ selected }: ModePillProps) {
         <button
           type="button"
           aria-pressed={selected === "archive"}
-          data-show-around-target="archive-segment"
           onClick={() => navigateTo("archive")}
           onMouseEnter={() => prefetchRoute(routeFor("archive"))}
           onFocus={() => prefetchRoute(routeFor("archive"))}
-          className="group content-stretch relative flex h-[32px] min-w-[90px] items-center justify-center overflow-hidden rounded-[16px] bg-transparent px-[20px] outline-none"
+          className="group content-stretch relative flex h-[32px] w-full items-center justify-center overflow-hidden rounded-[16px] bg-transparent px-[10px] outline-none"
           data-name="Segment Archive"
         >
           <p

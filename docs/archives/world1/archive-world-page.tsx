@@ -1,6 +1,6 @@
 import { StickyShell } from "@/components/unseen/StickyShell";
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
-import { WorldViewClient } from "@/components/unseen/WorldViewClient";
+import { WorldViewClient } from "./WorldViewClient";
 import { archiveCapsuleItems, sections, type ArchiveCapsuleId } from "@/data/mockCatalog";
 
 type WorldCategoryKey = "OUTER" | "UPPER" | "LOWER" | "SILHOUETTE" | "GROUND" | "ARTIFACTS";
@@ -46,7 +46,7 @@ export default async function ArchiveWorldPage({ searchParams }: ArchiveWorldPag
   return (
     <main data-return-root="true" className="min-h-screen bg-paper" style={{ minHeight: "var(--viewport-h)" }}>
       <ReturnScrollRestore />
-      <StickyShell mode="archive" view="world" archiveActiveItemCount={activeCapsuleItemCount} />
+      <StickyShell mode="archive" view="world2" archiveActiveItemCount={activeCapsuleItemCount} />
       <section
         data-world-root="true"
         className="flex w-full items-stretch justify-center"
