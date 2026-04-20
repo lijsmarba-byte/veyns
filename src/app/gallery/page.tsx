@@ -39,8 +39,8 @@ export default function GalleryPage() {
                 <section
                   key={section.key}
                   id={`gallery-section-${section.key.toLowerCase()}`}
-                  className="mb-[236px] last:mb-0"
-                  style={{ scrollMarginTop: "calc(var(--sticky-h) + 200px)" }}
+                  className="mb-[180px] last:mb-0"
+                  style={{ scrollMarginTop: "calc(var(--sticky-h) + 170px)" }}
                   aria-label={section.title}
                 >
                   <div className="grid grid-cols-1 gap-y-[148px] md:grid-cols-2 md:gap-x-[64px] lg:grid-cols-3 lg:gap-x-[72px]">

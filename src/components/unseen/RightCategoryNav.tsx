@@ -10,7 +10,7 @@ type RightCategoryNavProps = {
 };
 
 const DEFAULT_STICKY_HEIGHT_PX = 156;
-const CATEGORY_FOCUS_OFFSET_PX = 200;
+const CATEGORY_FOCUS_OFFSET_PX = 170;
 const SAFARI_SCROLL_SYNC_DEBOUNCE_MS = 60;
 
 function isSafariBrowser() {

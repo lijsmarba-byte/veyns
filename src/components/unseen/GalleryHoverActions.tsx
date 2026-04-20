@@ -188,7 +188,7 @@ export function GalleryHoverActions({
       : `${baseActionButtonClass} hover:text-ink focus-visible:text-ink`;
   const saveButtonClass = `${baseActionButtonClass} hover:text-ink focus-visible:text-ink`;
   const savePillBaseClass =
-    "relative inline-flex h-[33px] w-auto items-center overflow-visible rounded-[999px] border-[0.5px] border-[#DDDDDF] bg-[#E6E6E8] pl-[12px] pr-0 font-ui text-[13px] leading-5 tracking-[-0.03em] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]";
+    "relative inline-flex h-[33px] w-auto items-center overflow-visible rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] pl-[12px] pr-0 font-ui text-[13px] leading-5 tracking-[-0.03em] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]";
   const dropdownItemClass =
     "w-full rounded-[10px] px-[10px] py-[6px] text-left font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-accent focus-visible:outline-none";
   const archiveDeletePillClass =
@@ -277,9 +277,11 @@ export function GalleryHoverActions({
                 <span>{selectedCapsuleLabel}</span>
                 <span
                   aria-hidden="true"
-                  className="inline-block text-[11px] leading-none"
+                  className={`inline-block text-[11px] leading-none transition-transform duration-150 ${
+                    isDropdownOpen ? "rotate-180" : "rotate-0"
+                  }`}
                 >
-                  {isDropdownOpen ? "▴" : "▾"}
+                  ▾
                 </span>
               </button>
 
@@ -315,7 +317,7 @@ export function GalleryHoverActions({
 
             {isDropdownVisible ? (
               <div
-                className={`absolute left-0 ${dropdownPositionClass} z-20 min-w-full rounded-[14px] border-[0.5px] border-[#F0F0F1] bg-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-all duration-[180ms] ease-out ${
+                className={`absolute left-0 ${dropdownPositionClass} z-20 min-w-full rounded-[14px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-all duration-[180ms] ease-out ${
                   isDropdownOpen
                     ? "translate-y-0 scale-100 opacity-100"
                     : "-translate-y-[4px] scale-[0.985] opacity-0 pointer-events-none"
