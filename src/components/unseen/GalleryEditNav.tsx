@@ -16,6 +16,8 @@ const defaultTabs: EditTab[] = [
 
 type GalleryEditNavProps = {
   tabs?: EditTab[];
+  tone?: "gallery" | "archive";
+  queryKey?: string;
 };
 
 function toTitleCase(value: string) {
@@ -27,11 +29,11 @@ function toTitleCase(value: string) {
     .join(" ");
 }
 
-export function GalleryEditNav({ tabs = defaultTabs }: GalleryEditNavProps) {
+export function GalleryEditNav({ tabs = defaultTabs, tone = "gallery", queryKey = "edit" }: GalleryEditNavProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const editParam = searchParams.get("edit");
+  const editParam = searchParams.get(queryKey);
   const defaultTab = tabs[0]?.id ?? "main";
   const resolvedActiveTab = editParam && tabs.some((tab) => tab.id === editParam)
     ? editParam
@@ -40,9 +42,9 @@ export function GalleryEditNav({ tabs = defaultTabs }: GalleryEditNavProps) {
   const setActiveTab = (tabId: string) => {
     const nextParams = new URLSearchParams(searchParams.toString());
     if (tabId === defaultTab) {
-      nextParams.delete("edit");
+      nextParams.delete(queryKey);
     } else {
-      nextParams.set("edit", tabId);
+      nextParams.set(queryKey, tabId);
     }
 
     const nextQuery = nextParams.toString();
@@ -58,7 +60,9 @@ export function GalleryEditNav({ tabs = defaultTabs }: GalleryEditNavProps) {
             onClick={() => setActiveTab(tab.id)}
             className={`font-ui relative inline-flex h-10 items-center whitespace-nowrap px-0 text-[14px] leading-5 tracking-[0.28px] transition-colors ${
               resolvedActiveTab === tab.id
-                ? "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
+                ? tone === "archive"
+                  ? "font-semibold text-accent after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-accent after:content-['']"
+                  : "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
                 : "font-medium text-inactive hover:text-meta"
             }`}
           >

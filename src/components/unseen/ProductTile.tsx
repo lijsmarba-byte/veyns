@@ -261,6 +261,7 @@ export function ProductTile({
 
       <div
         ref={imageAreaRef}
+        data-product-tile-image-root="true"
         className={`relative mx-auto mt-[14px] h-[280px] w-full max-w-[210px] cursor-pointer ${
           returnImageState.hidden ? "pointer-events-none opacity-0" : "opacity-100"
         }`}

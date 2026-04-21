@@ -94,7 +94,7 @@ html[data-browser="safari"] [data-sticky-burger="true"] span {
 }
 
 html[data-browser="safari"] [data-sticky-divider="true"] {
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 0.8px rgba(0, 0, 0, 0.03);
 }
 
 html[data-browser="safari"] [data-gallery-edit-nav="true"] button::after {

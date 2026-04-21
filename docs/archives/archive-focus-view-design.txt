@@ -1,0 +1,66 @@
+Archive Focus View Design (Current Implementation)
+==================================================
+
+Scope
+- This document describes the active Archive Focus view used by route /archive/immersive.
+- Source of truth is:
+  - src/app/archive/immersive/page.tsx
+  - src/components/unseen/ImmersiveView.tsx
+  - src/components/unseen/StickyShell.tsx
+  - src/data/mockCatalog.ts
+
+Route and Entry
+- Route: src/app/archive/immersive/page.tsx
+- It resolves the active capsule from search param "capsule".
+- It reads archiveCapsuleItems[activeCapsule] and enforces a minimum of 5 items.
+- If fewer than 5 items, it redirects back to /archive (same capsule query preserved when needed).
+- It renders:
+  - ReturnScrollRestore
+  - StickyShell with mode="archive" and view="immersive"
+  - ImmersiveView with mode="archive"
+
+Data Model for Archive Focus
+- Archive capsule ids: main, capsule1, capsule2, capsule3.
+- Data source: archiveCapsuleItems in src/data/mockCatalog.ts.
+- In archive focus mode, ImmersiveView uses one continuous lane from capsule items.
+- Category selection UI is not shown for archive focus mode.
+
+Core Visual Structure
+- A fixed-height immersive section is anchored under the sticky divider area.
+- Card lane uses a 5-slot carousel model: -2, -1, 0, +1, +2.
+- Slot 0 is the focused center card.
+- Side cards remain visible for browsing rhythm; edge fades are applied at left/right boundaries.
+- The focused metadata row is centered below the card lane:
+  - Left: |itemNumber|
+  - Center: brand (archive tone uses accent color)
+  - Right: price
+
+Responsive Lane Geometry
+- Lane spacing is computed from viewport width/height and wheel footprint.
+- Layout math keeps product -> info row -> wheel vertical ordering stable.
+- If vertical space gets too tight, cards can scale down before overlap is allowed.
+- If space is still tight, archive wheel can auto-hide to prevent collisions.
+
+Interaction Model
+- Wheel/trackpad input on the lane navigates one item at a time with damping and cooldown.
+- Pointer drag on the lane uses scrub behavior while dragging and commits on release.
+- Clicking a non-focused side card moves focus one step toward that card.
+- Clicking the focused card opens /product-view with transition payloads.
+
+State Persistence and Return Behavior
+- Focus state is persisted to sessionStorage key "unseen:immersive-state" with:
+  - mode
+  - capsule
+  - category
+  - focusedTrack
+  - itemId
+- On return, state is restored when payload is fresh and compatible.
+- Return-flight keys are honored so focus image reveal and lane lock timing stay smooth.
+
+Sticky and Navigation Integration
+- StickyShell (archive mode) provides:
+  - Archive title block
+  - ArchiveCapsuleNav capsule tabs
+  - ViewToggle links (Grid / Focus / Immersive)
+- Capsule query is preserved across view transitions.
+

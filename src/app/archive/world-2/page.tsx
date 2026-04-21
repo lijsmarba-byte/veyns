@@ -37,6 +37,8 @@ export default async function ArchiveWorld2Page({ searchParams }: ArchiveWorld2P
     redirect(query ? `/archive?${query}` : "/archive");
   }
 
+  const activeItems = archiveCapsuleItems[activeCapsule];
+
   const categoryByItemId = new Map(
     sections.flatMap((section) =>
       section.items.map((item) => [
@@ -46,7 +48,7 @@ export default async function ArchiveWorld2Page({ searchParams }: ArchiveWorld2P
     ),
   );
 
-  const worldItems = archiveCapsuleItems[activeCapsule].map((item) => {
+  const worldItems = activeItems.map((item) => {
     const categoryData = categoryByItemId.get(item.id) ?? {
       categoryKey: "OUTER" as const,
       categoryLabel: "Outer",

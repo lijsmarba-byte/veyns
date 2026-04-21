@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ModePill } from "@/components/unseen/ModePill";
-import { ArchiveCapsuleNav } from "@/components/unseen/ArchiveCapsuleNav";
 import { GalleryEditNav } from "@/components/unseen/GalleryEditNav";
 import { ViewToggle } from "@/components/unseen/ViewToggle";
 import { StickyHeightSync } from "@/components/unseen/StickyHeightSync";
@@ -48,6 +47,13 @@ const profileNavTabs: ProfileNavTab[] = [
   },
 ];
 
+const archiveCapsuleTabs = [
+  { id: "main", label: "MAIN CAPSULE" },
+  { id: "capsule1", label: "CAPSULE1" },
+  { id: "capsule2", label: "CAPSULE2" },
+  { id: "capsule3", label: "CAPSULE3" },
+];
+
 const profileCardPath =
   "M4 10C4 6.68629 6.68629 4 10 4H291C294.314 4 297 6.68629 297 10V141C297 144.314 294.314 147 291 147H10C6.68629 147 4 144.314 4 141V10Z";
 
@@ -61,7 +67,7 @@ const ARCHIVE_STICKY_BACKDROP_HEIGHT_PX = 188;
 const GALLERY_STICKY_STACK_HEIGHT_PX = 203;
 const ARCHIVE_STICKY_STACK_HEIGHT_PX = 188;
 const DIVIDER_COLOR = "#ECEDEF";
-const DIVIDER_SHADOW = "0 1px 0.8px rgba(0,0,0,0.045)";
+const DIVIDER_SHADOW = "0 1px 0.6px rgba(0,0,0,0.03)";
 
 function ProfileIdCard() {
   const activeUser = mockUsers[0];
@@ -305,6 +311,11 @@ export function StickyShell({
   const stickyStackHeightPx =
     (isGallery ? GALLERY_STICKY_STACK_HEIGHT_PX : ARCHIVE_STICKY_STACK_HEIGHT_PX) - lowerNavLiftPx;
   const dividerTopPx = 187 - lowerNavLiftPx;
+  const galleryImmersiveStickyHeightPx = dividerTopPx + 1;
+  const effectiveStickyBackdropHeightPx =
+    isGallery && view === "immersive" ? galleryImmersiveStickyHeightPx : stickyBackdropHeightPx;
+  const effectiveStickyStackHeightPx =
+    isGallery && view === "immersive" ? galleryImmersiveStickyHeightPx : stickyStackHeightPx;
   const menuButtonAriaLabel = isMenuOpen ? "Close menu" : "Open menu";
   const editActionMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -375,10 +386,10 @@ export function StickyShell({
   return (
     <header data-sticky-root="true" className="sticky top-0 z-50">
       <StickyHeightSync targetId="sticky-stack" />
-      <div id="sticky-stack" className="relative w-full" style={{ height: `${stickyStackHeightPx}px` }}>
+      <div id="sticky-stack" className="relative w-full" style={{ height: `${effectiveStickyStackHeightPx}px` }}>
         <div
           className="relative w-full bg-paper/90 backdrop-blur-md after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-8 after:h-8 after:bg-[linear-gradient(180deg,rgba(254,254,253,0.34)_0%,rgba(254,254,253,0.16)_42%,rgba(254,254,253,0.05)_72%,rgba(254,254,253,0)_100%)]"
-          style={{ height: `${stickyBackdropHeightPx}px` }}
+          style={{ height: `${effectiveStickyBackdropHeightPx}px` }}
           data-node-id={isGallery ? "768:2169" : "770:2181"}
         >
           <div
@@ -470,15 +481,13 @@ export function StickyShell({
             </div>
           </div>
 
-          {isGallery ? (
-            <div className="absolute left-[41px] z-20" style={{ top: `${137 - lowerNavLiftPx}px` }}>
-              <GalleryEditNav />
-            </div>
-          ) : (
-            <div className="absolute left-0 right-0" style={{ top: `${137 - lowerNavLiftPx}px` }}>
-              <ArchiveCapsuleNav targetDividerY={dividerTopPx - (137 - lowerNavLiftPx)} />
-            </div>
-          )}
+          <div className="absolute left-[41px] z-20" style={{ top: `${137 - lowerNavLiftPx}px` }}>
+            <GalleryEditNav
+              tabs={isGallery ? undefined : archiveCapsuleTabs}
+              tone={isGallery ? "gallery" : "archive"}
+              queryKey={isGallery ? "edit" : "capsule"}
+            />
+          </div>
 
           <div className="absolute right-10 z-20" style={{ top: `${195 - lowerNavLiftPx}px` }}>
             <ViewToggle
@@ -489,9 +498,7 @@ export function StickyShell({
             />
           </div>
 
-          {isGallery ? (
-            <div aria-hidden="true" className="pointer-events-none absolute left-[41px] right-[33px] z-10" style={{ top: `${136 - lowerNavLiftPx}px`, height: "42px" }} />
-          ) : null}
+          <div aria-hidden="true" className="pointer-events-none absolute left-[41px] right-[33px] z-10" style={{ top: `${136 - lowerNavLiftPx}px`, height: "42px" }} />
 
           {isGallery ? (
             <div
@@ -550,15 +557,11 @@ export function StickyShell({
             </div>
           ) : null}
 
-          {isGallery && (
-            <>
-              <div
-                className="pointer-events-none absolute left-10 right-10 z-10 h-[1px]"
-                data-sticky-divider="true"
-                style={{ top: `${dividerTopPx}px`, backgroundColor: DIVIDER_COLOR, boxShadow: DIVIDER_SHADOW }}
-              />
-            </>
-          )}
+          <div
+            className="pointer-events-none absolute left-10 right-10 z-10 h-[1px]"
+            data-sticky-divider="true"
+            style={{ top: `${dividerTopPx}px`, backgroundColor: DIVIDER_COLOR, boxShadow: DIVIDER_SHADOW }}
+          />
         </div>
       </div>
 

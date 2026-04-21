@@ -1118,7 +1118,7 @@ export default function ProfilePage() {
             </div>
 
             <div
-              className="absolute inset-x-0 h-px bg-[#ECEDEF] shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
+              className="absolute inset-x-0 h-px bg-[#ECEDEF] shadow-[0_1px_1px_rgba(0,0,0,0.03)]"
               style={{ top: `${PROFILE_HEADER_DIVIDER_TOP_PX}px` }}
             />
           </div>

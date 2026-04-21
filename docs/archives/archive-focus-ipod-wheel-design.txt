@@ -1,0 +1,72 @@
+Archive Focus iPod Wheel Design (Current Implementation)
+========================================================
+
+Scope
+- This document covers only the archive focus clickwheel (iPod-style control).
+- Source of truth: src/components/unseen/ImmersiveView.tsx (archive mode branch).
+
+When It Appears
+- Wheel is rendered only when:
+  - mode === "archive"
+  - hideArchiveWheel is false
+- hideArchiveWheel is computed from layout lane spacing; the wheel auto-hides on tight heights.
+
+Placement and Sizing
+- Wheel container is fixed-positioned at horizontal center (left: 50dvw).
+- Bottom offset uses responsive dock metrics:
+  - wheel size grows slightly with available height
+  - bottom safe padding increases with height
+- The wheel footprint is accounted for in lane spacing calculations to avoid collisions.
+
+Visual Style
+- Outer wheel uses a radial dark gradient:
+  - brighter near top-left
+  - darker toward edges
+- Outer wheel has subtle shadow:
+  - shadow-[0_1px_2px_rgba(0,0,0,0.12)]
+- Left and right symbols are filled double-triangle glyphs.
+- Center circle is a dark disk with border and hover-state brightening/scaling.
+- Hover emphasis is zone-specific:
+  - left zone animates only left arrows
+  - right zone animates only right arrows
+  - center zone animates only center button
+
+Hit Testing and Zones
+- Wheel zone classification uses pointer angle and distance from center:
+  - center zone by radius
+  - left / right / top zones by angle ranges
+  - rest treated as ring
+- Center radius scales with wheel size (dynamic hit area).
+
+Input Behavior
+- Pointer down on wheel starts angle tracking with pointer capture.
+- Pointer move:
+  - updates hover zone feedback
+  - accumulates angular delta
+  - steps navigation when accumulated angle reaches threshold
+- Pointer up:
+  - if user rotated, ends rotation without click action
+  - if not rotated, performs click action by zone:
+    - left: previous item
+    - right: next item
+    - center: open focused product
+- Pointer cancel resets wheel drag state and hover state.
+
+Keyboard Behavior
+- Global immersive key handling supports:
+  - ArrowLeft: previous
+  - ArrowRight: next
+  - Enter: open focused product
+- During return-lock phases, navigation keys are blocked to prevent interaction conflicts.
+
+Drag-Exempt Integration
+- Wheel root carries data-immersive-drag-exempt="true".
+- This prevents the main lane drag handler from hijacking wheel interactions.
+
+Accessibility/Labels
+- Wheel root uses:
+  - role="application"
+  - tabIndex=0
+  - aria-label="Immersive clickwheel"
+- A screen-reader live region announces current category/item context for immersive state updates.
+

@@ -291,7 +291,7 @@ export function ProductViewCloseButton({
   const CLOSE_SHELL_FADE_DELAY_MS = 70;
   const isImmersiveReturn = backHref.includes("/immersive");
   const isWorld2Return = backHref.includes("/world-2");
-  const closeEndHoldMs = isImmersiveReturn ? 220 : isWorld2Return ? 170 : CLOSE_END_HOLD_MS;
+  const closeEndHoldMs = isImmersiveReturn ? 190 : isWorld2Return ? 80 : CLOSE_END_HOLD_MS;
 
   useEffect(() => {
     router.prefetch(backHref);
@@ -330,6 +330,11 @@ export function ProductViewCloseButton({
     const imageTag = imageRoot?.querySelector("img") as HTMLImageElement | null;
     const imageRect = imageRoot?.getBoundingClientRect() ?? null;
     const canUseImageReturn = Boolean(payload && imageRoot && imageRect && isRectMostlyInViewport(imageRect));
+    let closeDurationMs = CLOSE_DURATION_MS;
+    let closeSettleHoldMs = closeEndHoldMs;
+    let world2TravelRatio = 0;
+    let world2MotionIntensity = 0;
+    let closeFlightEasing = "cubic-bezier(0.22, 1, 0.36, 1)";
     let closeOverlay: HTMLDivElement | null = null;
     const returnBackdropDetail = canUseImageReturn
       ? {
@@ -391,6 +396,23 @@ export function ProductViewCloseButton({
       const scaleX = payload.width / Math.max(start.width, 1);
       const scaleY = payload.height / Math.max(start.height, 1);
       const scale = (scaleX + scaleY) * 0.5;
+      if (isWorld2Return) {
+        const travelDistancePx = Math.hypot(translateX, translateY);
+        const viewportDiagonalPx = Math.max(1, Math.hypot(window.innerWidth, window.innerHeight));
+        const travelRatio = Math.min(2.2, travelDistancePx / viewportDiagonalPx);
+        const clampedScale = Math.max(0.08, Math.min(12, scale));
+        const scaleDeltaRatio = Math.abs(Math.log(clampedScale));
+        const motionIntensity = Math.min(3.2, travelRatio * 1.1 + scaleDeltaRatio * 0.7);
+        world2TravelRatio = travelRatio;
+        world2MotionIntensity = motionIntensity;
+        closeDurationMs = Math.round(
+          Math.min(1820, Math.max(CLOSE_DURATION_MS, CLOSE_DURATION_MS + motionIntensity * 320)),
+        );
+        closeSettleHoldMs = Math.round(
+          Math.min(170, Math.max(closeEndHoldMs, closeEndHoldMs + motionIntensity * 34)),
+        );
+        closeFlightEasing = "cubic-bezier(0.2, 0.88, 0.24, 1)";
+      }
       const visibleTop = getVisibleGridTop();
 
       closeOverlay = document.createElement("div");
@@ -463,8 +485,8 @@ export function ProductViewCloseButton({
             { transform: `translate3d(${translateX}px, ${translateY}px, 0px) scale(${scale}, ${scale})` },
           ],
           {
-            duration: CLOSE_DURATION_MS,
-            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            duration: closeDurationMs,
+            easing: closeFlightEasing,
             fill: "forwards",
           },
         );
@@ -473,7 +495,7 @@ export function ProductViewCloseButton({
           () => {
             window.setTimeout(() => {
               removeCloseOverlay();
-            }, Math.max(0, closeEndHoldMs));
+            }, Math.max(0, closeSettleHoldMs));
           },
           { once: true },
         );
@@ -482,7 +504,7 @@ export function ProductViewCloseButton({
       cleanupTimerId = window.setTimeout(() => {
         motion?.cancel();
         removeCloseOverlay();
-      }, CLOSE_DURATION_MS + closeEndHoldMs + 500);
+      }, closeDurationMs + closeSettleHoldMs + 500);
     } else {
       const shell = document.querySelector('[data-pv-shell="true"]') as HTMLElement | null;
       if (shell) {
@@ -540,13 +562,16 @@ export function ProductViewCloseButton({
       if (isWorld2Return) {
         try {
           const now = Date.now();
-          const remainingFlightMs = Math.max(0, CLOSE_DURATION_MS + closeEndHoldMs - CLOSE_ROUTE_DELAY_MS);
+          const remainingFlightMs = Math.max(0, closeDurationMs + closeSettleHoldMs - CLOSE_ROUTE_DELAY_MS);
+          const world2RevealLagMs = Math.round(72 + world2MotionIntensity * 22 + world2TravelRatio * 10);
+          const world2LockTailMs = Math.round(38 + world2MotionIntensity * 24);
           window.sessionStorage.setItem(
             WORLD2_RETURN_REVEAL_KEY,
             JSON.stringify({
               at: now,
               href: backHref,
-              revealAt: now + remainingFlightMs + 120,
+              revealAt: now + remainingFlightMs + world2RevealLagMs,
+              lockUntil: now + remainingFlightMs + world2RevealLagMs + world2LockTailMs,
               fadeMs: 260,
             }),
           );
@@ -556,8 +581,8 @@ export function ProductViewCloseButton({
       }
       if (canUseImageReturn) {
         try {
-          const closeSettleMs = Math.max(0, closeEndHoldMs);
-          const hideBaseMs = CLOSE_DURATION_MS + closeSettleMs;
+          const closeSettleMs = Math.max(0, closeSettleHoldMs);
+          const hideBaseMs = closeDurationMs + closeSettleMs;
           const targetRevealLeadMs = isImmersiveReturn
             ? CLOSE_TARGET_REVEAL_LEAD_IMMERSIVE_MS
             : CLOSE_TARGET_REVEAL_LEAD_MS;

@@ -142,6 +142,7 @@ export function ProductImageRail({
   const ENTER_CROSSFADE_MS = 280;
   const railRef = useRef<HTMLDivElement | null>(null);
   const firstImageRef = useRef<HTMLDivElement | null>(null);
+  const enterTransitionActiveRef = useRef(false);
   const sectionRefs = useRef<(HTMLElement | null)[]>([]);
   const cuePillRef = useRef<HTMLSpanElement | null>(null);
   const cueTargetRef = useRef({ x: 0, y: 0 });
@@ -155,6 +156,8 @@ export function ProductImageRail({
   const cueActivationTimerRef = useRef<number | null>(null);
   const cueLastMoveRef = useRef<{ t: number; x: number; y: number }>({ t: 0, x: 0, y: 0 });
   const cueTravelDistanceRef = useRef(0);
+  const alignImageToInfoRafRef = useRef<number | null>(null);
+  const hasInitializedDesktopLiftRef = useRef(false);
   const [hasAnyFollowingImageInView, setHasAnyFollowingImageInView] = useState(false);
   const [isScrollHintDismissed, setIsScrollHintDismissed] = useState(false);
   const [railViewportBounds, setRailViewportBounds] = useState({ left: 0, width: 0 });
@@ -207,19 +210,25 @@ export function ProductImageRail({
   );
   const resolvedCues = useMemo(() => cues.filter(Boolean), [cues]);
   const cuePillToneClass = mode === "archive" || isProductSaved ? "bg-accent" : "bg-ink";
+  const cuePillBorderToneClass = mode === "archive" || isProductSaved ? "border-accent" : "border-ink";
 
   useEffect(() => {
     if (!isDesktopSplitLayout || disableMainImageTopLift) {
+      hasInitializedDesktopLiftRef.current = false;
       setMainImageTopLiftPx(0);
       return;
     }
-    setMainImageTopLiftPx(baseMainImageTopLiftPx);
+    if (!hasInitializedDesktopLiftRef.current) {
+      hasInitializedDesktopLiftRef.current = true;
+      setMainImageTopLiftPx(baseMainImageTopLiftPx);
+    }
   }, [baseMainImageTopLiftPx, disableMainImageTopLift, isDesktopSplitLayout]);
 
   useLayoutEffect(() => {
     if (!isDesktopSplitLayout || disableMainImageTopLift) return;
 
     const alignFirstImageToInfoCenter = () => {
+      if (enterTransitionActiveRef.current) return;
       const infoBlock = document.querySelector('[data-pv-info-block="true"]') as HTMLElement | null;
       const imageRoot = firstImageRef.current;
       if (!infoBlock || !imageRoot) return;
@@ -230,28 +239,43 @@ export function ProductImageRail({
       const imageCenterY = imageRect.top + imageRect.height * 0.5;
 
       setMainImageTopLiftPx((currentLift) => {
-        const desiredLift = clampNumber((imageCenterY + currentLift) - infoCenterY, 0, 260);
+        const desiredLift = Math.round(clampNumber((imageCenterY + currentLift) - infoCenterY, 0, 260));
         return Math.abs(desiredLift - currentLift) > 0.75 ? desiredLift : currentLift;
       });
     };
 
-    const raf1 = window.requestAnimationFrame(() => {
-      alignFirstImageToInfoCenter();
-      window.requestAnimationFrame(alignFirstImageToInfoCenter);
-    });
-
-    window.addEventListener("resize", alignFirstImageToInfoCenter);
-    return () => {
-      window.cancelAnimationFrame(raf1);
-      window.removeEventListener("resize", alignFirstImageToInfoCenter);
+    const scheduleAlign = () => {
+      if (alignImageToInfoRafRef.current !== null) {
+        window.cancelAnimationFrame(alignImageToInfoRafRef.current);
+      }
+      alignImageToInfoRafRef.current = window.requestAnimationFrame(() => {
+        alignImageToInfoRafRef.current = null;
+        alignFirstImageToInfoCenter();
+      });
     };
-  }, [
-    disableMainImageTopLift,
-    isDesktopSplitLayout,
-    mainImageAspectRatio,
-    mainImageTopLiftPx,
-    primaryImageMaxWidthPx,
-  ]);
+
+    scheduleAlign();
+
+    let resizeObserver: ResizeObserver | null = null;
+    const infoBlock = document.querySelector('[data-pv-info-block="true"]') as HTMLElement | null;
+    if (typeof ResizeObserver !== "undefined" && infoBlock && firstImageRef.current) {
+      resizeObserver = new ResizeObserver(scheduleAlign);
+      resizeObserver.observe(infoBlock);
+      resizeObserver.observe(firstImageRef.current);
+    }
+
+    window.addEventListener("resize", scheduleAlign);
+    window.visualViewport?.addEventListener("resize", scheduleAlign);
+    return () => {
+      if (alignImageToInfoRafRef.current !== null) {
+        window.cancelAnimationFrame(alignImageToInfoRafRef.current);
+        alignImageToInfoRafRef.current = null;
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleAlign);
+      window.visualViewport?.removeEventListener("resize", scheduleAlign);
+    };
+  }, [disableMainImageTopLift, isDesktopSplitLayout]);
 
   useEffect(() => {
     const following = sectionRefs.current.slice(1).filter(Boolean) as HTMLElement[];
@@ -626,6 +650,7 @@ export function ProductImageRail({
     const completeTransition = () => {
       if (didComplete) return;
       didComplete = true;
+      enterTransitionActiveRef.current = false;
       if (cleanupTimer !== null) {
         window.clearTimeout(cleanupTimer);
         cleanupTimer = null;
@@ -679,19 +704,11 @@ export function ProductImageRail({
             ? parsed.aspectRatio
             : image && image.naturalWidth > 0 && image.naturalHeight > 0
               ? image.naturalWidth / image.naturalHeight
-              : mainImageAspectRatio;
+              : DEFAULT_MAIN_ASPECT_RATIO;
         const fallbackLast = ratio > 0 ? getContainRect(container, ratio) : container;
-        const liveImageRect = image?.getBoundingClientRect();
-        const last =
-          liveImageRect && liveImageRect.width > 2 && liveImageRect.height > 2
-            ? {
-                left: liveImageRect.left,
-                top: liveImageRect.top,
-                width: liveImageRect.width,
-                height: liveImageRect.height,
-              }
-            : fallbackLast;
+        const last = fallbackLast;
         if (last.width < 2 || last.height < 2) return;
+        enterTransitionActiveRef.current = true;
 
         lockPageScrollForEnter();
         hasEnterScrollLock = true;
@@ -726,16 +743,19 @@ export function ProductImageRail({
         overlay.appendChild(overlayImg);
         document.body.appendChild(overlay);
 
-        // Use exact endpoint geometry to eliminate last-frame size correction at handoff.
-        const translateX = last.left - parsed.left;
-        const translateY = last.top - parsed.top;
+        // Keep enter zoom uniformly scaled to avoid aspect warping during flight.
         const scaleX = last.width / Math.max(parsed.width, 1);
         const scaleY = last.height / Math.max(parsed.height, 1);
+        const scale = Math.max(0.0001, (scaleX + scaleY) * 0.5);
+        const targetLeft = last.left + (last.width - parsed.width * scale) * 0.5;
+        const targetTop = last.top + (last.height - parsed.height * scale) * 0.5;
+        const translateX = targetLeft - parsed.left;
+        const translateY = targetTop - parsed.top;
 
         overlayMotion = overlay.animate(
           [
             { transform: "translate3d(0px, 0px, 0px) scale(1, 1)", opacity: 1 },
-            { transform: `translate3d(${translateX}px, ${translateY}px, 0px) scale(${scaleX}, ${scaleY})`, opacity: 1 },
+            { transform: `translate3d(${translateX}px, ${translateY}px, 0px) scale(${scale}, ${scale})`, opacity: 1 },
           ],
           {
             duration: ENTER_DURATION_MS,
@@ -815,6 +835,7 @@ export function ProductImageRail({
         }, ENTER_DURATION_MS + ENTER_END_HOLD_MS + ENTER_CROSSFADE_MS + 420);
       } catch {
         // Ignore malformed transition payloads.
+        enterTransitionActiveRef.current = false;
         clearStyles();
         setAreCuesEnabled(true);
       }
@@ -844,10 +865,11 @@ export function ProductImageRail({
         unlockPageScrollForEnter();
         hasEnterScrollLock = false;
       }
+      enterTransitionActiveRef.current = false;
       clearStyles();
       setAreCuesEnabled(true);
     };
-  }, [mainImageAspectRatio, productId]);
+  }, [productId]);
 
   const mainImageIntrinsicWidth = Math.max(1, Math.round(mainImageAspectRatio * 1000));
   const mainImageIntrinsicHeight = 1000;
@@ -1074,7 +1096,7 @@ export function ProductImageRail({
               >
                 <span
                   ref={cuePillRef}
-                  className={`pointer-events-none absolute left-0 top-0 z-30 inline-flex h-[29px] items-center whitespace-nowrap rounded-[999px] border border-black/25 px-[11px] shadow-[0_0_0_0.5px_rgba(17,17,17,0.22)] transition-opacity duration-180 ease-out ${cuePillToneClass} ${
+                  className={`pointer-events-none absolute left-0 top-0 z-30 inline-flex h-[29px] items-center whitespace-nowrap rounded-[999px] border px-[11px] shadow-[0_0_0_0.5px_rgba(17,17,17,0.22)] transition-opacity duration-180 ease-out ${cuePillToneClass} ${cuePillBorderToneClass} ${
                     isCueVisible && areCuesEnabled ? "opacity-100" : "opacity-0"
                   }`}
                 >
@@ -1107,11 +1129,11 @@ export function ProductImageRail({
               <div className="mt-5 flex justify-center">
                 <span
                   aria-hidden="true"
-                  className={`inline-flex text-[16px] leading-none text-meta transition-opacity duration-200 motion-safe:[animation:pv-scroll-hint-bob_1.4s_ease-in-out_infinite] ${
+                  className={`inline-flex items-center font-ui text-[13px] leading-5 tracking-[0.02em] text-meta transition-opacity duration-200 motion-safe:[animation:pv-scroll-hint-bob_1.4s_ease-in-out_infinite] ${
                     showScrollHint ? "opacity-100" : "opacity-0"
                   }`}
                 >
-                  <span className="inline-block">▾</span>
+                  <span className="inline-block leading-none">▾</span>
                 </span>
               </div>
             ) : null}

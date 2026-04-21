@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -17,7 +17,6 @@ type ImmersiveViewProps = {
 };
 
 type CategoryKey = "OUTER" | "UPPER" | "LOWER" | "SILHOUETTE" | "GROUND" | "ARTIFACTS";
-type FocusCategoryKey = CategoryKey | "ALL";
 type SlotKey = -2 | -1 | 0 | 1 | 2;
 
 type ReturnFocusPayload = {
@@ -29,7 +28,7 @@ type ReturnFocusPayload = {
 type ImmersiveStatePayload = {
   at: number;
   capsule?: ArchiveCapsuleId;
-  category: FocusCategoryKey;
+  category: CategoryKey;
   focusedTrack?: number;
   itemId: string;
   mode: "gallery" | "archive";
@@ -45,7 +44,6 @@ type CardPresentation = {
 };
 
 const CATEGORY_KEYS: CategoryKey[] = ["OUTER", "UPPER", "LOWER", "SILHOUETTE", "GROUND", "ARTIFACTS"];
-const GALLERY_CATEGORY_KEYS: FocusCategoryKey[] = ["ALL", ...CATEGORY_KEYS];
 const SLOT_ORDER: SlotKey[] = [-2, -1, 0, 1, 2];
 const RETURN_FOCUS_ITEM_KEY = "unseen:return-focus-item";
 const RETURN_FLIGHT_FINISHED_EVENT = "unseen:return-flight-finished";
@@ -54,9 +52,8 @@ const IMMERSIVE_STATE_KEY = "unseen:immersive-state";
 const DEFAULT_RETURN_REVEAL_DELAY_MS = 820;
 const DEFAULT_VIEWPORT_WIDTH = 1440;
 const DEFAULT_SECTION_HEIGHT = 760;
-const CATEGORY_NAV_CLOSE_DELAY_MS = 180;
-const CATEGORY_NAV_LABEL_SWAP_DELAY_MS = 140;
-const CATEGORY_NAV_LABEL_SYNC_SUPPRESS_MS = 260;
+const CATEGORY_MENU_OPEN_SETTLE_MS = 32;
+const CATEGORY_MENU_CLOSE_DURATION_MS = 320;
 
 const SECTION_BY_KEY = new Map(
   sections.map((section) => [section.key as CategoryKey, section]),
@@ -90,16 +87,6 @@ function normalizeWheelHoverZone(
   zone: "left" | "right" | "top" | "center" | "ring",
 ): "none" | "left" | "right" | "top" | "center" {
   return zone === "ring" ? "none" : zone;
-}
-
-function ActiveCategoryLabel({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-baseline text-ink">
-      <span className="font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">The</span>
-      <span className="-ml-[1px] font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">&ndash;</span>
-      <span className="ml-[2px] font-instrument text-[25px] italic leading-none tracking-[0.01em]">{label}</span>
-    </span>
-  );
 }
 
 function isPointerInCenteredHoverZone(
@@ -290,7 +277,7 @@ function ImmersiveProductCard({
         height: `${presentation.height}px`,
         zIndex: presentation.zIndex,
         opacity: hiddenForReturn ? 0 : presentation.opacity,
-        transform: `translate(-50%, -50%) translate3d(0px, ${presentation.translateX}px, 0px)`,
+        transform: `translate(-50%, -50%) translate3d(${presentation.translateX}px, 0px, 0px)`,
         transition: isDragging || isMotionLocked
           ? "none"
           : [
@@ -372,9 +359,8 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const focusLabelRef = useRef<HTMLParagraphElement | null>(null);
   const focusedImageRef = useRef<HTMLDivElement | null>(null);
   const categoryCloseTimerRef = useRef<number | null>(null);
+  const categoryMenuPhaseTimerRef = useRef<number | null>(null);
   const categorySettleTimerRef = useRef<number | null>(null);
-  const categoryDisplaySwapTimerRef = useRef<number | null>(null);
-  const suppressCategoryDisplaySyncUntilRef = useRef(0);
   const sectionRef = useRef<HTMLElement | null>(null);
   const rowStageRef = useRef<HTMLDivElement | null>(null);
   const rowWheelAccumulatorRef = useRef(0);
@@ -408,11 +394,10 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     lastStepAt: 0,
   });
   const didInitialStateRestoreRef = useRef(false);
+  const wasMenuOpenRef = useRef(false);
 
-  const [selectedCategory, setSelectedCategory] = useState<FocusCategoryKey>(CATEGORY_KEYS[0]);
-  const [displayCategory, setDisplayCategory] = useState<FocusCategoryKey>(CATEGORY_KEYS[0]);
-  const [renderCategory, setRenderCategory] = useState<FocusCategoryKey>(CATEGORY_KEYS[0]);
-  const [isCategoryNavExpanded, setIsCategoryNavExpanded] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<CategoryKey>(CATEGORY_KEYS[0]);
+  const [renderCategory, setRenderCategory] = useState<CategoryKey>(CATEGORY_KEYS[0]);
   const [categoryTransitionPhase, setCategoryTransitionPhase] = useState<"idle" | "out" | "in">("idle");
   const [focusedTrack, setFocusedTrack] = useState(0);
   const [motionDurationMs, setMotionDurationMs] = useState(380);
@@ -422,6 +407,8 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const [stageCenterOffsetPx, setStageCenterOffsetPx] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(DEFAULT_VIEWPORT_WIDTH);
   const [sectionHeight, setSectionHeight] = useState(DEFAULT_SECTION_HEIGHT);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [categoryMenuPhase, setCategoryMenuPhase] = useState<"closed" | "opening" | "open" | "closing">("closed");
   const [hoveredWheelZone, setHoveredWheelZone] = useState<"none" | "left" | "right" | "top" | "center">("none");
   const [returnImageState, setReturnImageState] = useState(() => {
     const returnPayload = readReturnFocusDelayPayload();
@@ -445,7 +432,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const queryString = searchParams.toString();
   const editParam = searchParams.get("edit");
   const activeCapsule = mode === "archive" ? getCapsuleFromParams(searchParams) : null;
-  const isVerticalFlow = true;
+  const hasCategoryMenu = mode === "gallery";
 
   useEffect(() => {
     dragProgressRef.current = dragProgress;
@@ -456,11 +443,11 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       if (categoryCloseTimerRef.current !== null) {
         window.clearTimeout(categoryCloseTimerRef.current);
       }
+      if (categoryMenuPhaseTimerRef.current !== null) {
+        window.clearTimeout(categoryMenuPhaseTimerRef.current);
+      }
       if (categorySettleTimerRef.current !== null) {
         window.clearTimeout(categorySettleTimerRef.current);
-      }
-      if (categoryDisplaySwapTimerRef.current !== null) {
-        window.clearTimeout(categoryDisplaySwapTimerRef.current);
       }
       if (dragProgressRafRef.current !== null) {
         cancelAnimationFrame(dragProgressRafRef.current);
@@ -472,10 +459,9 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   }, []);
 
   const itemsByCategory = useMemo(() => {
-    const bucket = GALLERY_CATEGORY_KEYS.reduce<Record<FocusCategoryKey, MockCatalogItem[]>>(
+    const bucket = CATEGORY_KEYS.reduce<Record<CategoryKey, MockCatalogItem[]>>(
       (acc, key) => ({ ...acc, [key]: [] }),
       {
-        ALL: [],
         OUTER: [],
         UPPER: [],
         LOWER: [],
@@ -490,7 +476,6 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         const key = section.key as CategoryKey;
         bucket[key] = normalizeCarouselItems(section.items);
       });
-      bucket.ALL = normalizeCarouselItems(sections.flatMap((section) => section.items));
       return bucket;
     }
 
@@ -501,24 +486,18 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     return bucket;
   }, [activeCapsule, mode]);
 
-  const categoryEntries = useMemo(() => {
-    if (mode === "gallery") {
-      return GALLERY_CATEGORY_KEYS.map((key) => ({
+  const categoryEntries = useMemo(
+    () =>
+      CATEGORY_KEYS.map((key) => ({
         key,
-        label: key === "ALL" ? "All" : (SECTION_BY_KEY.get(key)?.title ?? key),
+        label: SECTION_BY_KEY.get(key)?.title ?? key,
         items: itemsByCategory[key],
-      }));
-    }
-
-    return CATEGORY_KEYS.map((key) => ({
-      key,
-      label: SECTION_BY_KEY.get(key)?.title ?? key,
-      items: itemsByCategory[key],
-    }));
-  }, [itemsByCategory, mode]);
+      })),
+    [itemsByCategory],
+  );
 
   const firstCategoryWithItems =
-    categoryEntries.find((entry) => entry.items.length > 0)?.key ?? (mode === "gallery" ? "ALL" : CATEGORY_KEYS[0]);
+    categoryEntries.find((entry) => entry.items.length > 0)?.key ?? CATEGORY_KEYS[0];
 
   useLayoutEffect(() => {
     if (didInitialStateRestoreRef.current) return;
@@ -534,12 +513,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         const isSameMode = parsed.mode === mode;
         const isSameCapsule = mode !== "archive" || parsed.capsule === activeCapsule;
 
-        if (
-          isFresh &&
-          isSameMode &&
-          isSameCapsule &&
-          categoryEntries.some((entry) => entry.key === parsed.category)
-        ) {
+        if (isFresh && isSameMode && isSameCapsule && CATEGORY_KEYS.includes(parsed.category)) {
           const restoredCategoryItems = itemsByCategory[parsed.category];
           const hasStoredTrack = Number.isFinite(parsed.focusedTrack);
           if (hasStoredTrack && restoredCategoryItems.length > 0) {
@@ -547,7 +521,6 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
             const normalizedStoredIndex = normalizeIndex(storedTrack, restoredCategoryItems.length);
             if (restoredCategoryItems[normalizedStoredIndex]?.id === parsed.itemId) {
               setSelectedCategory(parsed.category);
-              setDisplayCategory(parsed.category);
               setRenderCategory(parsed.category);
               setFocusedTrack(storedTrack);
               restored = true;
@@ -558,7 +531,6 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
             const restoredIndex = restoredCategoryItems.findIndex((item) => item.id === parsed.itemId);
             if (restoredIndex >= 0) {
               setSelectedCategory(parsed.category);
-              setDisplayCategory(parsed.category);
               setRenderCategory(parsed.category);
               setFocusedTrack(restoredIndex);
               restored = true;
@@ -572,11 +544,10 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
 
     if (!restored) {
       setSelectedCategory(firstCategoryWithItems);
-      setDisplayCategory(firstCategoryWithItems);
       setRenderCategory(firstCategoryWithItems);
       setFocusedTrack(0);
     }
-  }, [activeCapsule, categoryEntries, firstCategoryWithItems, itemsByCategory, mode]);
+  }, [activeCapsule, firstCategoryWithItems, itemsByCategory, mode]);
 
   useEffect(() => {
     if (!returnImageState.hiddenItemId) return;
@@ -746,7 +717,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       body.style.paddingRight = prevBodyPaddingRight;
       window.scrollTo(0, lockScrollY);
     };
-  }, [mode]);
+  }, []);
 
   useLayoutEffect(() => {
     const updateViewportWidth = () => {
@@ -789,99 +760,21 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     if (renderCategoryItems.length > 0) return;
 
     setSelectedCategory(firstCategoryWithItems);
-    setDisplayCategory(firstCategoryWithItems);
     setRenderCategory(firstCategoryWithItems);
     setFocusedTrack(0);
     setCategoryTransitionPhase("idle");
   }, [firstCategoryWithItems, itemsByCategory, renderCategory]);
 
   const activeItems = itemsByCategory[renderCategory] ?? [];
-  const gallerySideFadeProgress = isVerticalFlow ? clampNumber(0, (590 - sectionHeight) / 140, 1) : 0;
-  const gallerySideOpacity = 1 - gallerySideFadeProgress * 0.65;
-  const hideGallerySideSlots = isVerticalFlow && sectionHeight < 450;
-  const hideGalleryMetaForSpace = isVerticalFlow && sectionHeight < 500;
-  const galleryMetaRowHeightPx = 22;
-  const galleryMetaGapPx = 18;
-  const galleryRowHeightPx = useMemo(() => {
-    if (!isVerticalFlow) return 0;
-    const vh = sectionHeight > 0 ? sectionHeight : DEFAULT_SECTION_HEIGHT;
-    return Math.round(clampNumber(320, vh, 900));
-  }, [isVerticalFlow, sectionHeight]);
 
   const slotPresentationByKey = useMemo(() => {
     const vw = viewportWidth > 0 ? viewportWidth : 1440;
-    const focusWidthBase = clampNumber(166, vw * 0.18, 269);
-    const focusHeightBase = clampNumber(230, vw * 0.29, 361);
-    const focusWidth = focusWidthBase;
-    const focusHeight = focusHeightBase;
+    const focusWidth = clampNumber(166, vw * 0.18, 269);
+    const focusHeight = clampNumber(230, vw * 0.29, 361);
     const sideWidth = clampNumber(110, vw * 0.12, 180);
     const sideHeight = clampNumber(163, vw * 0.19, 254);
 
-    if (isVerticalFlow) {
-      // Rotate the same immersive spacing logic to vertical axis.
-      const laneHeight = galleryRowHeightPx > 0 ? galleryRowHeightPx : 520;
-      const farTopCenter = Math.max(0, laneHeight / 2 - 2);
-      const farBottomCenter = farTopCenter;
-      const focusWidth = clampNumber(198, focusWidthBase * 1.21, 326);
-      const focusHeight = clampNumber(275, focusHeightBase * 1.21, 438);
-      const heightPressure = clampNumber(0, (620 - sectionHeight) / 220, 1);
-      const minGapPx = Math.round(30 - heightPressure * 10);
-      const laneHalfPx = Math.max(0, laneHeight / 2 - 4);
-      const maxCombinedHeight = Math.max(1, (laneHalfPx - minGapPx) * 2);
-      const combinedHeight = focusHeight + sideHeight;
-      const compactScale = clampNumber(0.58, maxCombinedHeight / Math.max(1, combinedHeight), 1);
-      const compactFocusWidth = focusWidth * compactScale;
-      const compactFocusHeight = focusHeight * compactScale;
-      const compactSideWidth = sideWidth * compactScale;
-      const compactSideHeight = sideHeight * compactScale;
-      const requiredNearCenter = (compactFocusHeight + compactSideHeight) / 2 + minGapPx;
-      const nearTopCenter = Math.max(requiredNearCenter, laneHeight * 0.58);
-
-      return {
-        [-2]: {
-          width: compactSideWidth,
-          height: compactSideHeight,
-          translateX: -farTopCenter,
-          zIndex: 10,
-          opacity: gallerySideOpacity * 0.7,
-          scale: 1,
-        },
-        [-1]: {
-          width: compactSideWidth,
-          height: compactSideHeight,
-          translateX: -nearTopCenter,
-          zIndex: 20,
-          opacity: gallerySideOpacity,
-          scale: 1,
-        },
-        [0]: {
-          width: compactFocusWidth,
-          height: compactFocusHeight,
-          translateX: 0,
-          zIndex: 40,
-          opacity: 1,
-          scale: 1,
-        },
-        [1]: {
-          width: compactSideWidth,
-          height: compactSideHeight,
-          translateX: nearTopCenter,
-          zIndex: 20,
-          opacity: gallerySideOpacity,
-          scale: 1,
-        },
-        [2]: {
-          width: compactSideWidth,
-          height: compactSideHeight,
-          translateX: farBottomCenter,
-          zIndex: 10,
-          opacity: gallerySideOpacity * 0.7,
-          scale: 1,
-        },
-      } satisfies Record<SlotKey, CardPresentation>;
-    }
-
-    // Archive keeps horizontal left/right edge anchoring.
+    // Left/right edge cards should be about half cut at the viewport boundaries.
     const edgeInsetPx = clampNumber(0, vw * 0.002, 3);
     const leftReach = clampNumber(0, vw / 2 + stageCenterOffsetPx, vw);
     const rightReach = clampNumber(0, vw / 2 - stageCenterOffsetPx, vw);
@@ -932,13 +825,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         scale: 1,
       },
     } satisfies Record<SlotKey, CardPresentation>;
-  }, [galleryRowHeightPx, gallerySideOpacity, isVerticalFlow, sectionHeight, stageCenterOffsetPx, viewportWidth]);
+  }, [stageCenterOffsetPx, viewportWidth]);
 
   const edgeFadeWidth = useMemo(() => {
     const vw = viewportWidth > 0 ? viewportWidth : 1440;
     return clampNumber(16, vw * 0.022, 34);
   }, [viewportWidth]);
-  const verticalEdgeFadeHeightPx = useMemo(() => Math.max(10, Math.round(edgeFadeWidth * 0.52)), [edgeFadeWidth]);
 
   const verticalGapPx = useMemo(() => {
     const vw = viewportWidth > 0 ? viewportWidth : 1440;
@@ -946,14 +838,11 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   }, [viewportWidth]);
 
   const baseRowTopPadPx = useMemo(() => {
-    if (isVerticalFlow) {
-      // Anchor vertical gallery lane directly under divider.
-      return 0;
-    }
     const vw = viewportWidth > 0 ? viewportWidth : 1440;
     const shrinkProgress = clampNumber(0, (1400 - vw) / 700, 1);
+    // Allow up to 80% upward shift as viewport narrows.
     return Math.round(30 - 24 * shrinkProgress);
-  }, [isVerticalFlow, viewportWidth]);
+  }, [viewportWidth]);
 
   const wheelMetrics = useMemo(() => {
     const vh = sectionHeight > 0 ? sectionHeight : 760;
@@ -967,37 +856,14 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const wheelSizePx = wheelMetrics.sizePx;
   const wheelBottomPadPx = wheelMetrics.bottomPadPx;
   const wheelDockBottomPx = wheelBottomPadPx + 24;
+  const wheelMenuTopPx = (wheelSizePx - 79) / 4;
 
-  const rowHeightPx = useMemo(() => {
-    if (isVerticalFlow) {
-      return galleryRowHeightPx;
-    }
-    return Math.max(247, Math.round(slotPresentationByKey[0].height + 48));
-  }, [galleryRowHeightPx, isVerticalFlow, slotPresentationByKey]);
+  const rowHeightPx = useMemo(
+    () => Math.max(247, Math.round(slotPresentationByKey[0].height + 48)),
+    [slotPresentationByKey],
+  );
 
   const layoutLane = useMemo(() => {
-    if (isVerticalFlow) {
-      const resolvedRowTopPadPx = baseRowTopPadPx;
-      const stageCenterPx = resolvedRowTopPadPx + rowHeightPx / 2;
-      const focusBottomPx = stageCenterPx + slotPresentationByKey[0].height / 2;
-      const nearBottomTopPx =
-        stageCenterPx + slotPresentationByKey[1].translateX - slotPresentationByKey[1].height / 2;
-      const minInfoCenterPx = focusBottomPx + 8 + galleryMetaRowHeightPx / 2;
-      const maxInfoCenterPx = nearBottomTopPx - 8 - galleryMetaRowHeightPx / 2;
-      const preferredInfoCenterPx = focusBottomPx + galleryMetaGapPx + galleryMetaRowHeightPx / 2;
-      const infoRowCenterPx =
-        maxInfoCenterPx > minInfoCenterPx
-          ? clampNumber(minInfoCenterPx, preferredInfoCenterPx, maxInfoCenterPx)
-          : minInfoCenterPx;
-
-      return {
-        cardScale: 1,
-        hideWheel: true,
-        infoRowCenterPx: Math.round(infoRowCenterPx),
-        rowTopPadPx: Math.round(resolvedRowTopPadPx),
-      };
-    }
-
     const infoRowLineHeightPx = 20; // from text leading-5
     const minGapPx = 10;
     const staticGapPx = 14;
@@ -1034,18 +900,58 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     };
   }, [
     baseRowTopPadPx,
-    galleryMetaGapPx,
-    galleryMetaRowHeightPx,
     rowHeightPx,
     sectionHeight,
     slotPresentationByKey,
     viewportWidth,
     wheelDockBottomPx,
     wheelSizePx,
-    isVerticalFlow,
   ]);
-  const hideArchiveWheel = mode === "archive" && (layoutLane.hideWheel || isVerticalFlow);
-  const dividerAlignedTopInsetCss = "var(--sticky-h)";
+
+  useEffect(() => {
+    if (!hasCategoryMenu) {
+      setIsMenuOpen(false);
+      return;
+    }
+    if (!layoutLane.hideWheel) return;
+    setIsMenuOpen(false);
+  }, [hasCategoryMenu, layoutLane.hideWheel]);
+
+  useEffect(() => {
+    if (categoryMenuPhaseTimerRef.current !== null) {
+      window.clearTimeout(categoryMenuPhaseTimerRef.current);
+      categoryMenuPhaseTimerRef.current = null;
+    }
+
+    if (!hasCategoryMenu || layoutLane.hideWheel) {
+      wasMenuOpenRef.current = false;
+      setCategoryMenuPhase("closed");
+      return;
+    }
+
+    const wasMenuOpen = wasMenuOpenRef.current;
+    wasMenuOpenRef.current = isMenuOpen;
+
+    if (isMenuOpen) {
+      setCategoryMenuPhase("opening");
+      categoryMenuPhaseTimerRef.current = window.setTimeout(() => {
+        setCategoryMenuPhase("open");
+        categoryMenuPhaseTimerRef.current = null;
+      }, CATEGORY_MENU_OPEN_SETTLE_MS);
+      return;
+    }
+
+    if (wasMenuOpen) {
+      setCategoryMenuPhase("closing");
+      categoryMenuPhaseTimerRef.current = window.setTimeout(() => {
+        setCategoryMenuPhase("closed");
+        categoryMenuPhaseTimerRef.current = null;
+      }, CATEGORY_MENU_CLOSE_DURATION_MS);
+      return;
+    }
+
+    setCategoryMenuPhase("closed");
+  }, [hasCategoryMenu, isMenuOpen, layoutLane.hideWheel]);
 
   const getInterpolatedPresentation = useCallback(
     (slot: number) => {
@@ -1259,83 +1165,48 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     [activeItems.length],
   );
 
-  const selectCategory = useCallback(
-    (category: FocusCategoryKey) => {
-      if (isReturnInteractionLocked) return;
-      if (categoryCloseTimerRef.current !== null) {
-        window.clearTimeout(categoryCloseTimerRef.current);
-        categoryCloseTimerRef.current = null;
-      }
-      if (categorySettleTimerRef.current !== null) {
-        window.clearTimeout(categorySettleTimerRef.current);
-        categorySettleTimerRef.current = null;
-      }
-      if (categoryDisplaySwapTimerRef.current !== null) {
-        window.clearTimeout(categoryDisplaySwapTimerRef.current);
-        categoryDisplaySwapTimerRef.current = null;
-      }
+  const selectCategory = useCallback((category: CategoryKey) => {
+    if (isReturnInteractionLocked) return;
+    if (categoryCloseTimerRef.current !== null) {
+      window.clearTimeout(categoryCloseTimerRef.current);
+      categoryCloseTimerRef.current = null;
+    }
+    if (categorySettleTimerRef.current !== null) {
+      window.clearTimeout(categorySettleTimerRef.current);
+      categorySettleTimerRef.current = null;
+    }
 
-      const clickFromExpandedNav = isCategoryNavExpanded && category !== selectedCategory;
-      setIsCategoryNavExpanded(false);
-
-      if (clickFromExpandedNav) {
-        suppressCategoryDisplaySyncUntilRef.current = Date.now() + CATEGORY_NAV_LABEL_SYNC_SUPPRESS_MS;
-        categoryDisplaySwapTimerRef.current = window.setTimeout(() => {
-          setDisplayCategory((prev) => (prev === category ? prev : category));
-          categoryDisplaySwapTimerRef.current = null;
-        }, CATEGORY_NAV_LABEL_SWAP_DELAY_MS);
-      } else {
-        suppressCategoryDisplaySyncUntilRef.current = 0;
-        setDisplayCategory((prev) => (prev === category ? prev : category));
-      }
-
+    if (category === renderCategory) {
       setSelectedCategory(category);
-      if (category === renderCategory) return;
+      categoryCloseTimerRef.current = window.setTimeout(() => {
+        setIsMenuOpen(false);
+        categoryCloseTimerRef.current = null;
+      }, 220);
+      return;
+    }
 
-      setCategoryTransitionPhase("out");
-      setMotionDurationMs(480);
-      setMotionEasing("cubic-bezier(0.2, 0.88, 0.28, 1)");
+    setSelectedCategory(category);
+    setCategoryTransitionPhase("out");
+    setMotionDurationMs(480);
+    setMotionEasing("cubic-bezier(0.2, 0.88, 0.28, 1)");
 
+    categorySettleTimerRef.current = window.setTimeout(() => {
+      setRenderCategory(category);
+      setFocusedTrack(0);
+      setDragProgress(0);
+      dragProgressRef.current = 0;
+      setCategoryTransitionPhase("in");
       categorySettleTimerRef.current = window.setTimeout(() => {
-        setRenderCategory(category);
-        setFocusedTrack(0);
-        setDragProgress(0);
-        dragProgressRef.current = 0;
-        setCategoryTransitionPhase("in");
-        categorySettleTimerRef.current = window.setTimeout(() => {
-          setCategoryTransitionPhase("idle");
-          categorySettleTimerRef.current = null;
-        }, 340);
-      }, 210);
-    },
-    [isCategoryNavExpanded, isReturnInteractionLocked, renderCategory, selectedCategory],
-  );
+        setCategoryTransitionPhase("idle");
+        categorySettleTimerRef.current = null;
+      }, 340);
+    }, 210);
 
-  const openCategoryNav = useCallback(() => {
-    if (mode !== "gallery") return;
-    if (categoryCloseTimerRef.current !== null) {
-      window.clearTimeout(categoryCloseTimerRef.current);
-      categoryCloseTimerRef.current = null;
-    }
-    setIsCategoryNavExpanded(true);
-  }, [mode]);
-
-  const closeCategoryNav = useCallback(() => {
-    if (categoryCloseTimerRef.current !== null) {
-      window.clearTimeout(categoryCloseTimerRef.current);
-    }
     categoryCloseTimerRef.current = window.setTimeout(() => {
-      setIsCategoryNavExpanded(false);
+      setIsMenuOpen(false);
       categoryCloseTimerRef.current = null;
-    }, CATEGORY_NAV_CLOSE_DELAY_MS);
-  }, []);
-
-  const handleCategoryNavBlurCapture = useCallback((event: FocusEvent<HTMLElement>) => {
-    const next = event.relatedTarget;
-    if (!next || !event.currentTarget.contains(next as Node)) {
-      closeCategoryNav();
-    }
-  }, [closeCategoryNav]);
+    }, 300);
+  }, [isReturnInteractionLocked, renderCategory]);
 
   const handleRowWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
@@ -1345,15 +1216,9 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
 
       const absX = Math.abs(event.deltaX);
       const absY = Math.abs(event.deltaY);
+      // Horizontal trackpad gestures should follow the same path as horizontal mouse wheel.
       const hasHorizontalIntent = absX >= 0.6 && absX >= absY * 0.55;
-      const hasVerticalIntent = absY >= 0.6 && absY >= absX * 0.55;
-      const primaryDelta = isVerticalFlow
-        ? hasVerticalIntent
-          ? event.deltaY
-          : event.deltaX
-        : hasHorizontalIntent
-          ? event.deltaX
-          : event.deltaY;
+      const primaryDelta = hasHorizontalIntent ? event.deltaX : event.deltaY;
       if (Math.abs(primaryDelta) < 1.2) return;
 
       event.preventDefault();
@@ -1397,7 +1262,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         rowWheelLastDirectionRef.current = direction;
       });
     },
-    [activeItems.length, isReturnInteractionLocked, isVerticalFlow, navigateBy],
+    [activeItems.length, isReturnInteractionLocked, navigateBy],
   );
 
   const handleRowPointerDown = useCallback(
@@ -1408,11 +1273,10 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       if (isImmersiveDragExemptTarget(event.target)) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       event.currentTarget.setPointerCapture(event.pointerId);
-      const primaryPointer = isVerticalFlow ? event.clientY : event.clientX;
 
       rowDragRef.current.active = true;
       rowDragRef.current.pointerId = event.pointerId;
-      rowDragRef.current.lastX = primaryPointer;
+      rowDragRef.current.lastX = event.clientX;
       rowDragRef.current.lastT = performance.now();
       rowDragRef.current.startAt = performance.now();
       rowDragRef.current.accumX = 0;
@@ -1426,7 +1290,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       setIsRowDragging(true);
       setDragProgress(0);
     },
-    [activeItems.length, isReturnInteractionLocked, isVerticalFlow],
+    [activeItems.length, isReturnInteractionLocked],
   );
 
   const handleRowPointerMove = useCallback(
@@ -1436,11 +1300,10 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       if (!drag.active || drag.pointerId !== event.pointerId) return;
 
       const now = performance.now();
-      const primaryPointer = isVerticalFlow ? event.clientY : event.clientX;
-      const dx = primaryPointer - drag.lastX;
+      const dx = event.clientX - drag.lastX;
       const dt = Math.max(1, now - drag.lastT);
       drag.lastVelocityX = dx / dt;
-      drag.lastX = primaryPointer;
+      drag.lastX = event.clientX;
       drag.lastT = now;
       drag.accumX += dx;
 
@@ -1473,7 +1336,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         });
       }
     },
-    [isReturnInteractionLocked, isVerticalFlow],
+    [isReturnInteractionLocked],
   );
 
   const finishRowDrag = useCallback(
@@ -1705,9 +1568,10 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       const zone = classifyWheelZone(event.clientX, event.clientY);
       if (zone === "left") navigateBy(-1, 1.5, "rapid");
       if (zone === "right") navigateBy(1, 1.5, "rapid");
+      if (hasCategoryMenu && zone === "top") setIsMenuOpen((current) => !current);
       if (zone === "center") openFocused();
     },
-    [classifyWheelZone, isReturnInteractionLocked, navigateBy, openFocused, updateHoveredWheelZone],
+    [classifyWheelZone, hasCategoryMenu, isReturnInteractionLocked, navigateBy, openFocused, updateHoveredWheelZone],
   );
 
   const handleWheelPointerCancel = useCallback(
@@ -1738,44 +1602,23 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       }
 
       if (isReturnInteractionLocked) {
-        if (
-          event.key === "ArrowLeft" ||
-          event.key === "ArrowRight" ||
-          event.key === "ArrowUp" ||
-          event.key === "ArrowDown" ||
-          event.key === "Enter"
-        ) {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "Enter") {
           event.preventDefault();
         }
         return;
       }
 
-      if (isVerticalFlow) {
-        if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          navigateBy(-1, 1.5, "rapid");
-        }
-        if (event.key === "ArrowRight") {
-          event.preventDefault();
-          navigateBy(1, 1.5, "rapid");
-        }
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          navigateBy(-1, 1.5, "rapid");
-        }
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          navigateBy(1, 1.5, "rapid");
-        }
-      } else {
-        if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          navigateBy(-1, 1.5, "rapid");
-        }
-        if (event.key === "ArrowRight") {
-          event.preventDefault();
-          navigateBy(1, 1.5, "rapid");
-        }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        navigateBy(-1, 1.5, "rapid");
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        navigateBy(1, 1.5, "rapid");
+      }
+      if (event.key === "ArrowUp" && hasCategoryMenu) {
+        event.preventDefault();
+        setIsMenuOpen((current) => !current);
       }
       if (event.key === "Enter") {
         event.preventDefault();
@@ -1787,19 +1630,14 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     return () => {
       window.removeEventListener("keydown", handleGlobalImmersiveKeyDown);
     };
-  }, [isReturnInteractionLocked, isVerticalFlow, navigateBy, openFocused]);
+  }, [hasCategoryMenu, isReturnInteractionLocked, navigateBy, openFocused]);
 
   const visibleSlots = useMemo(() => {
     if (activeItems.length === 0) return [];
 
     const integerDragShift = dragProgress >= 0 ? Math.floor(dragProgress) : Math.ceil(dragProgress);
-    const slotOrder = isVerticalFlow
-      ? hideGallerySideSlots
-        ? ([0] as const)
-        : ([-1, 0, 1] as const)
-      : SLOT_ORDER;
     const seenByItemId = new Map<string, number>();
-    return slotOrder.map((slot) => {
+    return SLOT_ORDER.map((slot) => {
       const virtualIndex = focusedTrack + slot - integerDragShift;
       const itemIndex = normalizeIndex(virtualIndex, activeItems.length);
       const item = activeItems[itemIndex];
@@ -1811,52 +1649,27 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         item,
       };
     });
-  }, [activeItems, dragProgress, focusedTrack, hideGallerySideSlots, isVerticalFlow]);
+  }, [activeItems, dragProgress, focusedTrack]);
 
   const focusedItemNumber = focusedItem ? getItemNumber(focusedItem) : "00";
   const focusedBrandClass = mode === "archive" ? "text-accent" : "text-ink";
-  const focusedMetaMaxWidthPx = isVerticalFlow ? 500 : 760;
-  const focusedMetaSideInsetPx = isVerticalFlow ? 10 : 42;
-  const focusedMetaHorizontalPaddingClass = isVerticalFlow ? "px-3 sm:px-4" : "px-6 sm:px-10";
-  const showGalleryCategoryNav = mode === "gallery";
-  const visualCategory = displayCategory || selectedCategory;
-  const activeCategoryEntry =
-    categoryEntries.find((entry) => entry.key === visualCategory) ??
-    categoryEntries.find((entry) => entry.key === selectedCategory) ??
-    categoryEntries[0];
-  const activeCategoryIndex = Math.max(
-    0,
-    categoryEntries.findIndex((entry) => entry.key === (activeCategoryEntry?.key ?? selectedCategory)),
-  );
-  const expandedRowStepPx = 38;
-  const collapsedMarkerHeightPx = 26;
-  const expandedMarkerHeightPx =
-    collapsedMarkerHeightPx + Math.max(0, categoryEntries.length - 1) * expandedRowStepPx + 20;
-  const markerLeftInsetPx = 16;
-  const markerGapPx = 16;
-  const markerWidthPx = 1.5;
-  const inactiveTextLeftPx = markerLeftInsetPx + markerGapPx + markerWidthPx;
-  const activeMarkerHeight = isCategoryNavExpanded ? expandedMarkerHeightPx : collapsedMarkerHeightPx;
-  const markerCenterOffsetPx = isCategoryNavExpanded
-    ? Math.round((((categoryEntries.length - 1) / 2) - activeCategoryIndex) * expandedRowStepPx)
-    : 0;
-  const galleryNavHasHeight = sectionHeight >= 360;
-  const hideGalleryNavForSpace = !galleryNavHasHeight || sectionHeight < 500;
-  const expandedCategoryEntries = categoryEntries
-    .map((entry, index) => ({ ...entry, index }))
-    .filter((entry) => entry.key !== activeCategoryEntry?.key);
-
+  const activeCategoryPillClass =
+    "border-[0.5px] border-[#181818] bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] font-medium text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)]";
   const wheelBackground = "radial-gradient(circle at 32% 28%, #2f2f2f 0%, #171717 54%, #0e0e0e 100%)";
-  const wheelCenterClass =
-    hoveredWheelZone === "center"
-      ? "scale-[1.04] border-[#18132F] bg-[#24204A] shadow-[inset_0_2px_0_rgba(255,255,255,0.07),0_4px_12px_rgba(10,8,24,0.3)]"
-      : "scale-100 border-[#120F25] bg-[#1A1536] shadow-[inset_0_2px_0_rgba(255,255,255,0.04)]";
+  const isCategoryMenuVisible = categoryMenuPhase !== "closed";
+  const activeCategoryMenuIndex = Math.max(
+    0,
+    categoryEntries.findIndex((entry) => entry.key === selectedCategory),
+  );
 
-  useEffect(() => {
-    if (!hideGalleryNavForSpace) return;
-    if (!isCategoryNavExpanded) return;
-    setIsCategoryNavExpanded(false);
-  }, [hideGalleryNavForSpace, isCategoryNavExpanded]);
+  const wheelCenterClass =
+    mode === "archive"
+      ? hoveredWheelZone === "center"
+        ? "scale-[1.04] border-[#18132F] bg-[#24204A] shadow-[inset_0_2px_0_rgba(255,255,255,0.07),0_4px_12px_rgba(10,8,24,0.3)]"
+        : "scale-100 border-[#120F25] bg-[#1A1536] shadow-[inset_0_2px_0_rgba(255,255,255,0.04)]"
+      : hoveredWheelZone === "center"
+        ? "scale-[1.04] border-black/90 bg-[#303030] shadow-[inset_0_2px_0_rgba(255,255,255,0.08),0_4px_12px_rgba(0,0,0,0.24)]"
+        : "scale-100 border-black/90 bg-[#1b1b1b] shadow-[inset_0_2px_0_rgba(255,255,255,0.04)]";
 
   return (
     <section
@@ -1865,15 +1678,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         isRowDragging ? "cursor-grabbing" : "cursor-grab"
       }`}
       style={{
-        height: `calc(var(--viewport-h) - ${dividerAlignedTopInsetCss})`,
-        minHeight: `calc(var(--viewport-h) - ${dividerAlignedTopInsetCss})`,
+        height: "calc(var(--viewport-h) - var(--sticky-h))",
+        minHeight: "calc(var(--viewport-h) - var(--sticky-h))",
         paddingTop: `${layoutLane.rowTopPadPx}px`,
-        paddingBottom:
-          isVerticalFlow
-            ? "0px"
-            : hideArchiveWheel
-              ? `${verticalGapPx}px`
-              : `${wheelSizePx + wheelDockBottomPx + verticalGapPx}px`,
+        paddingBottom: layoutLane.hideWheel
+          ? `${verticalGapPx}px`
+          : `${wheelSizePx + wheelDockBottomPx + verticalGapPx}px`,
       }}
       onWheel={(event) => {
         event.preventDefault();
@@ -1886,7 +1696,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         <div
           aria-hidden="true"
           className="fixed inset-x-0 bottom-0 z-[120] touch-none"
-          style={{ top: dividerAlignedTopInsetCss }}
+          style={{ top: "var(--sticky-h)" }}
           onWheel={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -1934,14 +1744,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       >
         <div
           ref={rowStageRef}
-          className={`relative ${isVerticalFlow ? "mt-0" : "mt-[8px]"} w-[calc(100dvw+6px)] max-w-none ${
-            isVerticalFlow ? "overflow-x-visible overflow-y-hidden" : "overflow-x-hidden overflow-y-visible"
-          }`}
+          className="relative mt-[8px] w-[calc(100dvw+6px)] max-w-none overflow-x-hidden overflow-y-visible"
           style={{
             height: `${rowHeightPx}px`,
             marginLeft: "calc(50% - 50dvw - 3px)",
             marginRight: "calc(50% - 50dvw - 3px)",
-            touchAction: isVerticalFlow ? "pan-y" : "pan-x",
+            touchAction: "pan-x",
             willChange: "transform",
           }}
           onPointerDown={handleRowPointerDown}
@@ -1949,13 +1757,6 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           onPointerUp={finishRowDrag}
           onPointerCancel={finishRowDrag}
           onWheel={handleRowWheel}
-          onContextMenu={(event) => {
-            if (!isVerticalFlow) return;
-            event.preventDefault();
-            if (isReturnInteractionLocked) return;
-            if (activeItems.length <= 1) return;
-            navigateBy(1, 1.45, "rapid");
-          }}
         >
           {visibleSlots.map(({ instanceKey, slot, item }) => (
             <ImmersiveProductCard
@@ -1977,226 +1778,252 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
               onFocusedRefChange={slot === 0 ? handleFocusedImageRef : undefined}
             />
           ))}
-          {isVerticalFlow ? (
-            <>
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 z-50 bg-gradient-to-b from-paper/12 via-paper/4 to-transparent"
-                style={{ height: `${verticalEdgeFadeHeightPx}px` }}
-              />
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-gradient-to-t from-paper/26 via-paper/10 to-transparent"
-                style={{ height: `${verticalEdgeFadeHeightPx}px` }}
-              />
-            </>
-          ) : (
-            <>
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-y-0 left-0 z-50 bg-gradient-to-r from-paper/26 via-paper/10 to-transparent"
-                style={{ width: `${edgeFadeWidth}px` }}
-              />
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-y-0 right-0 z-50 bg-gradient-to-l from-paper/26 via-paper/10 to-transparent"
-                style={{ width: `${edgeFadeWidth}px` }}
-              />
-            </>
-          )}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-0 z-50 bg-gradient-to-r from-paper/26 via-paper/10 to-transparent"
+            style={{ width: `${edgeFadeWidth}px` }}
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 z-50 bg-gradient-to-l from-paper/26 via-paper/10 to-transparent"
+            style={{ width: `${edgeFadeWidth}px` }}
+          />
         </div>
 
       </div>
 
       {focusedItem ? (
         <div
-          className={`pointer-events-none absolute left-1/2 w-full -translate-x-1/2 -translate-y-1/2 transition-opacity duration-200 ease-out ${focusedMetaHorizontalPaddingClass} ${
-            hideGalleryMetaForSpace ? "opacity-0" : "opacity-100"
-          }`}
-          aria-hidden={hideGalleryMetaForSpace}
-          style={{
-            top: `${layoutLane.infoRowCenterPx}px`,
-            maxWidth: `${focusedMetaMaxWidthPx}px`,
-          }}
+          className="pointer-events-none absolute left-1/2 w-full max-w-[760px] -translate-x-1/2 -translate-y-1/2 px-6 sm:px-10"
+          style={{ top: `${layoutLane.infoRowCenterPx}px` }}
         >
           <div className="grid grid-cols-[1fr_auto_1fr] items-center font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-meta">
-            <p
-              ref={focusLabelRef}
-              className="inline-flex h-[22px] items-center justify-self-end text-meta"
-              style={{ paddingRight: `${focusedMetaSideInsetPx}px` }}
-            >
+            <p ref={focusLabelRef} className="justify-self-end pr-[42px] text-meta">
               <span aria-hidden="true">|</span>
               <span className="px-[2px]">{focusedItemNumber}</span>
               <span aria-hidden="true">|</span>
             </p>
-            <p className={`inline-flex h-[22px] items-center justify-self-center text-center ${focusedBrandClass}`}>
-              {focusedItem.brand}
-            </p>
-            <p
-              className="inline-flex h-[22px] items-center justify-self-start text-meta"
-              style={{ paddingLeft: `${focusedMetaSideInsetPx}px` }}
-            >
-              {focusedItem.price}
-            </p>
+            <p className={`justify-self-center text-center ${focusedBrandClass}`}>{focusedItem.brand}</p>
+            <p className="justify-self-start pl-[42px] text-meta">{focusedItem.price}</p>
           </div>
         </div>
       ) : null}
 
-      {showGalleryCategoryNav ? (
-        <div
-          data-gallery-immersive-left-nav="true"
-          className="pointer-events-none fixed left-5 z-[95] hidden -translate-y-1/2 lg:block"
-          style={{
-            top: `calc(${dividerAlignedTopInsetCss} + (var(--viewport-h) - ${dividerAlignedTopInsetCss}) / 2 - 32px)`,
-          }}
-        >
-          <nav
-            aria-label="Immersive category navigation"
-            data-immersive-drag-exempt="true"
-            className={`-m-4 select-none p-4 transition-opacity duration-200 ease-out ${
-              hideGalleryNavForSpace ? "pointer-events-none opacity-0" : "pointer-events-auto opacity-100"
-            }`}
-            onMouseEnter={openCategoryNav}
-            onMouseLeave={closeCategoryNav}
-            onFocusCapture={openCategoryNav}
-            onBlurCapture={handleCategoryNavBlurCapture}
-          >
-            <div className="relative h-[252px] w-[246px] rounded-xl px-4 py-4">
-              {activeCategoryEntry ? (
-                <div
-                  className="pointer-events-none absolute top-1/2 z-20 -translate-y-1/2"
-                  style={{ left: `${markerLeftInsetPx}px` }}
-                >
-                  <div
-                    className="pointer-events-auto inline-flex translate-x-[2px] items-center"
-                    style={{ marginLeft: `${markerGapPx + markerWidthPx}px` }}
-                  >
-                    <button
-                      type="button"
-                      aria-expanded={isCategoryNavExpanded}
-                      onClick={() => {
-                        if (isReturnInteractionLocked) return;
-                        selectCategory(activeCategoryEntry.key);
-                      }}
-                      data-nav-active-anchor="true"
-                      className="inline-flex items-center justify-start rounded-md py-[2px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
-                    >
-                      <ActiveCategoryLabel label={activeCategoryEntry.label} />
-                    </button>
-                  </div>
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute left-0 top-1/2 block bg-ink transition-[height,transform] duration-150 ease-out"
-                    style={{
-                      width: `${markerWidthPx}px`,
-                      height: `${activeMarkerHeight}px`,
-                      transform: `translateY(calc(-50% + ${markerCenterOffsetPx}px))`,
-                    }}
-                  />
-                </div>
-              ) : null}
-
-              <ul
-                aria-hidden={!isCategoryNavExpanded}
-                className={`absolute inset-0 z-10 transition-opacity duration-200 ease-out ${
-                  isCategoryNavExpanded ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-                }`}
-              >
-                {expandedCategoryEntries.map((entry) => {
-                  const isDisabled = entry.items.length === 0;
-                  const offsetY = (entry.index - activeCategoryIndex) * expandedRowStepPx;
-
-                  return (
-                    <li
-                      key={entry.key}
-                      className="absolute top-1/2 transition-transform duration-150 ease-out"
-                      style={{
-                        left: `${inactiveTextLeftPx}px`,
-                        transform: `translateY(calc(-50% + ${offsetY}px))`,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        tabIndex={isCategoryNavExpanded ? 0 : -1}
-                        disabled={isDisabled}
-                        onClick={() => {
-                          if (isReturnInteractionLocked || isDisabled) return;
-                          selectCategory(entry.key);
-                        }}
-                        className={`inline-flex items-center justify-start text-left font-ui text-[14px] font-medium leading-5 tracking-[0.02em] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35 ${
-                          isDisabled ? "cursor-not-allowed text-inactive/80" : "text-inactive hover:text-meta"
-                        }`}
-                      >
-                        <span>{entry.label}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </nav>
-        </div>
-      ) : null}
-
-      {!hideArchiveWheel && mode === "archive" && !isVerticalFlow ? (
-        <div
-          className="fixed z-[90] flex -translate-x-1/2 flex-col items-center"
-          style={{
-            left: "50dvw",
-            bottom: `${wheelDockBottomPx}px`,
-          }}
-        >
+      {!layoutLane.hideWheel ? (
+      <div
+        className="fixed z-[90] flex -translate-x-1/2 flex-col items-center"
+        style={{
+          left: "50dvw",
+          bottom: `${wheelDockBottomPx}px`,
+        }}
+      >
+        {hasCategoryMenu && isCategoryMenuVisible ? (
           <div
-            ref={wheelRef}
-            role="application"
-            tabIndex={0}
-            aria-label="Immersive clickwheel"
-            data-immersive-drag-exempt="true"
-            className="relative cursor-default touch-none select-none rounded-full shadow-[0_1px_2px_rgba(0,0,0,0.12)] outline-none"
+            className={`absolute left-1/2 z-[92] flex w-fit max-w-[min(88vw,680px)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0 overflow-hidden rounded-[18px] border-[0.5px] border-[#E4E6EB] bg-[#F3F3F4] px-[3px] py-[3px] backdrop-blur-[6px] transition-[opacity,transform,filter,clip-path] ${
+              categoryMenuPhase === "open"
+                ? "pointer-events-auto translate-y-0 scale-100 opacity-100 blur-0"
+                : categoryMenuPhase === "opening"
+                  ? "pointer-events-none translate-y-[18px] scale-x-[0.84] scale-y-[0.72] opacity-0 blur-[8px]"
+                  : "pointer-events-none translate-y-[8px] scale-[0.985] opacity-0 blur-[2px]"
+            } relative`}
             style={{
-              width: `${wheelSizePx}px`,
-              height: `${wheelSizePx}px`,
-              background: wheelBackground,
+              bottom: `calc(100% + ${Math.max(3, wheelMetrics.menuOffsetPx - 3)}px)`,
+              transformOrigin: "center calc(100% + 14px)",
+              transitionDuration:
+                categoryMenuPhase === "closing" ? `${CATEGORY_MENU_CLOSE_DURATION_MS}ms` : "560ms",
+              transitionTimingFunction:
+                categoryMenuPhase === "closing"
+                  ? "cubic-bezier(0.16, 0.82, 0.22, 1)"
+                  : "cubic-bezier(0.2, 0.88, 0.28, 1)",
+              clipPath:
+                categoryMenuPhase === "open"
+                  ? "inset(0% 0% 0% 0% round 18px)"
+                  : categoryMenuPhase === "opening"
+                    ? "inset(26% 4% 0% 4% round 16px)"
+                    : "inset(18% 3% 0% 3% round 16px)",
+              boxShadow: `
+                0 0.5px 1px rgba(0, 0, 0, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.42),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.02)
+              `,
+              willChange: "transform, opacity, filter, clip-path",
             }}
-            onPointerDown={handleWheelPointerDown}
-            onPointerMove={handleWheelPointerMove}
-            onPointerUp={handleWheelPointerUp}
-            onPointerCancel={handleWheelPointerCancel}
-            onPointerLeave={() => updateHoveredWheelZone("none")}
+            data-immersive-drag-exempt="true"
+            aria-label="Immersive categories"
           >
-            <span
-              className={`pointer-events-none absolute left-[16px] top-0 bottom-0 my-auto flex h-6 items-center transition-[transform,opacity] duration-220 ease-out ${
-                hoveredWheelZone === "left" ? "scale-110 opacity-100" : "scale-100 opacity-85"
-              }`}
-            >
-              <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true" className="fill-white">
-                <polygon points="8,1 2,5 8,9" />
-                <polygon points="16,1 10,5 16,9" />
-              </svg>
-            </span>
-            <span
-              className={`pointer-events-none absolute right-[16px] top-0 bottom-0 my-auto flex h-6 items-center transition-[transform,opacity] duration-220 ease-out ${
-                hoveredWheelZone === "right" ? "scale-110 opacity-100" : "scale-100 opacity-85"
-              }`}
-            >
-              <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true" className="fill-white">
-                <polygon points="2,1 8,5 2,9" />
-                <polygon points="10,1 16,5 10,9" />
-              </svg>
-            </span>
-
-            <div
-              aria-hidden="true"
-              className={`pointer-events-none absolute inset-0 m-auto h-[55px] w-[55px] rounded-full border transition-[background-color,border-color,transform,box-shadow] duration-260 ease-out ${wheelCenterClass}`}
-            />
+            {categoryEntries.map((entry, index) => {
+              const isActive = entry.key === selectedCategory;
+              const isDisabled = entry.items.length === 0;
+              const distanceFromActive = Math.abs(index - activeCategoryMenuIndex);
+              const closeHoldMs = 0;
+              const closeShiftY = 6;
+              const closeShiftX = 0;
+              const closeScale = 0.985;
+              const pillMotionStyle =
+                categoryMenuPhase === "open"
+                  ? {
+                      opacity: 1,
+                      filter: "blur(0px)",
+                      transform: "translate3d(0, 0, 0) scale(1)",
+                      transitionDelay: "0ms",
+                      transitionDuration: "420ms",
+                      transitionTimingFunction: "cubic-bezier(0.2, 0.88, 0.28, 1)",
+                      willChange: "transform, opacity, filter",
+                    }
+                  : categoryMenuPhase === "opening"
+                    ? {
+                        opacity: 0,
+                        filter: "blur(4px)",
+                        transform: `translate3d(0, ${8 + distanceFromActive * 2}px, 0) scale(${
+                          0.9 - Math.min(0.05, distanceFromActive * 0.01)
+                        })`,
+                        transitionDelay: `${index * 22}ms`,
+                        transitionDuration: "520ms",
+                        transitionTimingFunction: "cubic-bezier(0.18, 0.92, 0.28, 1)",
+                        willChange: "transform, opacity, filter",
+                      }
+                    : {
+                        opacity: 0,
+                        filter: "blur(1px)",
+                        transform: `translate3d(${closeShiftX}px, ${closeShiftY}px, 0) scale(${closeScale})`,
+                        transitionDelay: `${closeHoldMs}ms`,
+                        transitionDuration: `${CATEGORY_MENU_CLOSE_DURATION_MS}ms`,
+                        transitionTimingFunction: "cubic-bezier(0.24, 0.82, 0.3, 1)",
+                        willChange: "transform, opacity, filter",
+                      };
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  onClick={() => {
+                    if (isReturnInteractionLocked) return;
+                    if (isDisabled) return;
+                    selectCategory(entry.key);
+                  }}
+                  disabled={isDisabled}
+                  className={`relative z-[1] h-[27px] rounded-full px-[11px] font-ui text-[10px] font-medium uppercase tracking-[0.05em] transition-[color,background-color,border-color,box-shadow,transform,opacity,filter] ${
+                    isActive
+                      ? activeCategoryPillClass
+                      : isDisabled
+                        ? "cursor-not-allowed bg-transparent text-inactive/80"
+                        : "bg-transparent text-meta hover:text-ink"
+                  }`}
+                  style={pillMotionStyle}
+                  aria-current={isActive ? "true" : "false"}
+                >
+                  {entry.key}
+                </button>
+              );
+            })}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+        <div
+          ref={wheelRef}
+          role="application"
+          tabIndex={0}
+          aria-label="Immersive clickwheel"
+          data-immersive-drag-exempt="true"
+          className="relative cursor-default touch-none select-none rounded-full shadow-[0_1px_2px_rgba(0,0,0,0.12)] outline-none"
+          style={{
+            width: `${wheelSizePx}px`,
+            height: `${wheelSizePx}px`,
+            background: wheelBackground,
+          }}
+          onPointerDown={handleWheelPointerDown}
+          onPointerMove={handleWheelPointerMove}
+          onPointerUp={handleWheelPointerUp}
+          onPointerCancel={handleWheelPointerCancel}
+          onPointerLeave={() => updateHoveredWheelZone("none")}
+        >
+          {hasCategoryMenu ? (
+            <button
+              type="button"
+              aria-label={isMenuOpen ? "Close categories menu" : "Open categories menu"}
+              aria-expanded={isMenuOpen}
+              className={`absolute left-1/2 flex h-[12px] min-w-[28px] -translate-x-1/2 items-center justify-center rounded-full px-2 py-[2px] font-ui text-[9px] font-medium uppercase tracking-[0.1em] text-white transition-[transform,opacity] duration-220 ease-out focus-visible:outline-none ${
+                hoveredWheelZone === "top"
+                  ? "scale-[1.09] opacity-100 -translate-y-[1px]"
+                  : "scale-100 opacity-90"
+              }`}
+              style={{ top: `${wheelMenuTopPx}px` }}
+              onMouseEnter={() => updateHoveredWheelZone("top")}
+              onFocus={() => updateHoveredWheelZone("top")}
+              onMouseLeave={() => updateHoveredWheelZone("none")}
+              onBlur={() => updateHoveredWheelZone("none")}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+              }}
+              onPointerUp={(event) => {
+                event.stopPropagation();
+              }}
+              onPointerCancel={(event) => {
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                if (isReturnInteractionLocked) return;
+                event.stopPropagation();
+                setIsMenuOpen((current) => !current);
+              }}
+            >
+              <span className="relative block h-[12px] min-w-[28px] overflow-hidden">
+                <span
+                  aria-hidden="true"
+                  className={`absolute inset-0 flex items-center justify-center transition-all duration-220 ${
+                    isMenuOpen
+                      ? "translate-y-[-10px] opacity-0"
+                      : "translate-y-0 opacity-100"
+                  }`}
+                >
+                  menu
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={`absolute inset-0 flex items-center justify-center transition-all duration-220 ${
+                    isMenuOpen
+                      ? "translate-y-0 opacity-100"
+                      : "translate-y-[10px] opacity-0"
+                  }`}
+                >
+                  <span className="relative block h-[12px] w-[15px] translate-y-px">
+                    <span className="absolute left-0 top-1/2 block h-[1.5px] w-[15px] -translate-y-1/2 rotate-45 rounded-full bg-white" />
+                    <span className="absolute left-0 top-1/2 block h-[1.5px] w-[15px] -translate-y-1/2 -rotate-45 rounded-full bg-white" />
+                  </span>
+                </span>
+              </span>
+            </button>
+          ) : null}
+          <span
+            className={`pointer-events-none absolute left-[16px] top-0 bottom-0 my-auto flex h-6 items-center transition-[transform,opacity] duration-220 ease-out ${
+              hoveredWheelZone === "left" ? "scale-110 opacity-100" : "scale-100 opacity-85"
+            }`}
+          >
+            <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true" className="fill-white">
+              <polygon points="8,1 2,5 8,9" />
+              <polygon points="16,1 10,5 16,9" />
+            </svg>
+          </span>
+          <span
+            className={`pointer-events-none absolute right-[16px] top-0 bottom-0 my-auto flex h-6 items-center transition-[transform,opacity] duration-220 ease-out ${
+              hoveredWheelZone === "right" ? "scale-110 opacity-100" : "scale-100 opacity-85"
+            }`}
+          >
+            <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true" className="fill-white">
+              <polygon points="2,1 8,5 2,9" />
+              <polygon points="10,1 16,5 10,9" />
+            </svg>
+          </span>
 
-      <p className="sr-only" aria-live="polite">
-        {renderCategory === "ALL" ? "All" : (SECTION_BY_KEY.get(renderCategory)?.title ?? renderCategory)}
-        {focusedItem ? `, item ${focusedItemNumber}` : ""}
-      </p>
+          <div
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-0 m-auto h-[55px] w-[55px] rounded-full border transition-[background-color,border-color,transform,box-shadow] duration-260 ease-out ${wheelCenterClass}`}
+          />
+        </div>
+        <p className="sr-only" aria-live="polite">
+          {SECTION_BY_KEY.get(renderCategory)?.title ?? renderCategory}
+          {focusedItem ? `, item ${focusedItemNumber}` : ""}
+        </p>
+      </div>
+      ) : null}
     </section>
   );
 }

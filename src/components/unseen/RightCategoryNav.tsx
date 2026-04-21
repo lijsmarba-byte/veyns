@@ -71,11 +71,14 @@ export function RightCategoryNav({
   sectionIdPrefix = "gallery-section-",
   className = "",
 }: RightCategoryNavProps) {
+  const navRootRef = useRef<HTMLElement | null>(null);
   const searchParams = useSearchParams();
   const [activeCategory, setActiveCategory] = useState(sectionKeys[0] ?? "");
   const [displayActiveCategory, setDisplayActiveCategory] = useState(sectionKeys[0] ?? "");
   const [isExpanded, setIsExpanded] = useState(false);
   const autoScrollTargetRef = useRef<string | null>(null);
+  const autoScrollResetTimerRef = useRef<number | null>(null);
+  const autoScrollSettleTimerRef = useRef<number | null>(null);
   const closeExpandedTimerRef = useRef<number | null>(null);
   const displaySwapTimerRef = useRef<number | null>(null);
   const suppressDisplaySyncUntilRef = useRef(0);
@@ -116,20 +119,27 @@ export function RightCategoryNav({
         if (lockedNode) {
           const hasReachedTarget = Math.abs(lockedNode.top - activationTop) <= 36;
           const canSyncDisplay = Date.now() >= suppressDisplaySyncUntilRef.current;
-          if (!hasReachedTarget) {
-            setActiveCategory((prev) => (prev === lockedKey ? prev : lockedKey));
-            if (canSyncDisplay) {
-              setDisplayActiveCategory((prev) => (prev === lockedKey ? prev : lockedKey));
-            }
-            return;
-          }
           setActiveCategory((prev) => (prev === lockedKey ? prev : lockedKey));
           if (canSyncDisplay) {
             setDisplayActiveCategory((prev) => (prev === lockedKey ? prev : lockedKey));
           }
+          if (hasReachedTarget) {
+            if (autoScrollSettleTimerRef.current === null) {
+              autoScrollSettleTimerRef.current = window.setTimeout(() => {
+                autoScrollTargetRef.current = null;
+                autoScrollSettleTimerRef.current = null;
+                if (autoScrollResetTimerRef.current !== null) {
+                  window.clearTimeout(autoScrollResetTimerRef.current);
+                  autoScrollResetTimerRef.current = null;
+                }
+              }, 220);
+            }
+          } else if (autoScrollSettleTimerRef.current !== null) {
+            window.clearTimeout(autoScrollSettleTimerRef.current);
+            autoScrollSettleTimerRef.current = null;
+          }
+          return;
         }
-        autoScrollTargetRef.current = null;
-        return;
       }
 
       let next = nodes[0].key;
@@ -188,6 +198,14 @@ export function RightCategoryNav({
     const releaseAutoScrollLock = () => {
       autoScrollTargetRef.current = null;
       suppressDisplaySyncUntilRef.current = 0;
+      if (autoScrollResetTimerRef.current !== null) {
+        window.clearTimeout(autoScrollResetTimerRef.current);
+        autoScrollResetTimerRef.current = null;
+      }
+      if (autoScrollSettleTimerRef.current !== null) {
+        window.clearTimeout(autoScrollSettleTimerRef.current);
+        autoScrollSettleTimerRef.current = null;
+      }
       if (displaySwapTimerRef.current !== null) {
         window.clearTimeout(displaySwapTimerRef.current);
         displaySwapTimerRef.current = null;
@@ -225,8 +243,49 @@ export function RightCategoryNav({
         window.clearTimeout(displaySwapTimerRef.current);
         displaySwapTimerRef.current = null;
       }
+      if (autoScrollResetTimerRef.current !== null) {
+        window.clearTimeout(autoScrollResetTimerRef.current);
+        autoScrollResetTimerRef.current = null;
+      }
+      if (autoScrollSettleTimerRef.current !== null) {
+        window.clearTimeout(autoScrollSettleTimerRef.current);
+        autoScrollSettleTimerRef.current = null;
+      }
     };
   }, [sections]);
+
+  const getNavCenterY = () => {
+    const activeAnchor = navRootRef.current?.querySelector(
+      '[data-nav-active-anchor="true"]',
+    ) as HTMLElement | null;
+    if (activeAnchor) {
+      const activeRect = activeAnchor.getBoundingClientRect();
+      return activeRect.top + activeRect.height * 0.5;
+    }
+
+    const navRect = navRootRef.current?.getBoundingClientRect();
+    return navRect ? navRect.top + navRect.height * 0.5 : window.innerHeight * 0.5;
+  };
+
+  const getSectionImageCenterY = (sectionNode: HTMLElement) => {
+    const imageRoot = sectionNode.querySelector('[data-product-tile-image-root="true"]') as HTMLElement | null;
+    if (imageRoot) {
+      const imageRect = imageRoot.getBoundingClientRect();
+      return imageRect.top + imageRect.height * 0.5;
+    }
+
+    const fallbackRect = sectionNode.getBoundingClientRect();
+    return fallbackRect.top + fallbackRect.height * 0.5;
+  };
+
+  const scrollCategoryToNavCenter = (sectionNode: HTMLElement) => {
+    const navCenterY = getNavCenterY();
+    const imageCenterY = getSectionImageCenterY(sectionNode);
+    const desiredScrollY = window.scrollY + (imageCenterY - navCenterY);
+    const maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const clampedScrollY = Math.min(maxScrollY, Math.max(0, desiredScrollY));
+    window.scrollTo({ top: clampedScrollY, behavior: "smooth" });
+  };
 
   const handleClick = (key: string, id: string) => {
     if (closeExpandedTimerRef.current !== null) {
@@ -252,10 +311,25 @@ export function RightCategoryNav({
     }
 
     autoScrollTargetRef.current = key;
+    if (autoScrollResetTimerRef.current !== null) {
+      window.clearTimeout(autoScrollResetTimerRef.current);
+    }
+    if (autoScrollSettleTimerRef.current !== null) {
+      window.clearTimeout(autoScrollSettleTimerRef.current);
+      autoScrollSettleTimerRef.current = null;
+    }
+    autoScrollResetTimerRef.current = window.setTimeout(() => {
+      autoScrollTargetRef.current = null;
+      autoScrollResetTimerRef.current = null;
+      if (autoScrollSettleTimerRef.current !== null) {
+        window.clearTimeout(autoScrollSettleTimerRef.current);
+        autoScrollSettleTimerRef.current = null;
+      }
+    }, 1800);
     setActiveCategory((prev) => (prev === key ? prev : key));
     const target = document.getElementById(id);
     if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollCategoryToNavCenter(target);
   };
 
   const handleBlurCapture = (event: FocusEvent<HTMLElement>) => {
@@ -317,11 +391,18 @@ export function RightCategoryNav({
       if (displaySwapTimerRef.current !== null) {
         window.clearTimeout(displaySwapTimerRef.current);
       }
+      if (autoScrollResetTimerRef.current !== null) {
+        window.clearTimeout(autoScrollResetTimerRef.current);
+      }
+      if (autoScrollSettleTimerRef.current !== null) {
+        window.clearTimeout(autoScrollSettleTimerRef.current);
+      }
     };
   }, []);
 
   return (
     <nav
+      ref={navRootRef}
       aria-label="Category navigation"
       aria-expanded={effectiveExpanded}
       className={`group -m-4 hidden select-none p-4 lg:block ${className}`.trim()}
@@ -345,6 +426,7 @@ export function RightCategoryNav({
                 aria-expanded={effectiveExpanded}
                 aria-controls={expandedListId}
                 onClick={() => handleClick(activeSection.key, activeSection.id)}
+                data-nav-active-anchor="true"
                 className="inline-flex items-center justify-start rounded-md py-[2px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
               >
                 <ActiveCategoryLabel label={activeSection.label} />

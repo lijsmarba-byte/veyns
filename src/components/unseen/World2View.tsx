@@ -36,6 +36,7 @@ type World2CameraStatePayload = {
 type World2ReturnRevealPayload = {
   at?: number;
   href?: string;
+  lockUntil?: number;
   revealAt?: number;
   fadeMs?: number;
 };
@@ -235,6 +236,8 @@ export function World2View({
   const [camera, setCamera] = useState<Camera>({ panX: 0, panY: 0, zoom: 1 });
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isReturnRevealReady, setIsReturnRevealReady] = useState(false);
+  const [isReturnInteractionReady, setIsReturnInteractionReady] = useState(false);
+  const isReturnInteractionLocked = !isReturnInteractionReady;
   const [returnRevealFadeMs, setReturnRevealFadeMs] = useState(220);
   const [activeCategory, setActiveCategory] = useState<World2CategoryKey | "all">("all");
   const pendingRestoreCameraRef = useRef<Camera | null>(null);
@@ -263,6 +266,7 @@ export function World2View({
   });
 
   const startAnimation = useCallback(() => {
+    if (isReturnInteractionLocked) return;
     if (frameRef.current !== null) return;
 
     const tick = () => {
@@ -333,7 +337,7 @@ export function World2View({
     };
 
     frameRef.current = window.requestAnimationFrame(tick);
-  }, []);
+  }, [isReturnInteractionLocked]);
 
   const categoryMeta = useMemo(() => {
     const map = new Map<World2CategoryKey, { count: number; label: string }>();
@@ -383,29 +387,45 @@ export function World2View({
   }, [layout.radius]);
 
   useLayoutEffect(() => {
-    let timerId: number | null = null;
-    const scheduleReady = (delayMs: number, fadeMs: number) => {
+    let revealTimerId: number | null = null;
+    let interactionTimerId: number | null = null;
+    setIsReturnRevealReady(false);
+    setIsReturnInteractionReady(false);
+
+    const scheduleReady = (revealDelayMs: number, interactionDelayMs: number, fadeMs: number) => {
       const safeFade = Math.min(480, Math.max(120, fadeMs));
       window.requestAnimationFrame(() => {
         setReturnRevealFadeMs(safeFade);
       });
-      if (delayMs <= 0) {
+
+      if (revealDelayMs <= 0) {
         window.requestAnimationFrame(() => {
           setIsReturnRevealReady(true);
         });
-        return;
+      } else {
+        revealTimerId = window.setTimeout(() => {
+          setIsReturnRevealReady(true);
+        }, revealDelayMs);
       }
-      timerId = window.setTimeout(() => {
-        setIsReturnRevealReady(true);
-      }, delayMs);
+
+      if (interactionDelayMs <= 0) {
+        window.requestAnimationFrame(() => {
+          setIsReturnInteractionReady(true);
+        });
+      } else {
+        interactionTimerId = window.setTimeout(() => {
+          setIsReturnInteractionReady(true);
+        }, interactionDelayMs);
+      }
     };
 
     try {
       const raw = window.sessionStorage.getItem(WORLD2_RETURN_REVEAL_KEY);
       if (!raw) {
-        scheduleReady(0, 220);
+        scheduleReady(0, 0, 220);
         return () => {
-          if (timerId !== null) window.clearTimeout(timerId);
+          if (revealTimerId !== null) window.clearTimeout(revealTimerId);
+          if (interactionTimerId !== null) window.clearTimeout(interactionTimerId);
         };
       }
       const parsed = JSON.parse(raw) as World2ReturnRevealPayload;
@@ -413,22 +433,23 @@ export function World2View({
       const currentPath = currentHref.split("?")[0];
       const isFresh = typeof parsed.at === "number" && Date.now() - parsed.at < 5 * 60 * 1000;
       const revealAt = typeof parsed.revealAt === "number" ? parsed.revealAt : Date.now();
-      const delayMs = Math.max(0, revealAt - Date.now());
+      const lockUntil = typeof parsed.lockUntil === "number" ? parsed.lockUntil : revealAt;
+      const revealDelayMs = Math.max(0, revealAt - Date.now());
+      const interactionDelayMs = Math.max(0, lockUntil - Date.now());
       const fadeMs = typeof parsed.fadeMs === "number" ? parsed.fadeMs : 220;
       if (!isFresh || payloadPath !== currentPath) {
-        scheduleReady(0, 220);
+        scheduleReady(0, 0, 220);
       } else {
-        scheduleReady(delayMs, fadeMs);
+        scheduleReady(revealDelayMs, interactionDelayMs, fadeMs);
       }
       window.sessionStorage.removeItem(WORLD2_RETURN_REVEAL_KEY);
     } catch {
-      scheduleReady(0, 220);
+      scheduleReady(0, 0, 220);
     }
 
     return () => {
-      if (timerId !== null) {
-        window.clearTimeout(timerId);
-      }
+      if (revealTimerId !== null) window.clearTimeout(revealTimerId);
+      if (interactionTimerId !== null) window.clearTimeout(interactionTimerId);
     };
   }, [currentHref]);
 
@@ -611,6 +632,7 @@ export function World2View({
   }, [fitToViewport, effectiveActiveCategory]);
 
   const zoomAtPoint = useCallback((clientX: number, clientY: number, factor: number) => {
+    if (isReturnInteractionLocked) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -628,21 +650,42 @@ export function World2View({
     const clampedPan = clampPanToBounds(panX, panY, zoom);
     targetCameraRef.current = { panX: clampedPan.panX, panY: clampedPan.panY, zoom };
     startAnimation();
-  }, [clampPanToBounds, startAnimation]);
+  }, [clampPanToBounds, isReturnInteractionLocked, startAnimation]);
 
   const zoomAtCenter = useCallback((factor: number) => {
+    if (isReturnInteractionLocked) return;
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
     const { centerX, centerY } = getContentViewportFrame(container);
     zoomAtPoint(rect.left + centerX, rect.top + centerY, factor);
-  }, [zoomAtPoint]);
+  }, [isReturnInteractionLocked, zoomAtPoint]);
+
+  useEffect(() => {
+    if (!isReturnInteractionLocked) return;
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    velocityRef.current = { x: 0, y: 0 };
+    draggingRef.current = false;
+    setDragging(false);
+    dragRef.current.active = false;
+    dragRef.current.captured = false;
+    dragRef.current.pointerId = null;
+    dragRef.current.moved = false;
+    targetCameraRef.current = cameraRef.current;
+  }, [isReturnInteractionLocked]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const handleWheel = (event: WheelEvent) => {
+      if (isReturnInteractionLocked) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       hasInteractedRef.current = true;
 
@@ -673,9 +716,13 @@ export function World2View({
     return () => {
       container.removeEventListener("wheel", handleWheel);
     };
-  }, [clampPanToBounds, startAnimation, zoomAtPoint]);
+  }, [clampPanToBounds, isReturnInteractionLocked, startAnimation, zoomAtPoint]);
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (isReturnInteractionLocked) {
+      event.preventDefault();
+      return;
+    }
     if (event.button !== 0) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest('[data-world2-control="true"]')) return;
@@ -692,9 +739,13 @@ export function World2View({
     velocityRef.current = { x: 0, y: 0 };
     draggingRef.current = true;
     setDragging(true);
-  }, []);
+  }, [isReturnInteractionLocked]);
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (isReturnInteractionLocked) {
+      event.preventDefault();
+      return;
+    }
     const drag = dragRef.current;
     if (!drag.active || drag.pointerId !== event.pointerId) return;
 
@@ -730,9 +781,13 @@ export function World2View({
     cameraRef.current = nextTarget;
     setCamera(nextTarget);
     velocityRef.current = { x: dx, y: dy };
-  }, [clampPanToBounds]);
+  }, [clampPanToBounds, isReturnInteractionLocked]);
 
   const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (isReturnInteractionLocked) {
+      event.preventDefault();
+      return;
+    }
     const drag = dragRef.current;
     if (drag.pointerId !== event.pointerId) return;
 
@@ -753,7 +808,7 @@ export function World2View({
     if (hadCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-  }, [startAnimation]);
+  }, [isReturnInteractionLocked, startAnimation]);
 
   useEffect(
     () => () => {
@@ -765,6 +820,7 @@ export function World2View({
   );
 
   const handleItemClick = useCallback((entry: World2RenderItem, imageNode: HTMLElement | null) => {
+    if (isReturnInteractionLocked) return;
     if (suppressClickRef.current) return;
     if (frameRef.current !== null) {
       window.cancelAnimationFrame(frameRef.current);
@@ -853,7 +909,7 @@ export function World2View({
     }
 
     router.push(productViewHref);
-  }, [backHref, buildProductViewHref, currentHref, effectiveActiveCategory, mode, router]);
+  }, [backHref, buildProductViewHref, currentHref, effectiveActiveCategory, isReturnInteractionLocked, mode, router]);
 
   const centerX = "50%";
   const centerY = "calc(var(--sticky-h) + (100% - var(--sticky-h)) / 2)";
@@ -880,6 +936,40 @@ export function World2View({
         userSelect: "none",
       }}
     >
+      {isReturnInteractionLocked ? (
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 z-[60] touch-none"
+          onWheel={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onTouchStart={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onTouchMove={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerMove={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerUp={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        />
+      ) : null}
       {showCategoryNav ? (
         <div
           data-world2-control="true"
@@ -891,6 +981,7 @@ export function World2View({
               options={navOptions}
               activeKey={effectiveActiveCategory}
               onSelect={(key) => {
+                if (isReturnInteractionLocked) return;
                 setActiveCategory(key as World2CategoryKey | "all");
                 hasInteractedRef.current = false;
               }}
@@ -948,6 +1039,7 @@ export function World2View({
           type="button"
           className="pointer-events-auto mb-2 h-8 w-8 rounded-full bg-paper/95 text-[20px] leading-none text-ink shadow-[0_1px_2px_rgba(0,0,0,0.12)]"
           onClick={(event) => {
+            if (isReturnInteractionLocked) return;
             event.stopPropagation();
             hasInteractedRef.current = true;
             zoomAtCenter(1.35);
@@ -960,6 +1052,7 @@ export function World2View({
           type="button"
           className="pointer-events-auto block h-8 w-8 rounded-full bg-paper/95 text-[20px] leading-none text-ink shadow-[0_1px_2px_rgba(0,0,0,0.12)]"
           onClick={(event) => {
+            if (isReturnInteractionLocked) return;
             event.stopPropagation();
             hasInteractedRef.current = true;
             zoomAtCenter(1 / 1.35);

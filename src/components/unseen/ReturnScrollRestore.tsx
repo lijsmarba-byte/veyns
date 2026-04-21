@@ -21,6 +21,8 @@ const RETURN_SCROLL_INTENT_KEY = "unseen:return-scroll-intent";
 const RETURN_FLIGHT_FINISHED_EVENT = "unseen:return-flight-finished";
 const RETURN_FLIGHT_FINISHED_KEY = "unseen:return-flight-finished-flag";
 const RETURN_PREV_BODY_PADDING_ATTR = "data-unseen-return-prev-pr";
+const DEFAULT_UNLOCK_FALLBACK_MS = 900;
+const IMMERSIVE_UNLOCK_FALLBACK_MS = 1350;
 
 function unlockPageScrollFromReturn() {
   if (typeof window === "undefined") return;
@@ -57,6 +59,8 @@ export function ReturnScrollRestore() {
   const currentHref = query ? `${pathname}?${query}` : pathname;
 
   useLayoutEffect(() => {
+    const isImmersiveReturnRoot = /\/(immersive|world-2)$/.test(pathname);
+    const unlockFallbackMs = isImmersiveReturnRoot ? IMMERSIVE_UNLOCK_FALLBACK_MS : DEFAULT_UNLOCK_FALLBACK_MS;
     let hasReturnLock = false;
     let hasFinishedFlag = false;
     try {
@@ -325,7 +329,7 @@ export function ReturnScrollRestore() {
       window.addEventListener(RETURN_FLIGHT_FINISHED_EVENT, handleFlightFinished as EventListener);
       unlockFallbackTimer = window.setTimeout(() => {
         handleFlightFinished();
-      }, 900);
+      }, unlockFallbackMs);
     }
 
     let rafId: number | null = null;
@@ -391,7 +395,7 @@ export function ReturnScrollRestore() {
         window.clearTimeout(unlockFallbackTimer);
       }
     };
-  }, [currentHref]);
+  }, [currentHref, pathname]);
 
   return null;
 }
