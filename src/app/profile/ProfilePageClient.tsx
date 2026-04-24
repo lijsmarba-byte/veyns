@@ -9,6 +9,7 @@ import type { MockReferenceVisual, MockTasteCluster } from "@/data/mockUsers";
 import { mockUsers } from "@/data/mockUsers";
 
 type ProfileTab = "signature" | "reference-sets" | "quiet-constraints" | "feedback" | "settings";
+type OverlaySection = "profile" | "settings" | "feedback" | "about";
 type SettingsField = "email" | "name" | "password";
 type QuietConstraintAction = "price" | "sizing";
 
@@ -57,6 +58,10 @@ function isProfileTab(value: string | null): value is ProfileTab {
     value === "feedback" ||
     value === "settings"
   );
+}
+
+function isProfileOverlayTab(value: string | null): value is "signature" | "reference-sets" | "quiet-constraints" {
+  return value === "signature" || value === "reference-sets" || value === "quiet-constraints";
 }
 
 function limitSentences(text: string, maxSentences: number): string {
@@ -143,7 +148,6 @@ function buildRecalibratedMainEditSignature(images: MockReferenceVisual[], fallb
 
 const PROFILE_HEADER_NAME_TOP_PX = 32;
 const PROFILE_HEADER_NAV_TOP_PX = 46;
-const PROFILE_HEADER_META_TOP_PX = 66;
 const PROFILE_HEADER_DIVIDER_TOP_PX = 96;
 const PROFILE_HEADER_HEIGHT_PX = 97;
 const PROFILE_HEADER_META_FOLD_BUFFER_PX = 38;
@@ -151,13 +155,34 @@ const PROFILE_HEADER_META_FOLD_BUFFER_PX = 38;
 export default function ProfilePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isEmbedded = searchParams.get("embed") === "1";
+  const rawOverlaySection = searchParams.get("overlaySection");
+  const requestedProfileTab = searchParams.get("profileTab");
+  const overlaySection: OverlaySection | null =
+    rawOverlaySection === "profile" ||
+    rawOverlaySection === "settings" ||
+    rawOverlaySection === "feedback" ||
+    rawOverlaySection === "about"
+      ? rawOverlaySection
+      : null;
   const backHref = searchParams.get("back") || "/gallery";
-  const shouldMorphCloseIcon = searchParams.get("iconMorph") === "1";
+  const shouldMorphCloseIcon = !isEmbedded && searchParams.get("iconMorph") === "1";
   const requestedTab = searchParams.get("tab");
   const requestedEditFlow = searchParams.get("editFlow");
   const startsInCreateEditFlow = requestedEditFlow === "create";
+  const embeddedInitialTab: ProfileTab =
+    overlaySection === "settings"
+      ? "settings"
+      : overlaySection === "feedback" || overlaySection === "about"
+        ? "feedback"
+        : isProfileOverlayTab(requestedProfileTab)
+          ? requestedProfileTab
+          : "signature";
+  const isCompactEmbeddedOverlay =
+    isEmbedded && (overlaySection === "settings" || overlaySection === "feedback");
   const activeUser = mockUsers[0] ?? null;
   const [activeTab, setActiveTab] = useState<ProfileTab>(() => {
+    if (isEmbedded) return embeddedInitialTab;
     if (isProfileTab(requestedTab)) return requestedTab;
     return startsInCreateEditFlow ? "reference-sets" : "signature";
   });
@@ -185,7 +210,7 @@ export default function ProfilePage() {
     email: activeUser?.email ?? "",
     name: activeUser?.name ?? "",
   }));
-  const [isSettingsEditMode, setIsSettingsEditMode] = useState(false);
+  const [isSettingsEditMode, setIsSettingsEditMode] = useState(() => isEmbedded && embeddedInitialTab === "settings");
   const [activeSettingsField, setActiveSettingsField] = useState<SettingsField | null>(null);
   const [settingsFieldDraft, setSettingsFieldDraft] = useState("");
   const [activeConstraintHint, setActiveConstraintHint] = useState<QuietConstraintAction | null>(null);
@@ -195,6 +220,15 @@ export default function ProfilePage() {
   const [referenceSets, setReferenceSets] = useState<ReferenceSet[]>(
     () => buildReferenceSets(activeUser?.referenceSetForMainEdit ?? []),
   );
+  const [isMainEditHintDismissedForAccount, setIsMainEditHintDismissedForAccount] = useState(() => {
+    if (!activeUser || typeof window === "undefined") return false;
+    const key = `unseen:main-edit-meta-dismissed:${activeUser.userId}`;
+    try {
+      return window.localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [mainEditRecalibrationCount, setMainEditRecalibrationCount] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(1440);
   const [isCloseIconMorphed, setIsCloseIconMorphed] = useState(!shouldMorphCloseIcon);
@@ -299,6 +333,44 @@ export default function ProfilePage() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (!isCompactEmbeddedOverlay) return;
+
+    let rafId = 0;
+    const syncOverflow = () => {
+      const root = document.documentElement;
+      const body = document.body;
+      const canScroll = root.scrollHeight - root.clientHeight > 1;
+      const overflowY = canScroll ? "auto" : "hidden";
+      root.style.overflowY = overflowY;
+      body.style.overflowY = overflowY;
+    };
+
+    const scheduleSync = () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(syncOverflow);
+    };
+
+    scheduleSync();
+    window.addEventListener("resize", scheduleSync);
+
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", scheduleSync);
+      document.documentElement.style.overflowY = "";
+      document.body.style.overflowY = "";
+    };
+  }, [
+    isCompactEmbeddedOverlay,
+    activeSettingsField,
+    settingsFieldDraft,
+    feedbackAnswers.clarity,
+    feedbackAnswers.quality,
+    feedbackAnswers.trust,
+    feedbackHistory.length,
+    isFeedbackHistoryOpen,
+  ]);
+
+  useEffect(() => {
     if (activeTab !== "reference-sets" || isCreateEditOpen) return;
 
     const measureWrapNeed = () => {
@@ -323,6 +395,10 @@ export default function ProfilePage() {
   }, [activeTab, isCreateEditOpen, referenceSets.length, expandedSetIds, editingSetIds]);
 
   useEffect(() => {
+    if (isEmbedded) {
+      setShouldFoldHeaderMeta(false);
+      return;
+    }
     const measureMetaFold = () => {
       if (isCompactHeaderLayout) {
         setShouldFoldHeaderMeta(true);
@@ -352,7 +428,7 @@ export default function ProfilePage() {
       resizeObserver.disconnect();
       window.removeEventListener("resize", measureMetaFold);
     };
-  }, [isCompactHeaderLayout, activeTab]);
+  }, [isCompactHeaderLayout, activeTab, isEmbedded]);
 
   const clusters = useMemo(
     () => [...(activeUser?.tasteAttributes.clusters ?? [])].sort((a, b) => clusterWeight(b) - clusterWeight(a)),
@@ -363,11 +439,12 @@ export default function ProfilePage() {
 
   if (!activeUser) return null;
 
-  const calibrationMonth = new Date(activeUser.lastCalibrationDate)
-    .toLocaleDateString("en-US", { month: "short", year: "numeric" })
-    .toUpperCase();
+  const calibrationMonth = new Date(activeUser.lastCalibrationDate).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
   const issueLabel = String(activeUser.userId + mainEditRecalibrationCount).padStart(2, "0");
-  const userIdLabel = String(activeUser.userId);
+  const userIdLabel = String(activeUser.userId).padStart(3, "0");
   const activeSignatureSourceTitle =
     mainEditRecalibrationCount > 0
       ? buildRecalibratedMainEditSignature(mainEditImages, activeUser.tasteDescription.signatureTitle)
@@ -382,12 +459,17 @@ export default function ProfilePage() {
     "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink";
   const settingsDeletePillClass =
     "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] outline-none transition-colors duration-150 hover:border-[#D94343] hover:bg-[#D94343] hover:text-paper focus:outline-none focus-visible:outline-none focus-visible:ring-0";
+  const overlayTitleClass = "font-ui text-[16px] font-medium leading-5 text-ink";
+  const formFieldTitleClass = "font-ui text-[13px] font-medium leading-5 text-ink";
+  const overlayInfoCardClass = "rounded-[6px] bg-[#F5F5F6] px-5 py-5";
+  const overlayInputClass =
+    "mt-2 h-9 w-full rounded-[4px] border border-line/80 bg-paper px-3 font-ui text-[13px] font-normal text-meta outline-none placeholder:text-meta/75";
+  const overlayReadOnlyFieldClass =
+    "mt-2 w-full rounded-[4px] border border-transparent bg-paper/65 px-3 py-2 text-left font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none transition-colors duration-150 hover:text-meta";
   const profileTabHoverPillClass =
     "pointer-events-none absolute left-1/2 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center -translate-x-[calc(50%-8px)] translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381]/55 bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-all duration-150 ease-out group-hover/tab:translate-y-0 group-hover/tab:opacity-100 group-focus-visible/tab:translate-y-0 group-focus-visible/tab:opacity-100";
   const constraintHoverPillClass =
     "pointer-events-none absolute bottom-[5px] left-full z-20 ml-[8px] inline-flex h-[29px] items-center justify-center translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381]/55 bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-all duration-150 ease-out group-hover/constraint:translate-y-0 group-hover/constraint:opacity-100 group-focus-within/constraint:translate-y-0 group-focus-within/constraint:opacity-100";
-  const mainEditHoverPillClass =
-    "pointer-events-none absolute left-0 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381]/55 bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-all duration-150 ease-out group-hover/mainedit:translate-y-0 group-hover/mainedit:opacity-100 group-focus-within/mainedit:translate-y-0 group-focus-within/mainedit:opacity-100";
   const expandTextButtonClass =
     "inline-flex items-center gap-2 whitespace-nowrap border-0 bg-transparent p-0 font-ui text-[13px] leading-5 tracking-[0.02em] text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none";
   const isShortcutCreateFlowActive = isFocusedCreateFlow && isCreateEditOpen;
@@ -395,6 +477,14 @@ export default function ProfilePage() {
     feedbackAnswers.clarity.trim().length > 0 ||
     feedbackAnswers.quality.trim().length > 0 ||
     feedbackAnswers.trust.trim().length > 0;
+  const showSignatureSection = activeTab === "signature";
+  const showReferenceSetsSection = activeTab === "reference-sets";
+  const showConstraintsSection = activeTab === "quiet-constraints";
+  const showSettingsSection = activeTab === "settings";
+  const showFeedbackSection = activeTab === "feedback";
+  const showAboutSection = showFeedbackSection && overlaySection === "about";
+  const showFeedbackFormSection = showFeedbackSection && overlaySection !== "about";
+  const hasSecondaryEdit = referenceSets.some((set) => set.id !== MAIN_EDIT_SET_ID);
   const pendingDoneSet = pendingDoneSetId ? referenceSets.find((set) => set.id === pendingDoneSetId) ?? null : null;
   const isPendingDoneMainEdit = pendingDoneSet?.id === MAIN_EDIT_SET_ID;
   const pendingRebuildSet = pendingRebuildSetId ? referenceSets.find((set) => set.id === pendingRebuildSetId) ?? null : null;
@@ -815,6 +905,15 @@ export default function ProfilePage() {
 
   const proceedCreateEdit = () => {
     if (!canProceedNewEdit) return;
+    if (!hasSecondaryEdit && activeUser) {
+      const key = `unseen:main-edit-meta-dismissed:${activeUser.userId}`;
+      setIsMainEditHintDismissedForAccount(true);
+      try {
+        window.localStorage.setItem(key, "1");
+      } catch {
+        // Ignore storage failures and keep in-memory state.
+      }
+    }
     setReferenceSets((prev) => [
       ...prev,
       {
@@ -875,9 +974,7 @@ export default function ProfilePage() {
         <div className="mt-5">
           <div className="mb-2 flex w-full justify-end">
             <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[12px] font-medium leading-5 tracking-[0.02em] text-meta">
-              <span aria-hidden="true">|</span>
-              <span className="px-[2px]">{newEditReferences.length} references</span>
-              <span aria-hidden="true">|</span>
+              <span>{newEditReferences.length} references</span>
             </span>
           </div>
           <div
@@ -967,33 +1064,35 @@ export default function ProfilePage() {
 
   return (
     <motion.main
-      className="min-h-screen bg-paper"
+      className={`relative z-[120] isolate bg-paper ${isEmbedded ? "min-h-0" : "min-h-screen"}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.22, ease: "easeOut" }}
     >
-      <button
-        type="button"
-        aria-label="Close profile"
-        onClick={handleCloseProfile}
-        className="fixed right-5 top-[30px] z-50 inline-flex h-[11px] w-[15px] items-center justify-center text-inactive transition-colors duration-150 hover:text-ink focus-visible:outline-none sm:right-10"
-      >
-        <span
-          className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
-            isCloseIconMorphed ? "translate-y-0 rotate-45" : "-translate-y-[4px] rotate-0"
-          }`}
-        />
-        <span
-          className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
-            isCloseIconMorphed ? "opacity-0" : "opacity-100"
-          }`}
-        />
-        <span
-          className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
-            isCloseIconMorphed ? "translate-y-0 -rotate-45" : "translate-y-[4px] rotate-0"
-          }`}
-        />
-      </button>
+      {!isEmbedded ? (
+        <button
+          type="button"
+          aria-label="Close profile"
+          onClick={handleCloseProfile}
+          className="fixed right-5 top-[30px] z-50 inline-flex h-[11px] w-[15px] items-center justify-center text-inactive transition-colors duration-150 hover:text-ink focus-visible:outline-none sm:right-10"
+        >
+          <span
+            className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+              isCloseIconMorphed ? "translate-y-0 rotate-45" : "-translate-y-[4px] rotate-0"
+            }`}
+          />
+          <span
+            className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+              isCloseIconMorphed ? "opacity-0" : "opacity-100"
+            }`}
+          />
+          <span
+            className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+              isCloseIconMorphed ? "translate-y-0 -rotate-45" : "translate-y-[4px] rotate-0"
+            }`}
+          />
+        </button>
+      ) : null}
 
       <input
         ref={uploadInputRef}
@@ -1004,21 +1103,23 @@ export default function ProfilePage() {
         onChange={onUpload}
       />
 
-      <section className="mx-auto w-full max-w-[1333px] px-5 pb-16 pt-[116px] sm:px-10">
-        <div
-          ref={fixedHeaderRef}
-          className="fixed inset-x-0 top-0 z-40 mx-[calc(50%-50vw)] bg-paper px-5 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-8 after:h-8 after:bg-[linear-gradient(180deg,rgba(254,254,253,0.34)_0%,rgba(254,254,253,0.16)_42%,rgba(254,254,253,0.05)_72%,rgba(254,254,253,0)_100%)] sm:px-10"
-          style={{ height: `${PROFILE_HEADER_HEIGHT_PX}px` }}
-        >
+      <section
+        className={`mx-auto w-full max-w-[1333px] px-5 sm:px-10 ${
+          isCompactEmbeddedOverlay ? "pb-0" : "pb-16"
+        } ${isEmbedded ? "pt-0" : "pt-[116px]"}`}
+      >
+        {!isEmbedded ? (
+          <div
+            ref={fixedHeaderRef}
+            className="fixed inset-x-0 top-0 z-40 mx-[calc(50%-50vw)] bg-paper px-5 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-8 after:h-8 after:bg-[linear-gradient(180deg,rgba(254,254,253,0.34)_0%,rgba(254,254,253,0.16)_42%,rgba(254,254,253,0.05)_72%,rgba(254,254,253,0)_100%)] sm:px-10"
+            style={{ height: `${PROFILE_HEADER_HEIGHT_PX}px` }}
+          >
           <div className="relative h-full w-full">
-            <div className="absolute left-0 top-0 text-left">
+            <div className="absolute left-0 text-left" style={{ top: `${PROFILE_HEADER_NAME_TOP_PX}px` }}>
               <h1
-                className="text-left font-ui text-[20px] leading-none tracking-[-0.03em] text-ink sm:text-[26px]"
+                className="m-0 text-left font-ui text-[20px] leading-none tracking-[-0.03em] text-ink sm:text-[26px]"
                 style={{
                   fontFamily: "var(--font-meta-mono), monospace",
-                  position: "absolute",
-                  top: `${PROFILE_HEADER_NAME_TOP_PX}px`,
-                  left: 0,
                   whiteSpace: "nowrap",
                 }}
               >
@@ -1027,17 +1128,14 @@ export default function ProfilePage() {
               <p
                 ref={headerMetaRef}
                 aria-hidden={shouldFoldHeaderMeta}
-                className="text-left font-ui text-[12px] leading-4 tracking-[0.02em] text-meta"
+                className="m-0 mt-[14px] text-left font-ui text-[12px] font-bold leading-4 tracking-[0.02em] text-ink sm:mt-[8px]"
                 style={{
                   fontFamily: "var(--font-meta-mono), monospace",
-                  position: "absolute",
-                  top: `${PROFILE_HEADER_META_TOP_PX}px`,
-                  left: 0,
                   whiteSpace: "nowrap",
                   visibility: shouldFoldHeaderMeta ? "hidden" : "visible",
                 }}
               >
-                ID {userIdLabel} · CALIBRATION {calibrationMonth} · ISSUE {issueLabel}
+                no. {userIdLabel} · calibrated {calibrationMonth} · Issue {issueLabel}
               </p>
             </div>
 
@@ -1122,31 +1220,79 @@ export default function ProfilePage() {
               style={{ top: `${PROFILE_HEADER_DIVIDER_TOP_PX}px` }}
             />
           </div>
-        </div>
+          </div>
+        ) : null}
 
-        {activeTab === "signature" ? (
-          <section className="mt-12">
+        {showSignatureSection ? (
+          <section className="mt-10">
             <div className="mx-auto w-full px-10">
-              <div className="mx-auto w-full max-w-[72ch]">
-                <h2 className="mb-6 inline-flex w-full items-end justify-start text-[25px] leading-none text-ink">
-                  <span className="font-ui font-normal tracking-[-0.06em]">Signature</span>
-                  <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">–</span>
-                  <span className="ml-[1px] font-instrument italic tracking-[0.01em]">{signatureTitleDisplay}</span>
-                </h2>
+              <div
+                className="mx-auto w-full max-w-[1080px] overflow-hidden rounded-[10px]"
+                style={{
+                  backgroundColor: "#F5F5F6",
+                  boxShadow: "0 10px 26px rgba(17,17,17,0.12)",
+                }}
+              >
+                <div className="grid w-full gap-0 lg:grid-cols-[0.44fr_0.56fr]">
+                  <div className="min-h-[392px] p-3 md:p-4" style={{ backgroundColor: "#F5F5F6" }}>
+                    <div className="h-full min-h-[352px] rounded-[10px] bg-ink px-7 py-7 md:px-8 md:py-8">
+                      <h2 className="mb-7 inline-flex w-full items-end justify-start text-[25px] leading-none text-paper">
+                        <span className="font-ui font-normal tracking-[-0.06em]">{activeUser.name}</span>
+                        <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">–</span>
+                        <span className="ml-[1px] font-instrument italic tracking-[0.01em]">{signatureTitleDisplay}</span>
+                      </h2>
 
-                <p className="text-justify font-ui text-[14px] font-normal leading-[1.8] text-meta">
-                  {shortSummary}
-                </p>
+                      <p className="max-w-[52ch] text-left font-ui text-[14px] font-normal leading-[1.8] text-paper">
+                        {shortSummary}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex min-h-[392px] items-center px-4 py-4 md:px-5 md:py-5" style={{ backgroundColor: "#F5F5F6" }}>
+                    <div className="mx-auto w-[82%] overflow-visible rounded-[10px]">
+                      <ProfileSignatureContourInline
+                        user={activeUser}
+                        backgroundColor="#F5F5F6"
+                        exportArtifactContent={{
+                          displayName: activeUser.name,
+                          signatureTitle: signatureTitleDisplay,
+                          narrative: shortSummary,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
 
-            <div className="mx-auto mt-24 w-full max-w-[620px]">
-              <ProfileSignatureContourInline user={activeUser} />
+              <div className="mx-auto mt-4 flex w-full max-w-[1080px] items-center justify-end gap-[10px]">
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("unseen:signature-artifact-export", { detail: { mode: "save" } }),
+                    )
+                  }
+                  className="inline-flex h-[31px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink"
+                >
+                  save
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("unseen:signature-artifact-export", { detail: { mode: "share" } }),
+                    )
+                  }
+                  className="inline-flex h-[31px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink"
+                >
+                  share
+                </button>
+              </div>
             </div>
           </section>
         ) : null}
 
-        {activeTab === "reference-sets" ? (
+        {showReferenceSetsSection ? (
           <div className="mx-[calc(50%-50vw)] px-10">
             <section>
               {isShortcutCreateFlowActive ? (
@@ -1166,6 +1312,7 @@ export default function ProfilePage() {
                 const isLastSet = setIndex === referenceSets.length - 1;
                 const isRenaming = renamingSetId === set.id;
                 const isMainEdit = set.id === MAIN_EDIT_SET_ID;
+                const shouldShowMainEditMetaHint = isMainEdit && !hasSecondaryEdit && !isMainEditHintDismissedForAccount;
                 const previewColumns = getReferencePreviewColumns(viewportWidth);
                 const previewRows = 1;
                 const previewCount = previewColumns * previewRows;
@@ -1173,9 +1320,9 @@ export default function ProfilePage() {
 
                 return (
                   <div key={set.id} className={setIndex === 0 ? "mt-12" : "mt-8"}>
-                    <div className="flex items-center justify-between gap-8">
+                    <div className={`flex justify-between gap-8 ${shouldShowMainEditMetaHint ? "items-start" : "items-center"}`}>
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className={`${isMainEdit ? "group/mainedit relative" : ""}`}>
+                        <div>
                           <h3 className="inline-flex items-baseline leading-none text-ink">
                             <span className="font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">The</span>
                             <span className="-ml-[1px] font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">
@@ -1185,18 +1332,16 @@ export default function ProfilePage() {
                               {set.name}
                             </span>
                           </h3>
-                          {isMainEdit ? (
-                            <span aria-hidden="true" className={mainEditHoverPillClass}>
+                          {shouldShowMainEditMetaHint ? (
+                            <p className="mt-2 font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
                               This is the core reference set behind the Main Edit. The personal Signature is shaped
                               from it. Additional Edits exist for distinct contexts.
-                            </span>
+                            </p>
                           ) : null}
                         </div>
                       </div>
                       <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
-                        <span aria-hidden="true">|</span>
-                        <span className="px-[2px]">{set.images.length} References</span>
-                        <span aria-hidden="true">|</span>
+                        <span>{set.images.length} References</span>
                       </span>
                     </div>
                     {!isCreateEditOpen ? (
@@ -1505,7 +1650,7 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
-        {activeTab === "reference-sets" && pendingRebuildSet ? (
+        {showReferenceSetsSection && pendingRebuildSet ? (
           <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
             <button
               type="button"
@@ -1535,7 +1680,7 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
-        {activeTab === "reference-sets" && pendingDoneSet ? (
+        {showReferenceSetsSection && pendingDoneSet ? (
           <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
             <button
               type="button"
@@ -1565,7 +1710,7 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
-        {activeTab === "reference-sets" && pendingDeleteSet && pendingDeleteSet.id !== MAIN_EDIT_SET_ID ? (
+        {showReferenceSetsSection && pendingDeleteSet && pendingDeleteSet.id !== MAIN_EDIT_SET_ID ? (
           <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
             <button
               type="button"
@@ -1594,7 +1739,7 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
-        {activeTab === "quiet-constraints" ? (
+        {showConstraintsSection ? (
           <div className="mx-[calc(50%-50vw)] px-10">
             <section className="mt-12 w-full">
               <div className="w-full space-y-5">
@@ -1654,125 +1799,135 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
-        {activeTab === "settings" ? (
-          <div className="mx-[calc(50%-50vw)] px-10">
-            <section className="mt-12 w-full">
-              <div className="grid w-full gap-8">
-                <div>
-                  {activeSettingsField === "name" ? (
-                    <>
-                      <input
-                        type="text"
-                        value={settingsFieldDraft}
-                        onChange={(event) => setSettingsFieldDraft(event.target.value)}
-                        className="mt-2 h-10 w-full border-0 bg-transparent px-0 font-ui text-[13px] font-normal text-ink outline-none placeholder:text-inactive"
-                        placeholder="name"
-                        autoFocus
-                      />
-                      <div className="mt-3 flex items-center gap-2">
-                        <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
-                          cancel
+        {showSettingsSection ? (
+          <div
+            data-compact-overlay-content={isEmbedded ? "settings" : undefined}
+            className={`mx-[calc(50%-50vw)] px-10 ${isEmbedded ? "pb-4" : ""}`}
+          >
+            <section className={`${isEmbedded ? "pt-10" : "mt-4"} w-full`}>
+              <div className="w-full space-y-4">
+                <article className={overlayInfoCardClass}>
+                  <h2 className={overlayTitleClass}>Settings</h2>
+                  <div className="mt-4 grid w-full gap-5">
+                    <div>
+                      <p className={formFieldTitleClass}>Name</p>
+                      {activeSettingsField === "name" ? (
+                        <>
+                          <input
+                            type="text"
+                            value={settingsFieldDraft}
+                            onChange={(event) => setSettingsFieldDraft(event.target.value)}
+                            className={overlayInputClass}
+                            placeholder="name"
+                            autoFocus
+                          />
+                          <div className="mt-3 flex items-center gap-2">
+                            <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
+                              cancel
+                            </button>
+                            <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
+                              save
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => beginSettingsFieldEdit("name")}
+                          className={overlayReadOnlyFieldClass}
+                        >
+                          {profileSettings.name}
                         </button>
-                        <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
-                          save
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => beginSettingsFieldEdit("name")}
-                      className="mt-2 w-full border-0 pb-2 text-left font-ui text-[13px] font-normal text-ink outline-none transition-colors duration-150 hover:text-meta"
-                    >
-                      {profileSettings.name}
-                    </button>
-                  )}
-                </div>
+                      )}
+                    </div>
 
-                <div>
-                  {activeSettingsField === "email" ? (
-                    <>
-                      <input
-                        type="email"
-                        value={settingsFieldDraft}
-                        onChange={(event) => setSettingsFieldDraft(event.target.value)}
-                        className="mt-2 h-10 w-full border-0 bg-transparent px-0 font-ui text-[13px] font-normal text-ink outline-none placeholder:text-inactive"
-                        placeholder="email"
-                        autoFocus
-                      />
-                      <div className="mt-3 flex items-center gap-2">
-                        <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
-                          cancel
+                    <div>
+                      <p className={formFieldTitleClass}>Email</p>
+                      {activeSettingsField === "email" ? (
+                        <>
+                          <input
+                            type="email"
+                            value={settingsFieldDraft}
+                            onChange={(event) => setSettingsFieldDraft(event.target.value)}
+                            className={overlayInputClass}
+                            placeholder="email"
+                            autoFocus
+                          />
+                          <div className="mt-3 flex items-center gap-2">
+                            <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
+                              cancel
+                            </button>
+                            <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
+                              save
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => beginSettingsFieldEdit("email")}
+                          className={overlayReadOnlyFieldClass}
+                        >
+                          {profileSettings.email}
                         </button>
-                        <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
-                          save
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => beginSettingsFieldEdit("email")}
-                      className="mt-2 w-full border-0 pb-2 text-left font-ui text-[13px] font-normal text-ink outline-none transition-colors duration-150 hover:text-meta"
-                    >
-                      {profileSettings.email}
-                    </button>
-                  )}
-                </div>
+                      )}
+                    </div>
 
-                <div>
-                  {activeSettingsField === "password" ? (
-                    <>
-                      <input
-                        type="password"
-                        value={settingsFieldDraft}
-                        onChange={(event) => setSettingsFieldDraft(event.target.value)}
-                        className="mt-2 h-10 w-full border-0 bg-transparent px-0 font-ui text-[13px] font-normal text-ink outline-none placeholder:text-inactive"
-                        placeholder="new password"
-                        autoFocus
-                      />
-                      <div className="mt-3 flex items-center gap-2">
-                        <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
-                          cancel
+                    <div>
+                      <p className={formFieldTitleClass}>Password</p>
+                      {activeSettingsField === "password" ? (
+                        <>
+                          <input
+                            type="password"
+                            value={settingsFieldDraft}
+                            onChange={(event) => setSettingsFieldDraft(event.target.value)}
+                            className={overlayInputClass}
+                            placeholder="new password"
+                            autoFocus
+                          />
+                          <div className="mt-3 flex items-center gap-2">
+                            <button type="button" onClick={cancelSettingsFieldEdit} className={settingsActionPillClass}>
+                              cancel
+                            </button>
+                            <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
+                              save
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => beginSettingsFieldEdit("password")}
+                          className={`${overlayReadOnlyFieldClass} tracking-[0.1em]`}
+                        >
+                          ••••••
                         </button>
-                        <button type="button" onClick={saveSettingsFieldEdit} className={settingsActionPillClass}>
-                          save
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => beginSettingsFieldEdit("password")}
-                      className="mt-2 w-full border-0 pb-2 text-left font-ui text-[13px] font-normal tracking-[0.1em] text-meta outline-none transition-colors duration-150 hover:text-[#6F7381]"
-                    >
-                      ••••••
-                    </button>
-                  )}
+                      )}
+                    </div>
+                  </div>
+                </article>
+                <div className="flex w-full items-center justify-start gap-3">
+                  <button type="button" className={settingsActionPillClass}>
+                    log out
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSettingsEditMode(false);
+                      cancelSettingsFieldEdit();
+                      setIsDeleteProfileDisclaimerOpen(true);
+                    }}
+                    className={settingsDeletePillClass}
+                  >
+                    delete profile
+                  </button>
                 </div>
-              </div>
-
-              <div className="mt-10 flex items-center gap-3">
-                <button type="button" className={settingsActionPillClass}>
-                  log out
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsSettingsEditMode(false);
-                    cancelSettingsFieldEdit();
-                    setIsDeleteProfileDisclaimerOpen(true);
-                  }}
-                  className={settingsDeletePillClass}
-                >
-                  delete profile
-                </button>
               </div>
             </section>
           </div>
         ) : null}
 
-        {activeTab === "settings" && isDeleteProfileDisclaimerOpen ? (
+        {showSettingsSection && isDeleteProfileDisclaimerOpen ? (
           <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
             <button
               type="button"
@@ -1805,131 +1960,516 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
-        {activeTab === "feedback" ? (
+        {showAboutSection ? (
           <div className="mx-[calc(50%-50vw)] px-10">
-            <section className="mt-12 w-full">
-              <div>
-                <p className="w-full font-ui text-[14px] font-normal leading-[1.8] text-meta">
-                  Your notes are anonymous and used only to improve clarity, quality, and trust in the experience.
-                  Thank you for shaping cenoir.
-                </p>
+            <section className="mt-10 w-full">
+              <div className="w-full space-y-8 [&_h2]:text-[16px] [&_h3]:text-[13px] [&_p]:text-[13px] [&_li]:text-[13px] [&_th]:text-[12px] [&_td]:text-[12px]">
+                <article className="rounded-[6px] bg-[#F5F5F6] px-6 py-6">
+                  <h2 className="font-ui text-[18px] font-medium leading-6 text-ink">Impressum</h2>
+                  <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <span className="font-medium text-ink">Operator of cenoir.co (the Service)</span>
+                    <br />
+                    J. A.
+                    <br />
+                    Sole proprietor, trading as "Cenoir"
+                    <br />
+                    Fritz-Fleiner-Weg 11
+                    <br />
+                    8044 Zurich
+                    <br />
+                    Switzerland
+                  </p>
+                  <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <span className="font-medium text-ink">Contact:</span> hello@cenoir.co
+                  </p>
+                  <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Cenoir is operated as an unincorporated sole proprietorship. The operator is personally
+                    responsible for the content of the Service.
+                  </p>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Links to third-party websites are provided for convenience. The operator has no control over their
+                    content and accepts no liability for it.
+                  </p>
+                  <p className="mt-4 font-ui text-[13px] font-normal leading-5 text-meta">Last updated: 22 April 2026</p>
+                </article>
+
+                <article className="rounded-[6px] bg-[#F5F5F6] px-6 py-6">
+                  <h2 className="font-ui text-[18px] font-medium leading-6 text-ink">Privacy Policy</h2>
+                  <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <span className="font-medium text-ink">Effective date:</span> 22 April 2026
+                    <br />
+                    <span className="font-medium text-ink">Controller:</span> J. A., sole proprietor trading as
+                    "Cenoir", Fritz-Fleiner-Weg 11, 8044 Zurich, Switzerland
+                    <br />
+                    <span className="font-medium text-ink">Contact:</span> hello@cenoir.co
+                  </p>
+                  <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    This policy explains how Cenoir - a private, invitation-only beta of a fashion-technology service
+                    - handles your personal data. It is written to meet the Swiss FADP and, where applicable, the EU
+                    GDPR.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">1. What we collect</h3>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <li>
+                      <span className="font-medium text-ink">Account:</span> your email and a password (stored only
+                      hashed). Optionally a display name.
+                    </li>
+                    <li>
+                      <span className="font-medium text-ink">Profile inputs:</span> the preferences, tags, and
+                      selections you give us while using the Service.
+                    </li>
+                    <li>
+                      <span className="font-medium text-ink">Uploaded images:</span> photos you upload as inputs to
+                      the Service.
+                    </li>
+                    <li>
+                      <span className="font-medium text-ink">Usage and technical data:</span> actions you take in the
+                      Service, device and browser info, IP address, and basic logs.
+                    </li>
+                    <li>
+                      <span className="font-medium text-ink">Communications:</span> anything you send us by email or
+                      in-product.
+                    </li>
+                  </ul>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    We use strictly necessary cookies (session, CSRF, your cookie-preference) to run the Service. We
+                    do not set analytics or marketing cookies during the private beta.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    2. Why we use it and on what basis
+                  </h3>
+                  <div className="mt-2 overflow-hidden rounded-[4px] border border-line/80">
+                    <table className="w-full border-collapse text-left font-ui text-[13px] leading-[1.7] text-meta">
+                      <thead className="bg-paper">
+                        <tr>
+                          <th className="border-b border-line/80 px-3 py-2 font-medium text-ink">Purpose</th>
+                          <th className="border-b border-line/80 px-3 py-2 font-medium text-ink">Legal basis (GDPR)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="border-b border-line/70 px-3 py-2">
+                            Running your account and the core Service
+                          </td>
+                          <td className="border-b border-line/70 px-3 py-2">
+                            Performance of a contract (Art. 6(1)(b))
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="border-b border-line/70 px-3 py-2">
+                            Processing your inputs to produce the Service's outputs
+                          </td>
+                          <td className="border-b border-line/70 px-3 py-2">
+                            Performance of a contract; consent where required for biometric or sensitive data (Art.
+                            9(2)(a))
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="border-b border-line/70 px-3 py-2">Security and abuse prevention</td>
+                          <td className="border-b border-line/70 px-3 py-2">Legitimate interest (Art. 6(1)(f))</td>
+                        </tr>
+                        <tr>
+                          <td className="border-b border-line/70 px-3 py-2">Responding to your messages</td>
+                          <td className="border-b border-line/70 px-3 py-2">
+                            Performance of a contract; legitimate interest
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2">Legal compliance (accounting, requests from authorities)</td>
+                          <td className="px-3 py-2">Legal obligation (Art. 6(1)(c))</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    We do not sell your data. We do not use it to make automated decisions with legal or similarly
+                    significant effects about you.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">3. Automated processing</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Your inputs - including uploaded images and profile signals - are processed by proprietary and
+                    third-party models to generate the Service's outputs. Where we use third-party providers, they are
+                    contractually prohibited from using your inputs to train their own foundation models. You can ask
+                    us to exclude your data from model-improvement use at any time at hello@cenoir.co.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">4. How long we keep it</h3>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <li>
+                      Account data: for the life of your account, deleted or anonymised within 30 days of account
+                      closure, except where we have a legal obligation to keep it longer (e.g. Swiss accounting
+                      retention up to 10 years).
+                    </li>
+                    <li>Uploaded content and profile inputs: until you delete them or close your account.</li>
+                    <li>Logs: up to 12 months.</li>
+                  </ul>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">5. Who sees it</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Only the operator and sub-processors acting on written instructions (hosting, email, error
+                    monitoring, inference infrastructure). A current list is available at hello@cenoir.co on request.
+                    Where sub-processors are outside Switzerland or the EEA, transfers are protected by EU Standard
+                    Contractual Clauses and the Swiss FDPIC addendum.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">6. Your rights</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    You can ask us at any time to: access your data, correct it, delete it, restrict or object to
+                    processing, port it, or withdraw consent where processing is based on consent. Email
+                    hello@cenoir.co from the address on your account.
+                  </p>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    You can also complain to the Swiss Federal Data Protection and Information Commissioner (
+                    <a
+                      href="https://www.edoeb.admin.ch"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-line/70 underline-offset-2 hover:text-ink"
+                    >
+                      edoeb.admin.ch
+                    </a>
+                    ) or, if you are in the EU, to your local supervisory authority.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    7. Security and children
+                  </h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    We use TLS, access controls, and standard security practices. No system is perfectly secure.
+                  </p>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Cenoir is not intended for children under 16. Please do not use it if you are under 16.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">8. Changes</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    If we change this policy materially, we will update the date above and notify you by email or
+                    in-product before the change takes effect.
+                  </p>
+                  <p className="mt-4 font-ui text-[13px] font-normal leading-5 text-meta">Last updated: 22 April 2026</p>
+                </article>
+
+                <article className="rounded-[6px] bg-[#F5F5F6] px-6 py-6">
+                  <h2 className="font-ui text-[18px] font-medium leading-6 text-ink">Cenoir - Private Beta Terms</h2>
+                  <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <span className="font-medium text-ink">Effective date:</span> 22 April 2026
+                    <br />
+                    <span className="font-medium text-ink">Operator:</span> J. A., sole proprietor trading as
+                    "Cenoir" ("we", "us", "the Operator").
+                    <br />
+                    <span className="font-medium text-ink">Contact:</span> hello@cenoir.co
+                  </p>
+                  <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    By accepting a Cenoir invitation, creating an account, or using Cenoir, you agree to these Beta
+                    Terms and to our Privacy Policy. If you don't agree, don't use the Service.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">1. What Cenoir is</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Cenoir is a private, invitation-only beta of a fashion-technology service. It is pre-release and
+                    experimental. Features, mechanics, and available content may change, break, or be withdrawn at any
+                    time.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">2. Eligibility</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    You may use Cenoir only if you are at least 16 years old, have legal capacity to enter into a
+                    contract, and are not barred from using the Service under applicable law.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">3. Access is personal</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Your invitation and credentials are personal to you. Don't share them. You are responsible for
+                    activity on your account. Tell us at hello@cenoir.co if you suspect unauthorised use.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    4. Visual References, and the licence you give us
+                  </h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    You may upload images and other inputs (together, "Visual References"). You keep ownership. You
+                    grant us a worldwide, non-exclusive, royalty-free, sublicensable licence to host, store, process,
+                    analyse, and display your Visual References solely to run and improve Cenoir, including by running
+                    proprietary and third-party models over them.
+                  </p>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    You confirm that:
+                  </p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <li>
+                      you have the rights to submit your Visual References and grant this licence, including for any
+                      person or work shown;
+                    </li>
+                    <li>your Visual References do not infringe any third-party right or any law.</li>
+                  </ul>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    We may remove Visual References at our discretion if we reasonably think they breach these Terms or
+                    applicable law.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">5. Outputs are advisory</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Recommendations, scores, and other outputs produced by Cenoir are probabilistic and may contain
+                    errors. They are informational only. You are solely responsible for any decision you make based on
+                    them.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    6. What you agree not to do
+                  </h3>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <li>
+                      reverse engineer or try to derive our source code or models, except as allowed by mandatory law;
+                    </li>
+                    <li>use bots, scrapers, or automated tools without our written permission;</li>
+                    <li>
+                      use Cenoir, its outputs, or data obtained from it to build or train competing products or
+                      models;
+                    </li>
+                    <li>circumvent security or access controls;</li>
+                    <li>do anything unlawful, infringing, harassing, or abusive.</li>
+                  </ul>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    7. Confidentiality of the beta
+                  </h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    The beta is non-public. Until we publicly announce a feature, please don't publish screenshots,
+                    screen recordings, or detailed descriptions of the Service's interior (UI, copy, model behaviour)
+                    or share internal roadmap information you learn through the beta. You can say you are a Cenoir
+                    beta participant.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">8. Feedback</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    If you send us feedback, bug reports, or suggestions, you grant us a perpetual, irrevocable,
+                    worldwide, royalty-free, sublicensable licence to use them in any way, without obligation to
+                    credit or compensate you.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    9. We may reset or delete beta data
+                  </h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    We may reset, export, or delete beta data at any time - for example when the beta ends or when we
+                    transition to general release. We'll try to give reasonable notice.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    10. Commissions and retailer partnerships
+                  </h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    During the private beta, Cenoir does not charge users and does not receive any commission,
+                    referral, or affiliate payment of any kind.
+                  </p>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    In the future, Cenoir may receive a commission, referral fee, or comparable transfer fee from
+                    retailers when a user acquires an item through a retailer that is part of the Cenoir network.
+                    Where this is the case:
+                  </p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    <li>the fee is paid out of the retailer's margin. It is not added on top of the price you see;</li>
+                    <li>
+                      using Cenoir does not change the price you pay the retailer compared to buying directly;
+                    </li>
+                    <li>
+                      the commercial arrangement between Cenoir and any retailer can be independently verified by a
+                      qualified third party on reasonable request.
+                    </li>
+                  </ul>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Recommendations, rankings, and outputs inside Cenoir are always generated on the basis of best fit
+                    and similarity to your profile and inputs. They are not ranked, filtered, weighted, or otherwise
+                    biased by any commercial relationship between Cenoir and any retailer.
+                  </p>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    If and when commission relationships become active, we will disclose them clearly within the
+                    Service and update these Terms accordingly.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">11. No warranties</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    To the fullest extent permitted by law, Cenoir is provided "as is" and "as available", without any
+                    warranty, express or implied. We do not warrant uninterrupted availability, accuracy, security, or
+                    fitness for any purpose.
+                  </p>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Nothing here excludes liability that cannot be excluded under mandatory Swiss or EU consumer law,
+                    nor liability for wilful misconduct or gross negligence.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    12. Limitation of liability
+                  </h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    To the maximum extent permitted by law, we are not liable for any indirect, incidental, special,
+                    or consequential damages, or for loss of profits, data, or goodwill. Our total aggregate liability
+                    for all claims in any 12-month period is capped at CHF 100. Liability for wilful misconduct, gross
+                    negligence, or personal injury is not limited.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    13. Suspension and termination
+                  </h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    We may suspend or terminate your access at any time, with or without notice, if you breach these
+                    Terms, if your use creates a legal or security risk, or if we end the beta. You can stop using the
+                    Service at any time and request deletion of your account at hello@cenoir.co.
+                  </p>
+                  <p className="mt-3 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    Sections on Visual References licence, Feedback, Confidentiality, No Warranties, and Limitation of
+                    Liability survive termination.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">14. Changes</h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    We may change these Beta Terms. Material changes will be announced by email or in-product with
+                    reasonable notice. Continued use after they take effect means you accept them.
+                  </p>
+
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                    15. Governing law and jurisdiction
+                  </h3>
+                  <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
+                    These Beta Terms are governed by Swiss law, excluding its conflict-of-law rules and the CISG. Place
+                    of jurisdiction is Zurich, Switzerland, subject to mandatory consumer-protection rules (including
+                    the right of EU/Swiss consumers to sue at their place of residence).
+                  </p>
+                  <p className="mt-4 font-ui text-[13px] font-normal leading-5 text-meta">Last updated: 22 April 2026</p>
+                </article>
               </div>
+            </section>
+          </div>
+        ) : null}
 
-              <div className="mt-8 w-full space-y-7">
-                <label className="block w-full">
-                  <div className="flex w-full items-center gap-3">
-                    <span className="font-ui text-[14px] font-medium leading-[1.8] text-ink">
-                      What worked well?
-                    </span>
-                  </div>
-                  <div className="w-full">
-                    <textarea
-                      ref={feedbackClarityRef}
-                      rows={1}
-                      value={feedbackAnswers.clarity}
-                      onChange={(event) =>
-                        handleFeedbackFieldChange("clarity", event.target.value, event.currentTarget)
-                      }
-                      onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "clarity")}
-                      className="mt-2 h-[34px] w-full resize-none overflow-hidden rounded-[4px] border-0 bg-[#FBFBFA] px-3 py-2 font-ui text-[14px] font-normal leading-[1.6] text-meta outline-none"
-                    />
-                  </div>
-                </label>
+        {showFeedbackFormSection ? (
+          <div
+            data-compact-overlay-content={isEmbedded ? "feedback" : undefined}
+            className={`mx-[calc(50%-50vw)] px-10 ${isEmbedded ? "pb-4" : ""}`}
+          >
+            <section className={`${isEmbedded ? "pt-10" : "mt-10"} w-full`}>
+              <div className="w-full space-y-4">
+                <article className={overlayInfoCardClass}>
+                  <h2 className={overlayTitleClass}>Feedback</h2>
+                  <p className="mt-3 w-full font-ui text-[13px] font-normal leading-[1.7] text-meta">
+                    Your notes are anonymous and used only to improve clarity, quality, and trust in the experience.
+                    Thank you for shaping cenoir.
+                  </p>
+                  <div className="mt-4 w-full space-y-5">
+                    <label className="block w-full">
+                      <div className="flex w-full items-center gap-3">
+                        <span className={formFieldTitleClass}>What worked well?</span>
+                      </div>
+                      <div className="w-full">
+                        <textarea
+                          ref={feedbackClarityRef}
+                          rows={1}
+                          value={feedbackAnswers.clarity}
+                          onChange={(event) =>
+                            handleFeedbackFieldChange("clarity", event.target.value, event.currentTarget)
+                          }
+                          onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "clarity")}
+                          className="mt-2 h-[32px] w-full resize-none overflow-hidden rounded-[4px] border border-line/80 bg-paper px-3 py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none"
+                        />
+                      </div>
+                    </label>
 
-                <label className="block w-full">
-                  <div className="flex w-full items-center gap-3">
-                    <span className="font-ui text-[14px] font-medium leading-[1.8] text-ink">
-                      What felt unclear and complete?
-                    </span>
-                  </div>
-                  <div className="w-full">
-                    <textarea
-                      ref={feedbackQualityRef}
-                      rows={1}
-                      value={feedbackAnswers.quality}
-                      onChange={(event) =>
-                        handleFeedbackFieldChange("quality", event.target.value, event.currentTarget)
-                      }
-                      onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "quality")}
-                      className="mt-2 h-[34px] w-full resize-none overflow-hidden rounded-[4px] border-0 bg-[#FBFBFA] px-3 py-2 font-ui text-[14px] font-normal leading-[1.6] text-meta outline-none"
-                    />
-                  </div>
-                </label>
+                    <label className="block w-full">
+                      <div className="flex w-full items-center gap-3">
+                        <span className={formFieldTitleClass}>What felt unclear and complete?</span>
+                      </div>
+                      <div className="w-full">
+                        <textarea
+                          ref={feedbackQualityRef}
+                          rows={1}
+                          value={feedbackAnswers.quality}
+                          onChange={(event) =>
+                            handleFeedbackFieldChange("quality", event.target.value, event.currentTarget)
+                          }
+                          onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "quality")}
+                          className="mt-2 h-[32px] w-full resize-none overflow-hidden rounded-[4px] border border-line/80 bg-paper px-3 py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none"
+                        />
+                      </div>
+                    </label>
 
-                <label className="block w-full">
-                  <div className="flex w-full items-center gap-3">
-                    <span className="font-ui text-[14px] font-medium leading-[1.8] text-ink">
-                      What should change first, or which feature would most improve the experience?
-                    </span>
+                    <label className="block w-full">
+                      <div className="flex w-full items-center gap-3">
+                        <span className={formFieldTitleClass}>
+                          What should change first, or which feature would most improve the experience?
+                        </span>
+                      </div>
+                      <div className="w-full">
+                        <textarea
+                          ref={feedbackTrustRef}
+                          rows={1}
+                          value={feedbackAnswers.trust}
+                          onChange={(event) => handleFeedbackFieldChange("trust", event.target.value, event.currentTarget)}
+                          onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "trust")}
+                          className="mt-2 h-[32px] w-full resize-none overflow-hidden rounded-[4px] border border-line/80 bg-paper px-3 py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none"
+                        />
+                      </div>
+                    </label>
                   </div>
-                  <div className="w-full">
-                    <textarea
-                      ref={feedbackTrustRef}
-                      rows={1}
-                      value={feedbackAnswers.trust}
-                      onChange={(event) => handleFeedbackFieldChange("trust", event.target.value, event.currentTarget)}
-                      onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "trust")}
-                      className="mt-2 h-[34px] w-full resize-none overflow-hidden rounded-[4px] border-0 bg-[#FBFBFA] px-3 py-2 font-ui text-[14px] font-normal leading-[1.6] text-meta outline-none"
-                    />
-                  </div>
-                </label>
-
-                <div className="pt-1">
+                </article>
+                <div>
                   <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const sentAt = new Date().toLocaleDateString("en-US", {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                      });
-                      setLastFeedbackSentAt(sentAt);
-                      setFeedbackHistory((prev) => [
-                        {
-                          sentAt,
-                          clarity: feedbackAnswers.clarity.trim(),
-                          quality: feedbackAnswers.quality.trim(),
-                          trust: feedbackAnswers.trust.trim(),
-                        },
-                        ...prev,
-                      ]);
-                      setFeedbackAnswers({
-                        clarity: "",
-                        quality: "",
-                        trust: "",
-                      });
-                      window.requestAnimationFrame(() => {
-                        if (feedbackClarityRef.current) autoResizeFeedbackField(feedbackClarityRef.current);
-                        if (feedbackQualityRef.current) autoResizeFeedbackField(feedbackQualityRef.current);
-                        if (feedbackTrustRef.current) autoResizeFeedbackField(feedbackTrustRef.current);
-                      });
-                    }}
-                    disabled={!canSendFeedback}
-                    className={`${settingsActionPillClass} ${!canSendFeedback ? "cursor-not-allowed opacity-50 hover:text-[#6F7381]" : ""}`}
-                  >
-                    send feedback
-                  </button>
-                  {lastFeedbackSentAt ? (
-                    <p className="font-ui text-[13px] font-normal leading-5 text-meta">
-                      Last feedback sent: {lastFeedbackSentAt}
-                    </p>
-                  ) : null}
-                  {feedbackHistory.length > 0 ? (
                     <button
                       type="button"
-                      onClick={() => setIsFeedbackHistoryOpen((current) => !current)}
-                      className={expandTextButtonClass}
+                      onClick={() => {
+                        const sentAt = new Date().toLocaleDateString("en-US", {
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        });
+                        setLastFeedbackSentAt(sentAt);
+                        setFeedbackHistory((prev) => [
+                          {
+                            sentAt,
+                            clarity: feedbackAnswers.clarity.trim(),
+                            quality: feedbackAnswers.quality.trim(),
+                            trust: feedbackAnswers.trust.trim(),
+                          },
+                          ...prev,
+                        ]);
+                        setFeedbackAnswers({
+                          clarity: "",
+                          quality: "",
+                          trust: "",
+                        });
+                        window.requestAnimationFrame(() => {
+                          if (feedbackClarityRef.current) autoResizeFeedbackField(feedbackClarityRef.current);
+                          if (feedbackQualityRef.current) autoResizeFeedbackField(feedbackQualityRef.current);
+                          if (feedbackTrustRef.current) autoResizeFeedbackField(feedbackTrustRef.current);
+                        });
+                      }}
+                      disabled={!canSendFeedback}
+                      className={`${settingsActionPillClass} ${!canSendFeedback ? "cursor-not-allowed opacity-50 hover:text-[#6F7381]" : ""}`}
                     >
-                      {isFeedbackHistoryOpen ? "hide feedback" : "show feedback"}
-                      <span aria-hidden="true">{isFeedbackHistoryOpen ? "▴" : "▾"}</span>
+                      send feedback
                     </button>
-                  ) : null}
+                    {lastFeedbackSentAt ? (
+                      <p className="font-ui text-[13px] font-normal leading-5 text-meta">
+                        Last feedback sent: {lastFeedbackSentAt}
+                      </p>
+                    ) : null}
+                    {feedbackHistory.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsFeedbackHistoryOpen((current) => !current)}
+                        className={expandTextButtonClass}
+                      >
+                        {isFeedbackHistoryOpen ? "hide feedback" : "show feedback"}
+                        <span aria-hidden="true">{isFeedbackHistoryOpen ? "▴" : "▾"}</span>
+                      </button>
+                    ) : null}
                   </div>
                   {isFeedbackHistoryOpen && feedbackHistory.length > 0 ? (
                     <div className="mt-4 space-y-3">
                       {feedbackHistory.map((entry, index) => (
-                        <div key={`${entry.sentAt}-${index}`} className="rounded-[4px] bg-[#FBFBFA] px-3 py-3">
+                        <div key={`${entry.sentAt}-${index}`} className="rounded-[4px] border border-line/80 bg-paper px-3 py-3">
                           <p className="font-ui text-[12px] font-normal leading-5 text-meta">{entry.sentAt}</p>
                           {entry.clarity ? (
                             <p className="mt-1 font-ui text-[13px] font-normal leading-[1.6] text-ink">

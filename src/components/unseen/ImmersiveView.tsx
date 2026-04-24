@@ -204,6 +204,8 @@ function hasReturnFlightFinishedFlag() {
 }
 
 type ImmersiveProductCardProps = {
+  enableEdgeEntryAnimation: boolean;
+  focusLiftPx: number;
   isClickable: boolean;
   isDragging: boolean;
   isMotionLocked: boolean;
@@ -220,6 +222,8 @@ type ImmersiveProductCardProps = {
 };
 
 function ImmersiveProductCard({
+  enableEdgeEntryAnimation,
+  focusLiftPx,
   isClickable,
   isDragging,
   isMotionLocked,
@@ -240,6 +244,17 @@ function ImmersiveProductCard({
   const hoverDelayTimerRef = useRef<number | null>(null);
   const isFocused = slot === 0;
   const hasHoverActions = isFocused && isFocusedHoverActive;
+  const centeredLiftY = isFocused ? -focusLiftPx : 0;
+  const shouldAnimateEdgeEntry = enableEdgeEntryAnimation && Math.abs(slot) === 2;
+  const [edgeEntryProgress, setEdgeEntryProgress] = useState(shouldAnimateEdgeEntry ? 0 : 1);
+  const edgeEntryDelayMs = shouldAnimateEdgeEntry ? Math.round(motionDurationMs * 0.52) : 0;
+  const edgeEntryDurationMs = shouldAnimateEdgeEntry
+    ? Math.max(160, Math.round(motionDurationMs * 0.48))
+    : motionDurationMs;
+  const transformDurationMs = shouldAnimateEdgeEntry ? edgeEntryDurationMs : motionDurationMs;
+  const opacityDurationMs = shouldAnimateEdgeEntry
+    ? edgeEntryDurationMs
+    : Math.min(240, motionDurationMs);
 
   const clearHoverDelay = () => {
     if (hoverDelayTimerRef.current !== null) {
@@ -266,6 +281,18 @@ function ImmersiveProductCard({
     };
   }, []);
 
+  useEffect(() => {
+    if (edgeEntryProgress >= 1) return;
+    const timer = window.setTimeout(() => {
+      setEdgeEntryProgress(1);
+    }, Math.max(16, edgeEntryDelayMs));
+    return () => window.clearTimeout(timer);
+  }, [edgeEntryDelayMs, edgeEntryProgress]);
+
+  const edgeEntryOffsetPx =
+    shouldAnimateEdgeEntry ? (slot < 0 ? -56 : 56) * (1 - edgeEntryProgress) : 0;
+  const resolvedOpacity = (hiddenForReturn ? 0 : presentation.opacity) * edgeEntryProgress;
+
   return (
     <article
       className={`group/product absolute left-1/2 top-1/2 ${
@@ -289,15 +316,15 @@ function ImmersiveProductCard({
         width: `${presentation.width}px`,
         height: `${presentation.height}px`,
         zIndex: presentation.zIndex,
-        opacity: hiddenForReturn ? 0 : presentation.opacity,
-        transform: `translate(-50%, -50%) translate3d(0px, ${presentation.translateX}px, 0px)`,
+        opacity: resolvedOpacity,
+        transform: `translate(-50%, -50%) translate3d(0px, ${presentation.translateX + centeredLiftY + edgeEntryOffsetPx}px, 0px)`,
         transition: isDragging || isMotionLocked
           ? "none"
           : [
-              `transform ${motionDurationMs}ms ${motionEasing}`,
+              `transform ${transformDurationMs}ms ${motionEasing}`,
               `width ${Math.max(220, motionDurationMs)}ms ${motionEasing}`,
               `height ${Math.max(220, motionDurationMs)}ms ${motionEasing}`,
-              `opacity ${Math.min(240, motionDurationMs)}ms ease-out`,
+              `opacity ${opacityDurationMs}ms ease-out`,
             ].join(", "),
         willChange: "transform",
       }}
@@ -370,6 +397,10 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const focusLabelRef = useRef<HTMLParagraphElement | null>(null);
+  const focusedMetaRowRef = useRef<HTMLDivElement | null>(null);
+  const focusedBrandRef = useRef<HTMLParagraphElement | null>(null);
+  const focusedIdTextRef = useRef<HTMLSpanElement | null>(null);
+  const focusedPriceTextRef = useRef<HTMLSpanElement | null>(null);
   const focusedImageRef = useRef<HTMLDivElement | null>(null);
   const categoryCloseTimerRef = useRef<number | null>(null);
   const categorySettleTimerRef = useRef<number | null>(null);
@@ -422,6 +453,8 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const [stageCenterOffsetPx, setStageCenterOffsetPx] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(DEFAULT_VIEWPORT_WIDTH);
   const [sectionHeight, setSectionHeight] = useState(DEFAULT_SECTION_HEIGHT);
+  const [focusedMetaAnchorOffsetPx, setFocusedMetaAnchorOffsetPx] = useState(120);
+  const [hasCompletedInitialCardMount, setHasCompletedInitialCardMount] = useState(false);
   const [hoveredWheelZone, setHoveredWheelZone] = useState<"none" | "left" | "right" | "top" | "center">("none");
   const [returnImageState, setReturnImageState] = useState(() => {
     const returnPayload = readReturnFocusDelayPayload();
@@ -469,6 +502,13 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         cancelAnimationFrame(rowWheelRafRef.current);
       }
     };
+  }, []);
+
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(() => {
+      setHasCompletedInitialCardMount(true);
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, []);
 
   const itemsByCategory = useMemo(() => {
@@ -801,7 +841,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const hideGallerySideSlots = isVerticalFlow && sectionHeight < 450;
   const hideGalleryMetaForSpace = isVerticalFlow && sectionHeight < 500;
   const galleryMetaRowHeightPx = 22;
-  const galleryMetaGapPx = 18;
+  const galleryMetaGapPx = 12;
   const galleryRowHeightPx = useMemo(() => {
     if (!isVerticalFlow) return 0;
     const vh = sectionHeight > 0 ? sectionHeight : DEFAULT_SECTION_HEIGHT;
@@ -812,8 +852,8 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     const vw = viewportWidth > 0 ? viewportWidth : 1440;
     const focusWidthBase = clampNumber(166, vw * 0.18, 269);
     const focusHeightBase = clampNumber(230, vw * 0.29, 361);
-    const focusWidth = focusWidthBase;
-    const focusHeight = focusHeightBase;
+    const focusWidth = focusWidthBase * 1.12;
+    const focusHeight = focusHeightBase * 1.12;
     const sideWidth = clampNumber(110, vw * 0.12, 180);
     const sideHeight = clampNumber(163, vw * 0.19, 254);
 
@@ -999,7 +1039,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     }
 
     const infoRowLineHeightPx = 20; // from text leading-5
-    const minGapPx = 10;
+    const minGapPx = 8;
     const staticGapPx = 14;
     const largeScaleGapGrow = clampNumber(0, (viewportWidth - 1700) / 700, 1) * 8;
     const desiredGapPx = staticGapPx + largeScaleGapGrow;
@@ -1025,11 +1065,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     const equalGapPx = laneSpaceExcludingText / 2;
     const hideWheel = equalGapPx < 8;
     const resolvedGapPx = hideWheel ? Math.max(minGapPx, desiredGapPx) : Math.max(minGapPx, equalGapPx);
+    const tightenedGapPx = Math.max(minGapPx, resolvedGapPx - 6);
 
     return {
       cardScale,
       hideWheel,
-      infoRowCenterPx: Math.round(resolvedFocusBottom + resolvedGapPx + infoRowLineHeightPx / 2),
+      infoRowCenterPx: Math.round(resolvedFocusBottom + tightenedGapPx + infoRowLineHeightPx / 2),
       rowTopPadPx: Math.round(resolvedRowTopPadPx),
     };
   }, [
@@ -1815,9 +1856,14 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
 
   const focusedItemNumber = focusedItem ? getItemNumber(focusedItem) : "00";
   const focusedBrandClass = mode === "archive" ? "text-accent" : "text-ink";
-  const focusedMetaMaxWidthPx = isVerticalFlow ? 500 : 760;
-  const focusedMetaSideInsetPx = isVerticalFlow ? 10 : 42;
-  const focusedMetaHorizontalPaddingClass = isVerticalFlow ? "px-3 sm:px-4" : "px-6 sm:px-10";
+  const focusedMetaMaxWidthPx = isVerticalFlow ? 500 : 440;
+  const focusedMetaHorizontalPaddingClass = isVerticalFlow ? "px-3 sm:px-4" : "px-0";
+  const focusedMetaDefaultAnchorOffsetPx = isVerticalFlow ? 120 : 96;
+  const focusedMetaMinBrandGapPx = 18;
+  const focusLiftPx = useMemo(
+    () => Math.round(clampNumber(8, rowHeightPx * 0.05, 28)),
+    [rowHeightPx],
+  );
   const showGalleryCategoryNav = mode === "gallery";
   const visualCategory = displayCategory || selectedCategory;
   const activeCategoryEntry =
@@ -1857,6 +1903,55 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     if (!isCategoryNavExpanded) return;
     setIsCategoryNavExpanded(false);
   }, [hideGalleryNavForSpace, isCategoryNavExpanded]);
+
+  useLayoutEffect(() => {
+    const rowNode = focusedMetaRowRef.current;
+    const idTextNode = focusedIdTextRef.current;
+    const brandNode = focusedBrandRef.current;
+    const priceTextNode = focusedPriceTextRef.current;
+    if (!rowNode || !idTextNode || !brandNode || !priceTextNode) return;
+
+    const updateAnchorOffset = () => {
+      const rowWidth = rowNode.getBoundingClientRect().width;
+      const idWidth = idTextNode.getBoundingClientRect().width;
+      const brandWidth = brandNode.getBoundingClientRect().width;
+      const priceWidth = priceTextNode.getBoundingClientRect().width;
+
+      const requiredAnchorForBrand = Math.ceil(brandWidth / 2 + focusedMetaMinBrandGapPx);
+      const maxAnchorForBounds = Math.max(0, Math.floor(rowWidth / 2 - Math.max(idWidth, priceWidth) - 2));
+      const nextAnchor = Math.round(
+        clampNumber(0, Math.max(focusedMetaDefaultAnchorOffsetPx, requiredAnchorForBrand), maxAnchorForBounds),
+      );
+
+      setFocusedMetaAnchorOffsetPx((current) => (current === nextAnchor ? current : nextAnchor));
+    };
+
+    updateAnchorOffset();
+
+    window.addEventListener("resize", updateAnchorOffset);
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        window.removeEventListener("resize", updateAnchorOffset);
+      };
+    }
+
+    const resizeObserver = new ResizeObserver(updateAnchorOffset);
+    resizeObserver.observe(rowNode);
+    resizeObserver.observe(idTextNode);
+    resizeObserver.observe(brandNode);
+    resizeObserver.observe(priceTextNode);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateAnchorOffset);
+    };
+  }, [
+    focusedItem?.brand,
+    focusedItem?.id,
+    focusedItem?.price,
+    focusedMetaDefaultAnchorOffsetPx,
+    focusedMetaMinBrandGapPx,
+  ]);
 
   return (
     <section
@@ -1960,11 +2055,13 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           {visibleSlots.map(({ instanceKey, slot, item }) => (
             <ImmersiveProductCard
               key={instanceKey}
+              enableEdgeEntryAnimation={hasCompletedInitialCardMount}
               isClickable={Math.abs(slot) <= 2 && !isReturnInteractionLocked}
               isDragging={isRowDragging}
               isMotionLocked={isReturnLaneFrozen}
               hiddenForReturn={slot === 0 && returnImageState.hiddenItemId === item.id}
               item={item}
+              focusLiftPx={focusLiftPx}
               motionEasing={motionEasing}
               mode={mode}
               motionDurationMs={isRowDragging ? 0 : motionDurationMs}
@@ -2015,28 +2112,39 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           }`}
           aria-hidden={hideGalleryMetaForSpace}
           style={{
-            top: `${layoutLane.infoRowCenterPx}px`,
+            top: `${layoutLane.infoRowCenterPx - focusLiftPx}px`,
             maxWidth: `${focusedMetaMaxWidthPx}px`,
           }}
         >
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-meta">
+          <div
+            ref={focusedMetaRowRef}
+            className="relative mx-auto h-[22px] w-full text-[13px] font-medium leading-5 tracking-[0.02em] text-meta"
+          >
             <p
               ref={focusLabelRef}
-              className="inline-flex h-[22px] items-center justify-self-end text-meta"
-              style={{ paddingRight: `${focusedMetaSideInsetPx}px` }}
+              className="absolute top-1/2 inline-flex h-[22px] items-center font-mono-meta text-meta"
+              style={{
+                left: `calc(50% - ${focusedMetaAnchorOffsetPx}px)`,
+                transform: "translate(-100%, -50%)",
+              }}
             >
-              <span aria-hidden="true">|</span>
-              <span className="px-[2px]">{focusedItemNumber}</span>
-              <span aria-hidden="true">|</span>
+              <span ref={focusedIdTextRef} className="inline-flex items-center">
+                <span aria-hidden="true">|</span>
+                <span className="px-[2px]">{focusedItemNumber}</span>
+                <span aria-hidden="true">|</span>
+              </span>
             </p>
-            <p className={`inline-flex h-[22px] items-center justify-self-center text-center ${focusedBrandClass}`}>
+            <p
+              ref={focusedBrandRef}
+              className={`absolute left-1/2 top-1/2 inline-flex h-[22px] -translate-x-1/2 -translate-y-1/2 items-center whitespace-nowrap text-center ${focusedBrandClass}`}
+            >
               {focusedItem.brand}
             </p>
             <p
-              className="inline-flex h-[22px] items-center justify-self-start text-meta"
-              style={{ paddingLeft: `${focusedMetaSideInsetPx}px` }}
+              className="absolute top-1/2 inline-flex h-[22px] -translate-y-1/2 items-center font-mono-meta text-meta"
+              style={{ left: `calc(50% + ${focusedMetaAnchorOffsetPx}px)` }}
             >
-              {focusedItem.price}
+              <span ref={focusedPriceTextRef}>{focusedItem.price}</span>
             </p>
           </div>
         </div>

@@ -190,3 +190,10 @@ a {
     animation-timing-function: cubic-bezier(0.2, 0.88, 0.28, 1);
   }
 }
+
+/* Force-hide floating category nav only while the profile overlay is open. */
+html[data-unseen-overlay-open="true"] [aria-label="Category navigation"] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}

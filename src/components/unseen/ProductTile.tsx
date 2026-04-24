@@ -101,9 +101,6 @@ export function ProductTile({
   const galleryCoreLabel = item.idxLabel.replace(/^\[/, "").replace(/\]$/, "");
   const topLabel = mode === "archive" ? `Issue ${issueNumber} | ${itemNumber}` : galleryCoreLabel;
   const brandTextClass = mode === "archive" ? "text-accent" : "text-ink";
-  const metaTextClass = "font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-meta";
-  const metaLabelClass = `inline-flex w-full items-center justify-center text-center ${metaTextClass}`;
-  const priceClass = `w-full text-center ${metaTextClass}`;
   const handleHoverReset = () => {
     if (!hasHoverActions) return;
     setHoverResetKey((key) => key + 1);
@@ -253,16 +250,10 @@ export function ProductTile({
         }
       }}
     >
-      <p ref={topLabelRef} className={`${metaLabelClass} cursor-pointer`} onClick={openProductView}>
-        <span aria-hidden="true">|</span>
-        <span className="px-[2px]">{topLabel}</span>
-        <span aria-hidden="true">|</span>
-      </p>
-
       <div
         ref={imageAreaRef}
         data-product-tile-image-root="true"
-        className={`relative mx-auto mt-[14px] h-[280px] w-full max-w-[210px] cursor-pointer ${
+        className={`relative mx-auto h-[280px] w-full max-w-[210px] cursor-pointer ${
           returnImageState.hidden ? "pointer-events-none opacity-0" : "opacity-100"
         }`}
         onClick={(event) => {
@@ -283,11 +274,22 @@ export function ProductTile({
         {hasHoverActions ? <GalleryHoverActions itemId={item.id} mode={mode} hoverResetKey={hoverResetKey} /> : null}
       </div>
 
-      <div className="mt-[16px] flex w-full cursor-pointer flex-col items-center gap-[8px] text-center" onClick={openProductView}>
-        <p className={`w-full font-ui text-[14px] font-medium leading-5 tracking-[0.02em] ${brandTextClass}`}>
+      <div
+        className="mt-[16px] flex w-full cursor-pointer flex-col items-center gap-[3px] text-center text-[13px] font-medium leading-5 tracking-[0.02em] text-meta"
+        onClick={openProductView}
+      >
+        <p
+          ref={topLabelRef}
+          className="inline-flex h-[22px] items-center justify-center font-mono-meta text-meta"
+        >
+          <span aria-hidden="true">|</span>
+          <span className="px-[2px]">{topLabel}</span>
+          <span aria-hidden="true">|</span>
+        </p>
+        <p className={`inline-flex h-[22px] items-center justify-center text-center font-ui ${brandTextClass}`}>
           {item.brand}
         </p>
-        <p className={priceClass}>
+        <p className="inline-flex h-[22px] items-center justify-center font-mono-meta text-meta">
           {item.price}
         </p>
       </div>

@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ModePill } from "@/components/unseen/ModePill";
 import { GalleryEditNav } from "@/components/unseen/GalleryEditNav";
 import { ViewToggle } from "@/components/unseen/ViewToggle";
 import { StickyHeightSync } from "@/components/unseen/StickyHeightSync";
-import { ProfileSignatureContent } from "@/components/unseen/ProfileSignatureContent";
 import { mockUsers } from "@/data/mockUsers";
 
 type StickyMode = "gallery" | "archive";
@@ -19,32 +18,27 @@ type StickyShellProps = {
   archiveActiveItemCount?: number;
 };
 
-type ProfileNavTab = {
-  id: "signature" | "reference-sets" | "quiet-constraints";
-  label: string;
-  activeInterLabel: string;
-  activeInstrumentLabel: string;
-};
+type OverlaySurface = "profile" | "settings" | "feedback" | "about";
+type ProfileOverlayTab = "signature" | "reference-sets" | "quiet-constraints";
 
-const profileNavTabs: ProfileNavTab[] = [
-  {
-    id: "signature",
-    label: "The-Signature",
-    activeInterLabel: "The-",
-    activeInstrumentLabel: "Signature",
-  },
-  {
-    id: "reference-sets",
-    label: "Reference-Sets",
-    activeInterLabel: "Reference-",
-    activeInstrumentLabel: "Sets",
-  },
-  {
-    id: "quiet-constraints",
-    label: "Quiet-Constraints",
-    activeInterLabel: "Quiet-",
-    activeInstrumentLabel: "Constraints",
-  },
+const quickMenuItems: Array<{ id: OverlaySurface; label: string }> = [
+  { id: "profile", label: "Profile" },
+  { id: "settings", label: "Settings" },
+  { id: "feedback", label: "Feedback" },
+  { id: "about", label: "About" },
+];
+
+const quickMenuSocialSymbols = [
+  { id: "instagram", label: "Instagram", src: "/logos/instagram.png", href: "https://www.instagram.com/cenoir.co" },
+  { id: "tiktok", label: "TikTok", src: "/logos/tiktok.png", href: "https://www.tiktok.com/@cenoir_co" },
+  { id: "substack", label: "Substack", src: "/logos/substack.png", href: "https://substack.com/" },
+  { id: "pinterest", label: "Pinterest", src: "/logos/pinterest.png", href: "https://www.pinterest.com/" },
+];
+
+const profileOverlayTabs: Array<{ id: ProfileOverlayTab; label: string }> = [
+  { id: "signature", label: "Signature" },
+  { id: "reference-sets", label: "References" },
+  { id: "quiet-constraints", label: "Constraints" },
 ];
 
 const archiveCapsuleTabs = [
@@ -53,9 +47,6 @@ const archiveCapsuleTabs = [
   { id: "capsule2", label: "CAPSULE2" },
   { id: "capsule3", label: "CAPSULE3" },
 ];
-
-const profileCardPath =
-  "M4 10C4 6.68629 6.68629 4 10 4H291C294.314 4 297 6.68629 297 10V141C297 144.314 294.314 147 291 147H10C6.68629 147 4 144.314 4 141V10Z";
 
 const MODE_SWITCH_TOP_PX = 17;
 const MODE_SWITCH_HEIGHT_PX = 34;
@@ -69,199 +60,8 @@ const ARCHIVE_STICKY_STACK_HEIGHT_PX = 188;
 const DIVIDER_COLOR = "#ECEDEF";
 const DIVIDER_SHADOW = "0 1px 0.6px rgba(0,0,0,0.03)";
 
-function ProfileIdCard() {
-  const activeUser = mockUsers[0];
-  const userName = activeUser?.name ?? "User";
-  const calibrationDate = activeUser?.lastCalibrationDate ?? "2026-03-01";
-  const userIdLabel = `@${activeUser?.userId ?? 0}`;
-  const currentWeekLabel = formatCurrentWeekLabel(new Date());
-
-  return (
-    <div className="group relative h-[149px] w-[297px] min-h-[149px] min-w-[297px] max-h-[149px] max-w-[297px] shrink-0 cursor-default transition-transform duration-300 ease-out hover:-translate-y-[1px] hover:scale-[1.006]">
-      <div className="absolute inset-[0_-0.67%_-2.68%_-0.67%]">
-        <svg className="block size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 301 153">
-          <defs>
-            <filter colorInterpolationFilters="sRGB" filterUnits="userSpaceOnUse" height="153" id="profile-card-shadow" width="301" x="0" y="0">
-              <feFlood floodOpacity="0" result="BackgroundImageFix" />
-              <feColorMatrix in="SourceAlpha" result="hardAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" />
-              <feOffset dy="2" />
-              <feGaussianBlur stdDeviation="2" />
-              <feComposite in2="hardAlpha" operator="out" />
-              <feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.15 0" />
-              <feBlend in2="BackgroundImageFix" mode="normal" result="effect1_dropShadow_1_32" />
-              <feBlend in="BackgroundImageFix" in2="effect1_dropShadow_1_32" mode="normal" result="BackgroundImageFix" />
-              <feBlend in="SourceGraphic" in2="BackgroundImageFix" mode="normal" result="shape" />
-            </filter>
-            <linearGradient id="mistGradient" x1="0%" x2="100%" y1="0%" y2="100%">
-              <stop offset="0%" style={{ stopColor: "#f8f8f9", stopOpacity: 1 }} />
-              <stop offset="50%" style={{ stopColor: "#fafafa", stopOpacity: 1 }} />
-              <stop offset="100%" style={{ stopColor: "#f6f6f7", stopOpacity: 1 }} />
-            </linearGradient>
-          </defs>
-          <g filter="url(#profile-card-shadow)">
-            <path d={profileCardPath} fill="url(#mistGradient)" shapeRendering="crispEdges" />
-          </g>
-        </svg>
-      </div>
-      <div
-        className="pointer-events-none absolute inset-0 rounded-[8px] backdrop-blur-[1px] transition-opacity duration-300 ease-out group-hover:opacity-90"
-        style={{
-          background: "linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.1) 100%)",
-          mixBlendMode: "overlay",
-        }}
-      />
-      <p className="absolute right-[21px] top-[14px] text-right font-ui text-[20px] font-medium leading-[normal] tracking-[-0.4px] text-black">{userName}</p>
-      <p
-        className="absolute left-[21px] top-[12px] text-[11px] leading-[normal] tracking-[-0.22px] text-[#888894]"
-        style={{ fontFamily: "var(--font-meta-mono), monospace", fontWeight: 500 }}
-      >
-        PROFILE–ID
-      </p>
-      <div className="absolute left-[14px] top-[62px] h-[51px] w-[269px] border-[0.2px] border-solid border-[#888894]" />
-      <div className="absolute left-[14px] top-[87px] h-[52px] w-[269px] border-[0.2px] border-solid border-[#888894]" />
-      <p
-        className="absolute left-[21px] top-[68px] text-[11px] leading-[normal] tracking-[-0.22px] text-[#888894]"
-        style={{ fontFamily: "var(--font-meta-mono), monospace" }}
-      >
-        CURRENT WEEK:
-      </p>
-      <p
-        className="absolute right-[21px] top-[68px] text-right text-[11px] leading-[normal] tracking-[-0.22px] text-[#111111]"
-        style={{ fontFamily: "var(--font-meta-mono), monospace", fontWeight: 500 }}
-      >
-        {currentWeekLabel}
-      </p>
-      <p
-        className="absolute right-[21px] top-[118px] text-right text-[11px] leading-[normal] tracking-[-0.22px] text-[#111111]"
-        style={{ fontFamily: "var(--font-meta-mono), monospace", fontWeight: 500 }}
-      >
-        {userIdLabel}
-      </p>
-      <p
-        className="absolute right-[21px] top-[93px] text-right text-[11px] leading-[normal] tracking-[-0.22px] text-[#111111]"
-        style={{ fontFamily: "var(--font-meta-mono), monospace", fontWeight: 500 }}
-      >
-        {formatCalibrationDate(calibrationDate)}
-      </p>
-      <p
-        className="absolute left-[21px] top-[93px] text-[11px] leading-[normal] tracking-[-0.22px] text-[#888894]"
-        style={{ fontFamily: "var(--font-meta-mono), monospace" }}
-      >
-        LAST CALIBRATION:
-      </p>
-      <p
-        className="absolute left-[21px] top-[118px] text-[11px] leading-[normal] tracking-[-0.22px] text-[#888894]"
-        style={{ fontFamily: "var(--font-meta-mono), monospace" }}
-      >
-        USER-TAG:
-      </p>
-    </div>
-  );
-}
-
-function ReferenceSetsContent({ user }: { user: (typeof mockUsers)[number] }) {
-  const references = user.referenceSetForMainEdit ?? [];
-  const preview = references.slice(0, 5);
-
-  return (
-    <div className="px-10">
-      <p className="max-w-[760px] font-ui text-[13px] font-normal leading-[1.8] tracking-[0.02em] text-meta">
-        A visual representation of the taste. Below, you&apos;ll find the reference sets corresponding to each edit.
-      </p>
-
-      <div className="mt-5 flex w-full max-w-[760px] items-end gap-5">
-        <div className="w-[220px] shrink-0 self-end pb-2">
-          <div className="flex items-baseline gap-3">
-            <p className="font-ui text-[26px] font-medium leading-none tracking-[-0.03em] text-ink">MAIN EDIT</p>
-            <p className="font-ui text-[13px] font-normal leading-4 tracking-[0.02em] text-meta">30 References</p>
-          </div>
-        </div>
-
-        <div className="w-full max-w-[430px] self-end overflow-hidden rounded-[12px] bg-mist p-2">
-          <div className="grid h-[180px] grid-cols-[1.7fr_1fr_0.7fr] gap-2">
-            <div className="relative h-full w-full overflow-hidden rounded-[6px]">
-              {preview[0] ? (
-                <Image
-                  src={preview[0].publicPath}
-                  alt={preview[0].fileName}
-                  fill
-                  sizes="(max-width: 900px) 100vw, 300px"
-                  className="object-cover object-center"
-                />
-              ) : null}
-            </div>
-            <div className="grid h-full grid-rows-2 gap-2">
-              <div className="relative h-full w-full overflow-hidden rounded-[6px]">
-                {preview[1] ? (
-                  <Image
-                    src={preview[1].publicPath}
-                    alt={preview[1].fileName}
-                    fill
-                    sizes="(max-width: 900px) 50vw, 160px"
-                    className="object-cover object-center"
-                  />
-                ) : null}
-              </div>
-              <div className="relative h-full w-full overflow-hidden rounded-[6px]">
-                {preview[2] ? (
-                  <Image
-                    src={preview[2].publicPath}
-                    alt={preview[2].fileName}
-                    fill
-                    sizes="(max-width: 900px) 50vw, 160px"
-                    className="object-cover object-center"
-                  />
-                ) : null}
-              </div>
-            </div>
-            <div className="grid h-full grid-rows-2 gap-2">
-              <div className="relative h-full w-full overflow-hidden rounded-[6px]">
-                {preview[3] ? (
-                  <Image
-                    src={preview[3].publicPath}
-                    alt={preview[3].fileName}
-                    fill
-                    sizes="(max-width: 900px) 40vw, 120px"
-                    className="object-cover object-center"
-                  />
-                ) : null}
-              </div>
-              <div className="relative h-full w-full overflow-hidden rounded-[6px]">
-                {preview[4] ? (
-                  <Image
-                    src={preview[4].publicPath}
-                    alt={preview[4].fileName}
-                    fill
-                    sizes="(max-width: 900px) 40vw, 120px"
-                    className="object-cover object-center"
-                  />
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatCurrentWeekLabel(date: Date): string {
-  const { weekNumber, isoYear } = getIsoWeek(date);
-  return `W${String(weekNumber).padStart(2, "0")} ${isoYear}`;
-}
-
-function getIsoWeek(date: Date): { weekNumber: number; isoYear: number } {
-  const tmp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const day = tmp.getUTCDay() || 7;
-  tmp.setUTCDate(tmp.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
-  return {
-    weekNumber: Math.ceil((((tmp.getTime() - yearStart.getTime()) / 86400000) + 1) / 7),
-    isoYear: tmp.getUTCFullYear(),
-  };
-}
-
-function formatCalibrationDate(value: string): string {
+function formatCalibrationMonth(value: string | undefined): string {
+  if (!value) return "";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -276,7 +76,9 @@ export function StickyShell({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isQuickMenuOpen, setIsQuickMenuOpen] = useState(false);
+  const [activeOverlaySurface, setActiveOverlaySurface] = useState<OverlaySurface | null>(null);
+  const [activeProfileOverlayTab, setActiveProfileOverlayTab] = useState<ProfileOverlayTab>("signature");
   const [isEditActionMenuOpen, setIsEditActionMenuOpen] = useState(false);
   const [isProfileEntryFromClose, setIsProfileEntryFromClose] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -292,11 +94,13 @@ export function StickyShell({
       return false;
     }
   });
-  const [activeProfileTab, setActiveProfileTab] = useState<ProfileNavTab["id"]>("signature");
   const activeProfileUser = mockUsers[0] ?? null;
   const fallbackIssueNumber = Number(issueNumber);
-  const resolvedIssueNumber = activeProfileUser?.userId ?? (Number.isFinite(fallbackIssueNumber) ? fallbackIssueNumber : 0);
+  const resolvedIssueNumber =
+    activeProfileUser?.userId ?? (Number.isFinite(fallbackIssueNumber) ? fallbackIssueNumber : 0);
   const activeIssueNumber = String(resolvedIssueNumber).padStart(2, "0");
+  const profileUserIdLabel = String(activeProfileUser?.userId ?? 0).padStart(3, "0");
+  const profileCalibrationLabel = formatCalibrationMonth(activeProfileUser?.lastCalibrationDate);
   const archiveOwnerName = activeProfileUser?.name?.trim() || "User";
   const isGallery = mode === "gallery";
   const archiveCapsuleId = !isGallery ? searchParams.get("capsule") : null;
@@ -316,19 +120,95 @@ export function StickyShell({
     isGallery && view === "immersive" ? galleryImmersiveStickyHeightPx : stickyBackdropHeightPx;
   const effectiveStickyStackHeightPx =
     isGallery && view === "immersive" ? galleryImmersiveStickyHeightPx : stickyStackHeightPx;
-  const menuButtonAriaLabel = isMenuOpen ? "Close menu" : "Open menu";
+  const isProfileOverlayOpen = activeOverlaySurface === "profile";
+  const isCompactOverlayOpen =
+    activeOverlaySurface === "settings" || activeOverlaySurface === "feedback" || activeOverlaySurface === "about";
+  const isSettingsOrFeedbackOverlay = activeOverlaySurface === "settings" || activeOverlaySurface === "feedback";
+  const isAnyOverlayOpen = isProfileOverlayOpen || isCompactOverlayOpen;
+  const isMenuTriggerMorphed = isProfileEntryFromClose || isQuickMenuOpen || isAnyOverlayOpen;
+  const menuButtonAriaLabel = isQuickMenuOpen || isAnyOverlayOpen ? "Close menu" : "Open menu";
   const editActionMenuRef = useRef<HTMLDivElement | null>(null);
+  const compactIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const compactIframeCleanupRef = useRef<(() => void) | null>(null);
+  const [compactSettingsFeedbackHeight, setCompactSettingsFeedbackHeight] = useState<number | null>(null);
+
+  const clearCompactIframeObservers = () => {
+    if (compactIframeCleanupRef.current) {
+      compactIframeCleanupRef.current();
+      compactIframeCleanupRef.current = null;
+    }
+  };
+
+  const syncCompactSettingsFeedbackHeight = () => {
+    if (!isSettingsOrFeedbackOverlay) {
+      setCompactSettingsFeedbackHeight(null);
+      return;
+    }
+    const iframe = compactIframeRef.current;
+    if (!iframe) return;
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    const compactContent = doc.querySelector<HTMLElement>("[data-compact-overlay-content]");
+    const contentHeight = compactContent
+      ? Math.ceil(compactContent.getBoundingClientRect().height)
+      : Math.max(doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0);
+    if (contentHeight <= 0) return;
+    const viewportCap = Math.round(window.innerHeight * 0.78);
+    const clampedHeight = Math.min(contentHeight, viewportCap);
+    setCompactSettingsFeedbackHeight(clampedHeight);
+  };
+
+  const bindCompactIframeObservers = () => {
+    clearCompactIframeObservers();
+    if (!isSettingsOrFeedbackOverlay) return;
+    const iframe = compactIframeRef.current;
+    if (!iframe) return;
+    const doc = iframe.contentDocument;
+    const frameWindow = iframe.contentWindow;
+    if (!doc || !frameWindow) return;
+
+    let rafId = 0;
+    const scheduleSync = () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(syncCompactSettingsFeedbackHeight);
+    };
+
+    const observer = new ResizeObserver(scheduleSync);
+    if (doc.documentElement) observer.observe(doc.documentElement);
+    if (doc.body) observer.observe(doc.body);
+
+    frameWindow.addEventListener("resize", scheduleSync);
+    window.addEventListener("resize", scheduleSync);
+    scheduleSync();
+
+    compactIframeCleanupRef.current = () => {
+      observer.disconnect();
+      frameWindow.removeEventListener("resize", scheduleSync);
+      window.removeEventListener("resize", scheduleSync);
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  };
 
   useEffect(() => {
-    if (!isMenuOpen) return;
+    if (!isCompactOverlayOpen || !isSettingsOrFeedbackOverlay) {
+      clearCompactIframeObservers();
+      setCompactSettingsFeedbackHeight(null);
+      return;
+    }
+    bindCompactIframeObservers();
+    return () => {
+      clearCompactIframeObservers();
+    };
+  }, [isCompactOverlayOpen, isSettingsOrFeedbackOverlay, activeOverlaySurface]);
 
+  useEffect(() => {
+    if (!isAnyOverlayOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isMenuOpen]);
+  }, [isAnyOverlayOpen]);
 
   useEffect(() => {
     if (!isProfileEntryFromClose) return;
@@ -354,6 +234,36 @@ export function StickyShell({
     };
   }, [isEditActionMenuOpen]);
 
+  useEffect(() => {
+    if (!isQuickMenuOpen && !isAnyOverlayOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (isAnyOverlayOpen) {
+          setActiveOverlaySurface(null);
+          return;
+        }
+        setIsQuickMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isAnyOverlayOpen, isQuickMenuOpen]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isProfileOverlayOpen) {
+      root.setAttribute("data-unseen-overlay-open", "true");
+      return;
+    }
+    root.removeAttribute("data-unseen-overlay-open");
+  }, [isProfileOverlayOpen]);
+
+  useEffect(() => {
+    return () => {
+      document.documentElement.removeAttribute("data-unseen-overlay-open");
+    };
+  }, []);
+
   const openProfile = (options?: { tab?: "reference-sets"; editFlow?: "create" }) => {
     const query = searchParams.toString();
     const backHref = query ? `${pathname}?${query}` : pathname;
@@ -369,8 +279,12 @@ export function StickyShell({
     router.push(`/profile?${nextParams.toString()}`);
   };
 
-  const handleProfileOpen = () => {
-    openProfile();
+  const handleMenuTriggerClick = () => {
+    if (isAnyOverlayOpen) {
+      setActiveOverlaySurface(null);
+      return;
+    }
+    setIsQuickMenuOpen((current) => !current);
   };
 
   const handleCreateNewEdit = () => {
@@ -382,6 +296,36 @@ export function StickyShell({
     setIsEditActionMenuOpen(false);
     openProfile({ tab: "reference-sets" });
   };
+
+  const currentQuery = searchParams.toString();
+  const currentPathWithQuery = currentQuery ? `${pathname}?${currentQuery}` : pathname;
+  const profileOverlayParams = new URLSearchParams({
+    embed: "1",
+    overlaySection: "profile",
+    profileTab: activeProfileOverlayTab,
+    back: currentPathWithQuery,
+  });
+  const profileOverlayHref = `/profile?${profileOverlayParams.toString()}`;
+
+  const compactOverlaySection = activeOverlaySurface === "feedback" ? "feedback" : activeOverlaySurface;
+  const compactOverlayParams =
+    compactOverlaySection && compactOverlaySection !== "profile"
+      ? new URLSearchParams({
+          embed: "1",
+          overlaySection: compactOverlaySection,
+          back: currentPathWithQuery,
+        })
+      : null;
+  const compactOverlayHref = compactOverlayParams ? `/profile?${compactOverlayParams.toString()}` : null;
+
+  const openOverlaySurface = (surface: OverlaySurface) => {
+    setIsQuickMenuOpen(false);
+    if (surface === "profile") {
+      setActiveProfileOverlayTab("signature");
+    }
+    setActiveOverlaySurface(surface);
+  };
+  const topQuickMenuItems = quickMenuItems;
 
   return (
     <header data-sticky-root="true" className="sticky top-0 z-50">
@@ -416,26 +360,27 @@ export function StickyShell({
               </div>
               <button
                 type="button"
-                aria-label="Open profile"
-                onClick={handleProfileOpen}
+                aria-label={menuButtonAriaLabel}
+                aria-expanded={isQuickMenuOpen || isAnyOverlayOpen}
+                onClick={handleMenuTriggerClick}
                 data-sticky-burger="true"
                 className="group relative ml-[10px] inline-flex h-[12px] w-[16px] items-center justify-center transition-opacity duration-300 ease-out pointer-events-auto opacity-100 focus-visible:outline-none"
               >
                 <span
                   className={`absolute block h-px w-[16px] rounded-full bg-meta transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
-                    isProfileEntryFromClose
+                    isMenuTriggerMorphed
                       ? "translate-y-0 rotate-45"
                       : "-translate-y-[4px] rotate-0 group-hover:scale-x-[1.04]"
                   }`}
                 />
                 <span
                   className={`absolute block h-px w-[16px] rounded-full bg-meta transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
-                    isProfileEntryFromClose ? "opacity-0" : "opacity-100 group-hover:scale-x-[0.96]"
+                    isMenuTriggerMorphed ? "opacity-0" : "opacity-100 group-hover:scale-x-[0.96]"
                   }`}
                 />
                 <span
                   className={`absolute block h-px w-[16px] rounded-full bg-meta transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
-                    isProfileEntryFromClose
+                    isMenuTriggerMorphed
                       ? "translate-y-0 -rotate-45"
                       : "translate-y-[4px] rotate-0 group-hover:scale-x-[1.03]"
                   }`}
@@ -566,85 +511,231 @@ export function StickyShell({
       </div>
 
       <div
-        className={`fixed inset-0 z-[130] bg-paper p-[16px] transition-opacity duration-300 ease-out ${
-          isMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        className={`fixed inset-0 z-[126] transition-opacity duration-280 ease-out ${
+          isQuickMenuOpen && !isAnyOverlayOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
         }`}
-        aria-hidden={!isMenuOpen}
+        aria-hidden={!isQuickMenuOpen || isAnyOverlayOpen}
       >
+        <button
+          type="button"
+          aria-label="Close quick menu"
+          onClick={() => setIsQuickMenuOpen(false)}
+          className="absolute inset-0"
+        />
         <div
-          className={`relative h-full w-full rounded-[8px] bg-[#FCFCFA] shadow-[0_2px_8px_rgba(0,0,0,0.06)] transition-transform duration-300 ease-out ${
-            isMenuOpen ? "translate-y-0 scale-100" : "translate-y-[2px] scale-[0.996]"
+          className={`absolute inset-y-0 right-0 w-[202px] rounded-bl-[6px] rounded-tl-[6px] bg-paper shadow-[-10px_0_22px_rgba(0,0,0,0.08)] transition-transform duration-500 ease-[cubic-bezier(0.22,0.88,0.24,1)] ${
+            isQuickMenuOpen && !isAnyOverlayOpen ? "translate-x-0" : "translate-x-[102%]"
           }`}
         >
-          <div className="absolute inset-x-0 top-0 h-[250px] px-10">
-            <div className="relative grid h-full w-full grid-cols-[minmax(230px,1fr)_minmax(297px,auto)] gap-x-8">
-              <div className="relative z-20 flex h-full flex-col items-start justify-start pt-[70px]">
-                <div className="flex w-full flex-col items-start gap-3 text-left">
-                  {profileNavTabs.map((tab) => {
-                    const isActive = activeProfileTab === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setActiveProfileTab(tab.id)}
-                        className={`inline-flex items-end whitespace-nowrap transition-all duration-300 ease-out ${
-                          isActive
-                            ? "leading-none text-ink"
-                            : "font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-inactive hover:text-meta"
-                        }`}
-                      >
-                        {isActive ? (
-                          <span className="inline-flex items-end">
-                            {tab.activeInterLabel ? (
-                              <span className="font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">
-                                {tab.activeInterLabel}
-                              </span>
-                            ) : null}
-                            <span className="ml-[2px] font-instrument text-[25px] italic leading-none tracking-[0.01em]">
-                              {tab.activeInstrumentLabel}
-                            </span>
-                          </span>
-                        ) : (
-                          tab.label
-                        )}
-                      </button>
-                    );
-                  })}
+          <button
+            type="button"
+            aria-label="Close quick menu"
+            onClick={() => setIsQuickMenuOpen(false)}
+            className="group absolute right-4 top-[23px] inline-flex h-[26px] w-[16px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none md:right-10"
+          >
+            <span
+              className={`absolute block h-px w-[16px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+                isQuickMenuOpen ? "translate-y-0 rotate-45" : "-translate-y-[4px] rotate-0"
+              }`}
+            />
+            <span
+              className={`absolute block h-px w-[16px] rounded-full bg-current transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+                isQuickMenuOpen ? "opacity-0" : "opacity-100"
+              }`}
+            />
+            <span
+              className={`absolute block h-px w-[16px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+                isQuickMenuOpen ? "translate-y-0 -rotate-45" : "translate-y-[4px] rotate-0"
+              }`}
+            />
+          </button>
+
+          <div className="flex h-full w-full flex-col pb-6 pl-3 pr-0 pt-[64px]">
+            <ol className="grid gap-[2px]">
+              {topQuickMenuItems.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => openOverlaySurface(item.id)}
+                    className="inline-flex h-[31px] w-full items-center justify-end pr-4 text-right font-ui text-[14px] font-medium leading-5 tracking-[0.28px] text-inactive transition-colors duration-150 hover:text-meta focus-visible:outline-none md:pr-10"
+                  >
+                    {item.label}
+                  </button>
+                </li>
+              ))}
+            </ol>
+
+            <div className="mt-auto flex items-center justify-end gap-[14px] pr-4 md:pr-10">
+              {quickMenuSocialSymbols.map((item) => (
+                <a
+                  key={item.id}
+                  href={item.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={item.label}
+                  className="inline-flex h-[18px] w-[18px] items-center justify-center overflow-hidden transition-opacity duration-150 hover:opacity-75 focus-visible:opacity-75 focus-visible:outline-none"
+                >
+                  <Image
+                    src={item.src}
+                    alt={item.label}
+                    width={18}
+                    height={18}
+                    unoptimized
+                    className="h-[18px] w-[18px] object-contain"
+                  />
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={`fixed inset-0 z-[130] bg-paper pb-[16px] pl-[17px] pr-[17px] pt-[16px] transition-opacity duration-300 ease-out md:pb-[16px] md:pl-[17px] md:pr-[17px] md:pt-[16px] ${
+          isProfileOverlayOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        aria-hidden={!isProfileOverlayOpen}
+      >
+        <button
+          type="button"
+          aria-label="Close profile overlay"
+          onClick={() => setActiveOverlaySurface(null)}
+          className="group fixed right-4 top-[23px] z-[140] inline-flex h-[26px] w-[16px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none md:right-10"
+        >
+          <span
+            className={`absolute block h-px w-[16px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+              isProfileOverlayOpen ? "translate-y-0 rotate-45" : "-translate-y-[4px] rotate-0"
+            }`}
+          />
+          <span
+            className={`absolute block h-px w-[16px] rounded-full bg-current transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+              isProfileOverlayOpen ? "opacity-0" : "opacity-100"
+            }`}
+          />
+          <span
+            className={`absolute block h-px w-[16px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+              isProfileOverlayOpen ? "translate-y-0 -rotate-45" : "translate-y-[4px] rotate-0"
+            }`}
+          />
+        </button>
+
+        <div
+          className={`relative h-full w-full bg-paper transition-transform duration-300 ease-out ${
+            isProfileOverlayOpen ? "translate-y-0 scale-100" : "translate-y-[2px] scale-[0.996]"
+          }`}
+        >
+          <div className="absolute inset-x-0 top-0 z-10 px-10 pt-[24px]">
+            <div className="mx-auto w-full max-w-[1200px]">
+              <p
+                className="text-center font-ui font-bold tracking-[0.02em] text-meta"
+                style={{ fontFamily: "var(--font-meta-mono), monospace" }}
+              >
+                <span className="text-[13px] leading-5">{activeProfileUser?.name ?? "User"}</span>
+                <span className="px-[5px] text-[13px] leading-5 text-meta">·</span>
+                <span className="text-[13px] leading-5">No. {profileUserIdLabel}</span>
+                <span className="px-[5px] text-[13px] leading-5 text-meta">·</span>
+                <span className="text-[13px] leading-5">calibrated {profileCalibrationLabel}</span>
+                <span className="px-[5px] text-[13px] leading-5 text-meta">·</span>
+                <span className="text-[13px] leading-5">Issue {activeIssueNumber}</span>
+              </p>
+
+              <nav aria-label="Profile overlay sections" className="mt-[30px] w-full">
+                <div className="relative mx-auto w-full max-w-[298px] rounded-[18px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] p-[2px] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]">
+                  <ol className="relative z-[1] grid h-[32px] w-full grid-cols-3 gap-[2px]">
+                    {profileOverlayTabs.map((tab) => {
+                      const isActive = activeProfileOverlayTab === tab.id;
+                      return (
+                        <li key={tab.id} className="flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => setActiveProfileOverlayTab(tab.id)}
+                            className={`h-[32px] w-full rounded-[16px] px-3 text-center font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] transition-[background,color,box-shadow] duration-150 focus-visible:outline-none ${
+                              isActive
+                                ? "bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)]"
+                                : "text-meta hover:text-[#5F6471]"
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ol>
                 </div>
-              </div>
-
-              <div className="flex h-full -translate-x-2 items-start justify-end pt-5">
-                <ProfileIdCard />
-              </div>
-
-              <div
-                className="pointer-events-none absolute left-0 top-[186px] h-px w-[35%]"
-                style={{ backgroundColor: DIVIDER_COLOR, boxShadow: DIVIDER_SHADOW }}
-              />
+              </nav>
             </div>
           </div>
 
-          <div className="absolute inset-x-0 bottom-0 top-[194px] overflow-y-auto pt-4">
-            {activeProfileTab === "signature" && activeProfileUser ? (
-              <ProfileSignatureContent user={activeProfileUser} />
-            ) : null}
-            {activeProfileTab === "reference-sets" ? (
-              activeProfileUser ? <ReferenceSetsContent user={activeProfileUser} /> : null
-            ) : null}
+          <div className="absolute inset-x-0 bottom-0 top-[136px] overflow-hidden">
+            <iframe
+              key={`profile-${activeProfileOverlayTab}`}
+              src={profileOverlayHref}
+              title="Profile overlay"
+              className="h-full w-full border-0 bg-transparent"
+            />
           </div>
         </div>
+      </div>
+
+      <div
+        className={`fixed inset-0 z-[130] bg-paper/80 px-5 py-8 transition-opacity duration-250 ease-out sm:px-10 ${
+          isCompactOverlayOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        aria-hidden={!isCompactOverlayOpen}
+      >
         <button
           type="button"
-          aria-label={menuButtonAriaLabel}
-          aria-expanded={isMenuOpen}
-          onClick={() => setIsMenuOpen(false)}
-          className={`absolute right-10 top-[30px] flex h-[11px] w-[15px] items-center justify-center transition-opacity duration-300 ease-out ${
-            isMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-          }`}
+          aria-label="Close overlay"
+          onClick={() => setActiveOverlaySurface(null)}
+          className="absolute inset-0"
+        />
+        <button
+          type="button"
+          aria-label="Close overlay"
+          onClick={() => setActiveOverlaySurface(null)}
+          className="fixed right-4 top-[23px] z-[140] inline-flex h-[26px] w-[16px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none md:right-10"
         >
-          <span className="absolute block h-[1.5px] w-[15px] rotate-45 rounded-full bg-meta" />
-          <span className="absolute block h-[1.5px] w-[15px] -rotate-45 rounded-full bg-meta" />
+          <span className="absolute block h-[1.5px] w-[15px] rotate-45 rounded-full bg-current" />
+          <span className="absolute block h-[1.5px] w-[15px] -rotate-45 rounded-full bg-current" />
         </button>
+        <div className={`relative mx-auto mt-[84px] w-full ${isSettingsOrFeedbackOverlay ? "max-w-[760px]" : "max-w-[840px]"}`}>
+          <div
+            className={`mx-auto w-full rounded-[6px] bg-paper shadow-[0_8px_20px_rgba(0,0,0,0.06)] transition-transform duration-250 ease-out ${
+              isSettingsOrFeedbackOverlay ? "max-w-[740px]" : "max-w-[820px]"
+            } ${
+              isCompactOverlayOpen ? "translate-y-0 scale-100" : "translate-y-[2px] scale-[0.996]"
+            }`}
+          >
+            <div
+              className={`${
+                isSettingsOrFeedbackOverlay ? "" : "h-[min(68vh,680px)]"
+              } w-full overflow-hidden`}
+              style={
+                isSettingsOrFeedbackOverlay && compactSettingsFeedbackHeight
+                  ? { height: `${compactSettingsFeedbackHeight}px` }
+                  : undefined
+              }
+            >
+              {compactOverlayHref ? (
+                <iframe
+                  ref={isSettingsOrFeedbackOverlay ? compactIframeRef : null}
+                  key={`compact-${activeOverlaySurface}`}
+                  src={compactOverlayHref}
+                  title={`${activeOverlaySurface ?? "compact"} overlay`}
+                  onLoad={() => {
+                    if (isSettingsOrFeedbackOverlay) bindCompactIframeObservers();
+                  }}
+                  className={`${isSettingsOrFeedbackOverlay ? "w-full" : "h-full w-full"} border-0 bg-transparent`}
+                  style={
+                    isSettingsOrFeedbackOverlay && compactSettingsFeedbackHeight
+                      ? { height: `${compactSettingsFeedbackHeight}px` }
+                      : undefined
+                  }
+                />
+              ) : null}
+            </div>
+          </div>
+        </div>
       </div>
     </header>
   );

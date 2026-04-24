@@ -367,15 +367,6 @@ export function ProfileSignatureContent({ user }: { user: MockUserProfile }) {
   return (
     <div className="mx-auto w-full max-w-none px-10 pb-8 pt-0 md:px-10 md:pb-10 md:pt-0">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.9, ease: EASE }}>
-          <motion.p
-            className="mb-7 font-ui text-[13px] font-normal leading-[1.5] tracking-[0.02em] text-meta md:mb-8"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.08, ease: EASE }}
-          >
-            A Portrait of the Signature, Decoded Through the References.
-          </motion.p>
-
           <motion.section
             className="mb-12 md:mb-16"
             initial={{ opacity: 0, y: 20 }}

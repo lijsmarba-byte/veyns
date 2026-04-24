@@ -75,9 +75,11 @@ function ActionPill({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-meta shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none"
+      className="group inline-flex items-center justify-center rounded-[18px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] p-[2px] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none"
     >
-      {label}
+      <span className="inline-flex h-[32px] min-w-[96px] items-center justify-center whitespace-nowrap rounded-[16px] bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#fefefd] shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)] transition-[filter] duration-150 group-hover:brightness-[1.05]">
+        {label}
+      </span>
     </button>
   );
 }
@@ -557,9 +559,7 @@ export function OnboardingFlow() {
                           <>
                             <div className="mb-2 flex w-full justify-end">
                               <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
-                                <span aria-hidden="true">|</span>
-                                <span className="px-[2px]">{references.length} references</span>
-                                <span aria-hidden="true">|</span>
+                                <span>{references.length} references</span>
                               </span>
                             </div>
                             <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
@@ -656,9 +656,7 @@ export function OnboardingFlow() {
                         <div className="flex min-w-0 items-center gap-2">
                           {!showAllReferences ? (
                             <span className="inline-flex shrink-0 whitespace-nowrap font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
-                              <span aria-hidden="true">|</span>
-                              <span className="px-[2px]">{references.length} references</span>
-                              <span aria-hidden="true">|</span>
+                              <span>{references.length} references</span>
                             </span>
                           ) : null}
                         </div>
