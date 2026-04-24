@@ -74,6 +74,7 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui-sans), sans-serif;
+  line-height: inherit;
   min-height: var(--viewport-h);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -87,6 +88,7 @@ body {
 
 html {
   scrollbar-gutter: stable;
+  line-height: 1.5;
   min-height: 450px;
   -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
