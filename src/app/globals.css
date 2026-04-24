@@ -43,6 +43,14 @@
 }
 
 @layer base {
+  html {
+    line-height: 1.5;
+  }
+
+  body {
+    line-height: inherit;
+  }
+
   button,
   input[type="button"],
   input[type="submit"],
