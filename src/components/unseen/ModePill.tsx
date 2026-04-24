@@ -54,7 +54,7 @@ export function ModePill({ selected }: ModePillProps) {
 
   return (
     <div
-      className="content-stretch relative flex items-center justify-center rounded-[18px] border-[0.5px] border-[#F0F0F1] border-solid bg-[#F5F5F6] p-[2px]"
+      className="content-stretch relative flex items-center justify-center rounded-[18px] border border-[#F0F0F1] border-solid bg-[#F5F5F6] p-[2px]"
       data-name="Mode Switch"
       data-mode-pill-root="true"
       style={{
