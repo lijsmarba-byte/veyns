@@ -42,32 +42,34 @@
   --font-belmonte: var(--font-belmonte-ballpoint);
 }
 
-button,
-input[type="button"],
-input[type="submit"],
-input[type="reset"],
-input[type="text"],
-input[type="email"],
-input[type="password"],
-input[type="search"],
-textarea {
-  -webkit-appearance: none;
-  appearance: none;
-  background: none;
-  border: none;
-  font: inherit;
-  color: inherit;
-  line-height: inherit;
-}
+@layer base {
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  textarea {
+    -webkit-appearance: none;
+    appearance: none;
+    background: none;
+    border: none;
+    font: inherit;
+    color: inherit;
+    line-height: inherit;
+  }
 
-button {
-  cursor: pointer;
-}
+  button {
+    cursor: pointer;
+  }
 
-input,
-textarea {
-  -webkit-user-select: text;
-  user-select: text;
+  input,
+  textarea {
+    -webkit-user-select: text;
+    user-select: text;
+  }
 }
 
 body {
