@@ -2,7 +2,7 @@ import Link from "next/link";
 
 type ViewToggleProps = {
   mode: "gallery" | "archive";
-  view: "grid" | "immersive" | "world2";
+  view: "grid" | "focus" | "immersive";
   archiveActiveItemCount?: number;
   archiveCapsuleId?: string | null;
 };
@@ -17,16 +17,16 @@ export function ViewToggle({ mode, view, archiveActiveItemCount, archiveCapsuleI
   const archiveCapsuleQuery =
     mode === "archive" && archiveCapsuleId ? `?capsule=${encodeURIComponent(archiveCapsuleId)}` : "";
   const gridHref = mode === "gallery" ? "/gallery" : `/archive${archiveCapsuleQuery}`;
+  const focusHref = mode === "gallery" ? "/gallery/focus" : `/archive/focus${archiveCapsuleQuery}`;
   const immersiveHref = mode === "gallery" ? "/gallery/immersive" : `/archive/immersive${archiveCapsuleQuery}`;
-  const world2Href = mode === "gallery" ? "/gallery/world-2" : `/archive/world-2${archiveCapsuleQuery}`;
   const isArchiveImmersiveLocked =
     mode === "archive" && (archiveActiveItemCount ?? 0) < ARCHIVE_MIN_IMMERSIVE_ITEMS;
   const lockHintText = `Save at least ${ARCHIVE_MIN_IMMERSIVE_ITEMS} items`;
+  const shouldResetFocusStateOnEntry = view !== "focus";
   const shouldResetImmersiveStateOnEntry = view !== "immersive";
-  const shouldResetWorld2StateOnEntry = view !== "world2";
 
-  const handleImmersiveEntry = () => {
-    if (!shouldResetImmersiveStateOnEntry || typeof window === "undefined") return;
+  const handleFocusEntry = () => {
+    if (!shouldResetFocusStateOnEntry || typeof window === "undefined") return;
 
     try {
       window.sessionStorage.removeItem(IMMERSIVE_STATE_KEY);
@@ -35,8 +35,8 @@ export function ViewToggle({ mode, view, archiveActiveItemCount, archiveCapsuleI
     }
   };
 
-  const handleWorld2Entry = () => {
-    if (!shouldResetWorld2StateOnEntry || typeof window === "undefined") return;
+  const handleImmersiveEntry = () => {
+    if (!shouldResetImmersiveStateOnEntry || typeof window === "undefined") return;
 
     try {
       window.sessionStorage.removeItem(WORLD2_CAMERA_STATE_KEY);
@@ -86,11 +86,11 @@ export function ViewToggle({ mode, view, archiveActiveItemCount, archiveCapsuleI
         </div>
       ) : (
         <Link
-          href={immersiveHref}
+          href={focusHref}
           scroll={false}
-          onClick={handleImmersiveEntry}
+          onClick={handleFocusEntry}
           className={`relative pb-[7px] font-ui text-[13px] leading-4 tracking-[0.02em] transition-colors ${
-            view === "immersive" ? "font-medium text-meta/85" : "font-medium text-inactive hover:text-meta/85"
+            view === "focus" ? "font-medium text-meta/85" : "font-medium text-inactive hover:text-meta/85"
           }`}
         >
           Focus
@@ -99,11 +99,11 @@ export function ViewToggle({ mode, view, archiveActiveItemCount, archiveCapsuleI
 
       {mode === "gallery" ? (
         <Link
-          href={world2Href}
+          href={immersiveHref}
           scroll={false}
-          onClick={handleWorld2Entry}
+          onClick={handleImmersiveEntry}
           className={`relative pb-[7px] font-ui text-[13px] leading-4 tracking-[0.02em] transition-colors ${
-            view === "world2" ? "font-medium text-meta/85" : "font-medium text-inactive hover:text-meta/85"
+            view === "immersive" ? "font-medium text-meta/85" : "font-medium text-inactive hover:text-meta/85"
           }`}
         >
           Immersive
@@ -126,11 +126,11 @@ export function ViewToggle({ mode, view, archiveActiveItemCount, archiveCapsuleI
         </div>
       ) : (
         <Link
-          href={world2Href}
+          href={immersiveHref}
           scroll={false}
-          onClick={handleWorld2Entry}
+          onClick={handleImmersiveEntry}
           className={`relative pb-[7px] font-ui text-[13px] leading-4 tracking-[0.02em] transition-colors ${
-            view === "world2" ? "font-medium text-meta/85" : "font-medium text-inactive hover:text-meta/85"
+            view === "immersive" ? "font-medium text-meta/85" : "font-medium text-inactive hover:text-meta/85"
           }`}
         >
           Immersive

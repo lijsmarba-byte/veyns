@@ -2,6 +2,13 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import {
+  clearProductTransitionHold,
+  completeProductTransitionHold,
+  nextAnimationFrame,
+  waitForProductImageDecode,
+  warmProductImage,
+} from "@/components/unseen/productImagePreload";
 
 type RailImage = {
   id: string;
@@ -21,6 +28,7 @@ const DEFAULT_MAIN_ASPECT_RATIO = 560 / 660;
 const PRIMARY_IMAGE_BASE_WIDTH = 560;
 const SECONDARY_IMAGE_BASE_WIDTH = 562;
 const STACKED_TEXT_COLUMN_WIDTH = 460;
+const DEFAULT_VIEWPORT_SIZE = { width: 1440, height: 900 };
 const ENTER_SCROLL_LOCK_KEY = "unseen:enter-scroll-lock";
 const ENTER_SCROLL_INTENT_KEY = "unseen:enter-scroll-intent";
 const ENTER_PREV_BODY_PADDING_ATTR = "data-unseen-enter-prev-pr";
@@ -94,6 +102,18 @@ function readTransitionAspectRatio(productId: string) {
   }
 }
 
+function hasFreshProductTransitionPayload(productId: string) {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.sessionStorage.getItem("unseen:product-view-transition");
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { at?: number; itemId?: string };
+    return typeof parsed.at === "number" && Date.now() - parsed.at < 6000 && parsed.itemId === productId;
+  } catch {
+    return false;
+  }
+}
+
 function getContainRect(containerRect: DOMRect, aspectRatio: number) {
   if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
     return {
@@ -130,6 +150,19 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function readProductViewBackHref() {
+  if (typeof window === "undefined") return "";
+  try {
+    return new URLSearchParams(window.location.search).get("back") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function isImmersiveBackHref(backHref: string) {
+  return /\/immersive(?:$|[?#])/.test(backHref);
+}
+
 export function ProductImageRail({
   images,
   cues,
@@ -137,9 +170,9 @@ export function ProductImageRail({
   productId,
   disableMainImageTopLift = false,
 }: ProductImageRailProps) {
-  const ENTER_DURATION_MS = 780;
-  const ENTER_END_HOLD_MS = 12;
-  const ENTER_CROSSFADE_MS = 280;
+  const ENTER_DURATION_MS = 640;
+  const ENTER_END_HOLD_MS = 0;
+  const ENTER_CROSSFADE_MS = 220;
   const railRef = useRef<HTMLDivElement | null>(null);
   const firstImageRef = useRef<HTMLDivElement | null>(null);
   const enterTransitionActiveRef = useRef(false);
@@ -161,19 +194,15 @@ export function ProductImageRail({
   const [hasAnyFollowingImageInView, setHasAnyFollowingImageInView] = useState(false);
   const [isScrollHintDismissed, setIsScrollHintDismissed] = useState(false);
   const [railViewportBounds, setRailViewportBounds] = useState({ left: 0, width: 0 });
-  const [viewportSize, setViewportSize] = useState(() => {
-    if (typeof window === "undefined") return { width: 1440, height: 900 };
-    return { width: window.innerWidth, height: window.innerHeight };
-  });
+  const [viewportSize, setViewportSize] = useState(DEFAULT_VIEWPORT_SIZE);
+  const [hasMeasuredViewport, setHasMeasuredViewport] = useState(false);
   const [isCueVisible, setIsCueVisible] = useState(false);
   const [activeCueIndex, setActiveCueIndex] = useState(0);
   const [previousCueText, setPreviousCueText] = useState<string | null>(null);
   const [areCuesEnabled, setAreCuesEnabled] = useState(false);
   const [isProductSaved, setIsProductSaved] = useState(false);
   const resolvedMainImageSrc = images[0]?.src ?? "";
-  const [mainImageAspectRatio, setMainImageAspectRatio] = useState(
-    () => readTransitionAspectRatio(productId) ?? DEFAULT_MAIN_ASPECT_RATIO,
-  );
+  const [mainImageAspectRatio, setMainImageAspectRatio] = useState(DEFAULT_MAIN_ASPECT_RATIO);
 
   const showScrollHint = useMemo(
     () => !hasAnyFollowingImageInView && !isScrollHintDismissed,
@@ -188,6 +217,7 @@ export function ProductImageRail({
     return 180;
   }, [disableMainImageTopLift, isDesktopSplitLayout, viewportSize.height]);
   const [mainImageTopLiftPx, setMainImageTopLiftPx] = useState(baseMainImageTopLiftPx);
+  const mainImageTopLiftRef = useRef(baseMainImageTopLiftPx);
   const widthConstrainedScale = useMemo(() => {
     if (!isDesktopSplitLayout) {
       return STACKED_TEXT_COLUMN_WIDTH / PRIMARY_IMAGE_BASE_WIDTH;
@@ -212,36 +242,51 @@ export function ProductImageRail({
   const cuePillToneClass = mode === "archive" || isProductSaved ? "bg-accent" : "bg-ink";
   const cuePillBorderToneClass = mode === "archive" || isProductSaved ? "border-accent" : "border-ink";
 
+  const alignFirstImageToInfoCenterNow = () => {
+    if (!isDesktopSplitLayout || disableMainImageTopLift) return false;
+    const infoBlock = document.querySelector('[data-pv-info-block="true"]') as HTMLElement | null;
+    const imageRoot = firstImageRef.current;
+    if (!infoBlock || !imageRoot) return false;
+
+    const infoRect = infoBlock.getBoundingClientRect();
+    const imageRect = imageRoot.getBoundingClientRect();
+    const infoCenterY = infoRect.top + infoRect.height * 0.5;
+    const imageCenterY = imageRect.top + imageRect.height * 0.5;
+    const currentLift = mainImageTopLiftRef.current;
+    const desiredLift = Math.round(clampNumber((imageCenterY + currentLift) - infoCenterY, 0, 260));
+
+    if (Math.abs(desiredLift - currentLift) <= 0.75) return false;
+    mainImageTopLiftRef.current = desiredLift;
+    setMainImageTopLiftPx(desiredLift);
+    return true;
+  };
+
   useEffect(() => {
     if (!isDesktopSplitLayout || disableMainImageTopLift) {
       hasInitializedDesktopLiftRef.current = false;
+      mainImageTopLiftRef.current = 0;
       setMainImageTopLiftPx(0);
       return;
     }
     if (!hasInitializedDesktopLiftRef.current) {
       hasInitializedDesktopLiftRef.current = true;
+      mainImageTopLiftRef.current = baseMainImageTopLiftPx;
       setMainImageTopLiftPx(baseMainImageTopLiftPx);
     }
   }, [baseMainImageTopLiftPx, disableMainImageTopLift, isDesktopSplitLayout]);
 
+  useEffect(() => {
+    mainImageTopLiftRef.current = mainImageTopLiftPx;
+  }, [mainImageTopLiftPx]);
+
   useLayoutEffect(() => {
     if (!isDesktopSplitLayout || disableMainImageTopLift) return;
+    let resizeObserver: ResizeObserver | null = null;
+    let observerStopTimer: number | null = null;
 
     const alignFirstImageToInfoCenter = () => {
       if (enterTransitionActiveRef.current) return;
-      const infoBlock = document.querySelector('[data-pv-info-block="true"]') as HTMLElement | null;
-      const imageRoot = firstImageRef.current;
-      if (!infoBlock || !imageRoot) return;
-
-      const infoRect = infoBlock.getBoundingClientRect();
-      const imageRect = imageRoot.getBoundingClientRect();
-      const infoCenterY = infoRect.top + infoRect.height * 0.5;
-      const imageCenterY = imageRect.top + imageRect.height * 0.5;
-
-      setMainImageTopLiftPx((currentLift) => {
-        const desiredLift = Math.round(clampNumber((imageCenterY + currentLift) - infoCenterY, 0, 260));
-        return Math.abs(desiredLift - currentLift) > 0.75 ? desiredLift : currentLift;
-      });
+      alignFirstImageToInfoCenterNow();
     };
 
     const scheduleAlign = () => {
@@ -256,24 +301,26 @@ export function ProductImageRail({
 
     scheduleAlign();
 
-    let resizeObserver: ResizeObserver | null = null;
     const infoBlock = document.querySelector('[data-pv-info-block="true"]') as HTMLElement | null;
     if (typeof ResizeObserver !== "undefined" && infoBlock && firstImageRef.current) {
       resizeObserver = new ResizeObserver(scheduleAlign);
       resizeObserver.observe(infoBlock);
       resizeObserver.observe(firstImageRef.current);
+      observerStopTimer = window.setTimeout(() => {
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+      }, 900);
     }
 
-    window.addEventListener("resize", scheduleAlign);
-    window.visualViewport?.addEventListener("resize", scheduleAlign);
     return () => {
       if (alignImageToInfoRafRef.current !== null) {
         window.cancelAnimationFrame(alignImageToInfoRafRef.current);
         alignImageToInfoRafRef.current = null;
       }
+      if (observerStopTimer !== null) {
+        window.clearTimeout(observerStopTimer);
+      }
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", scheduleAlign);
-      window.visualViewport?.removeEventListener("resize", scheduleAlign);
     };
   }, [disableMainImageTopLift, isDesktopSplitLayout]);
 
@@ -350,18 +397,26 @@ export function ProductImageRail({
   }, [isScrollHintDismissed]);
 
   useEffect(() => {
+    let syncFrame: number | null = null;
     const syncViewportSize = () => {
       const vv = window.visualViewport;
       setViewportSize({
         width: Math.max(window.innerWidth, document.documentElement.clientWidth, vv?.width ?? 0),
         height: Math.max(window.innerHeight, document.documentElement.clientHeight, vv?.height ?? 0),
       });
+      setHasMeasuredViewport(true);
     };
 
-    syncViewportSize();
+    syncFrame = window.requestAnimationFrame(() => {
+      syncFrame = null;
+      syncViewportSize();
+    });
     window.addEventListener("resize", syncViewportSize);
     window.visualViewport?.addEventListener("resize", syncViewportSize);
     return () => {
+      if (syncFrame !== null) {
+        window.cancelAnimationFrame(syncFrame);
+      }
       window.removeEventListener("resize", syncViewportSize);
       window.visualViewport?.removeEventListener("resize", syncViewportSize);
     };
@@ -418,7 +473,7 @@ export function ProductImageRail({
 
   useLayoutEffect(() => {
     setMainImageAspectRatio(readTransitionAspectRatio(productId) ?? DEFAULT_MAIN_ASPECT_RATIO);
-  }, [productId]);
+  }, [hasMeasuredViewport, productId]);
 
   useEffect(() => {
     const syncSavedState = () => {
@@ -453,6 +508,18 @@ export function ProductImageRail({
   }, [productId]);
 
   useLayoutEffect(() => {
+    const root = firstImageRef.current;
+    if (!root || hasMeasuredViewport) return;
+    if (!hasFreshProductTransitionPayload(productId)) return;
+
+    root.style.transition = "none";
+    root.style.opacity = "0";
+    root.style.willChange = "opacity";
+  }, [hasMeasuredViewport, productId]);
+
+  useLayoutEffect(() => {
+    if (!hasMeasuredViewport) return;
+
     let cleanupTimer: number | null = null;
     let unlockFallbackTimer: number | null = null;
     const root = firstImageRef.current;
@@ -472,6 +539,7 @@ export function ProductImageRail({
     let touchStartY: number | null = null;
     let hasEnterScrollLock = false;
     let didComplete = false;
+    let didCancel = false;
     setAreCuesEnabled(true);
 
     const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -644,6 +712,8 @@ export function ProductImageRail({
       if (!root) return;
       root.style.opacity = "";
       root.style.transition = "";
+      root.style.transform = "";
+      root.style.transformOrigin = "";
       root.style.willChange = "";
     };
 
@@ -672,7 +742,7 @@ export function ProductImageRail({
       completeTransition();
     };
 
-    const runTransition = () => {
+    const runTransition = async () => {
       if (!root) return;
       let raw: string | null = null;
       try {
@@ -680,7 +750,10 @@ export function ProductImageRail({
       } catch {
         return;
       }
-      if (!raw) return;
+      if (!raw) {
+        clearStyles();
+        return;
+      }
 
       try {
         const parsed = JSON.parse(raw) as {
@@ -696,6 +769,10 @@ export function ProductImageRail({
         const isFresh = Date.now() - parsed.at < 6000;
         if (!isFresh || parsed.itemId !== productId) return;
         if (!parsed.src?.startsWith("/")) return;
+        if (alignFirstImageToInfoCenterNow()) {
+          await nextAnimationFrame();
+          if (didCancel || !root) return;
+        }
         const container = root.getBoundingClientRect();
         if (container.width < 2 || container.height < 2) return;
 
@@ -709,27 +786,91 @@ export function ProductImageRail({
         const last = fallbackLast;
         if (last.width < 2 || last.height < 2) return;
         enterTransitionActiveRef.current = true;
+        const isImmersiveEnter = isImmersiveBackHref(readProductViewBackHref());
+        const enterDurationMs = isImmersiveEnter ? 720 : ENTER_DURATION_MS;
+
+        // Hide the destination image before any async decode work so the first
+        // product-view paint cannot flash a second, unanimated image layer.
+        root.style.transition = "none";
+        root.style.opacity = "0";
+        root.style.willChange = "opacity";
+
+        await waitForProductImageDecode(image, parsed.src, isImmersiveEnter ? 120 : 80);
+        void warmProductImage(image?.currentSrc || parsed.src);
+        if (didCancel || !root) return;
 
         lockPageScrollForEnter();
         hasEnterScrollLock = true;
         startEnterIntentCapture();
         unlockFallbackTimer = window.setTimeout(() => {
           releaseEnterScrollLock();
-        }, ENTER_DURATION_MS + ENTER_END_HOLD_MS + ENTER_CROSSFADE_MS + 700);
+        }, enterDurationMs + ENTER_END_HOLD_MS + ENTER_CROSSFADE_MS + 700);
 
         setAreCuesEnabled(false);
-        root.style.opacity = "0";
-        root.style.willChange = "opacity";
+
+        const persistentOverlayDidStart = completeProductTransitionHold({
+          productId,
+          src: image?.currentSrc || parsed.src,
+          targetRect: last,
+          durationMs: enterDurationMs,
+          crossfadeMs: ENTER_CROSSFADE_MS,
+          easing: isImmersiveEnter ? "cubic-bezier(0.2, 0.88, 0.24, 1)" : "cubic-bezier(0.22, 1, 0.36, 1)",
+          onArrive: () => {
+            if (!root) return;
+            root.style.willChange = "opacity";
+            root.style.opacity = "1";
+          },
+          onDone: () => {
+            completeTransition();
+          },
+        });
+
+        if (persistentOverlayDidStart) {
+          cleanupTimer = window.setTimeout(() => {
+            clearProductTransitionHold();
+            if (root) root.style.opacity = "1";
+            completeTransition();
+          }, enterDurationMs + ENTER_CROSSFADE_MS + 900);
+          return;
+        }
+
+        let targetWidth = last.width;
+        let targetHeight = last.height;
+        let targetLeft = last.left;
+        let targetTop = last.top;
+        let startTransform = "";
+        let startOpacity = 1;
+
+        // Keep fallback enter zoom uniformly scaled to avoid aspect warping during flight.
+        const scaleX = last.width / Math.max(parsed.width, 1);
+        const scaleY = last.height / Math.max(parsed.height, 1);
+        const scale = Math.max(0.0001, (scaleX + scaleY) * 0.5);
+        targetWidth = parsed.width * scale;
+        targetHeight = parsed.height * scale;
+        targetLeft = last.left + (last.width - targetWidth) * 0.5;
+        targetTop = last.top + (last.height - targetHeight) * 0.5;
+        const invertScale = 1 / scale;
+        const invertX = parsed.left - targetLeft;
+        const invertY = parsed.top - targetTop;
+        startTransform = `translate3d(${invertX}px, ${invertY}px, 0px) scale(${invertScale}, ${invertScale})`;
+
         overlay = document.createElement("div");
         overlay.style.position = "fixed";
-        overlay.style.left = `${parsed.left}px`;
-        overlay.style.top = `${parsed.top}px`;
-        overlay.style.width = `${parsed.width}px`;
-        overlay.style.height = `${parsed.height}px`;
+        overlay.style.left = `${targetLeft}px`;
+        overlay.style.top = `${targetTop}px`;
+        overlay.style.width = `${targetWidth}px`;
+        overlay.style.height = `${targetHeight}px`;
         overlay.style.transformOrigin = "top left";
         overlay.style.pointerEvents = "none";
         overlay.style.zIndex = "145";
         overlay.style.willChange = "transform, opacity";
+        overlay.style.backfaceVisibility = "hidden";
+        overlay.style.transformStyle = "preserve-3d";
+        overlay.style.userSelect = "none";
+        overlay.style.contain = "layout paint style";
+        overlay.style.transform = startTransform;
+        overlay.style.opacity = String(startOpacity);
+        overlay.style.setProperty("-webkit-backface-visibility", "hidden");
 
         const overlayImg = document.createElement("img");
         overlayImg.src = image?.currentSrc || parsed.src;
@@ -740,29 +881,30 @@ export function ProductImageRail({
         overlayImg.style.width = "100%";
         overlayImg.style.height = "100%";
         overlayImg.style.objectFit = "contain";
+        overlayImg.style.backfaceVisibility = "hidden";
+        overlayImg.style.transform = "translateZ(0)";
+        overlayImg.style.userSelect = "none";
+        overlayImg.style.setProperty("-webkit-backface-visibility", "hidden");
         overlay.appendChild(overlayImg);
         document.body.appendChild(overlay);
 
-        // Keep enter zoom uniformly scaled to avoid aspect warping during flight.
-        const scaleX = last.width / Math.max(parsed.width, 1);
-        const scaleY = last.height / Math.max(parsed.height, 1);
-        const scale = Math.max(0.0001, (scaleX + scaleY) * 0.5);
-        const targetLeft = last.left + (last.width - parsed.width * scale) * 0.5;
-        const targetTop = last.top + (last.height - parsed.height * scale) * 0.5;
-        const translateX = targetLeft - parsed.left;
-        const translateY = targetTop - parsed.top;
+        await waitForProductImageDecode(overlayImg, parsed.src, 120);
+        await nextAnimationFrame();
+        await nextAnimationFrame();
+        if (didCancel || !overlay) return;
 
         overlayMotion = overlay.animate(
           [
+            { transform: startTransform, opacity: startOpacity },
             { transform: "translate3d(0px, 0px, 0px) scale(1, 1)", opacity: 1 },
-            { transform: `translate3d(${translateX}px, ${translateY}px, 0px) scale(${scale}, ${scale})`, opacity: 1 },
           ],
           {
-            duration: ENTER_DURATION_MS,
-            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            duration: enterDurationMs,
+            easing: isImmersiveEnter ? "cubic-bezier(0.2, 0.88, 0.24, 1)" : "cubic-bezier(0.22, 1, 0.36, 1)",
             fill: "forwards",
           },
         );
+        clearProductTransitionHold();
         overlayMotion.addEventListener(
           "finish",
           () => {
@@ -832,7 +974,7 @@ export function ProductImageRail({
         cleanupTimer = window.setTimeout(() => {
           if (root) root.style.opacity = "1";
           completeTransition();
-        }, ENTER_DURATION_MS + ENTER_END_HOLD_MS + ENTER_CROSSFADE_MS + 420);
+        }, enterDurationMs + ENTER_END_HOLD_MS + ENTER_CROSSFADE_MS + 420);
       } catch {
         // Ignore malformed transition payloads.
         enterTransitionActiveRef.current = false;
@@ -841,12 +983,13 @@ export function ProductImageRail({
       }
     };
 
-    runTransition();
+    void runTransition();
 
     window.addEventListener("resize", handleViewportResizeDuringEnter);
     window.visualViewport?.addEventListener("resize", handleViewportResizeDuringEnter);
 
     return () => {
+      didCancel = true;
       window.removeEventListener("resize", handleViewportResizeDuringEnter);
       window.visualViewport?.removeEventListener("resize", handleViewportResizeDuringEnter);
       if (cleanupTimer !== null) window.clearTimeout(cleanupTimer);
@@ -869,7 +1012,7 @@ export function ProductImageRail({
       clearStyles();
       setAreCuesEnabled(true);
     };
-  }, [productId]);
+  }, [hasMeasuredViewport, productId]);
 
   const mainImageIntrinsicWidth = Math.max(1, Math.round(mainImageAspectRatio * 1000));
   const mainImageIntrinsicHeight = 1000;
@@ -977,12 +1120,12 @@ export function ProductImageRail({
           >
           <div
             ref={index === 0 ? firstImageRef : undefined}
-            data-pv-image-hit="true"
             data-pv-main-image-root={index === 0 ? "true" : undefined}
             className="relative w-full lg:mx-auto"
             style={{ maxWidth: `${index === 0 ? primaryImageMaxWidthPx : nonPrimaryImageMaxWidthPx}px` }}
           >
             <Image
+              data-pv-image-hit="true"
               src={index === 0 && resolvedMainImageSrc ? resolvedMainImageSrc : entry.src}
               alt={entry.alt}
               width={index === 0 ? mainImageIntrinsicWidth : 562}
@@ -999,6 +1142,7 @@ export function ProductImageRail({
 
             {index === 0 && resolvedCues.length > 0 ? (
               <div
+                data-pv-image-hit="true"
                 className="absolute inset-0"
                 onMouseEnter={() => {
                   if (!areCuesEnabled) return;

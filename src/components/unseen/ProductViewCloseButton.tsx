@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { nextAnimationFrame, waitForProductImageDecode, warmProductImage } from "@/components/unseen/productImagePreload";
 
 type TransitionPayload = {
   at: number;
@@ -67,6 +68,23 @@ function getContainRect(containerRect: DOMRect, aspectRatio: number) {
     top: containerRect.top,
     width: fittedWidth,
     height: containerRect.height,
+  };
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getIndicatedTextExit(payload: TransitionPayload, target: DOMRect) {
+  const sourceCenterX = payload.left + payload.width * 0.5;
+  const sourceCenterY = payload.top + payload.height * 0.5;
+  const targetCenterX = target.left + target.width * 0.5;
+  const targetCenterY = target.top + target.height * 0.5;
+
+  return {
+    scale: 0.992,
+    x: clampNumber((sourceCenterX - targetCenterX) * 0.045, -18, 18),
+    y: clampNumber((sourceCenterY - targetCenterY) * 0.045, -16, 16),
   };
 }
 
@@ -213,16 +231,20 @@ function startReturnScrollBlock() {
     event.preventDefault();
   };
 
-  window.addEventListener("wheel", onWheel, { passive: false, capture: true });
-  window.addEventListener("touchstart", onTouchStart, { passive: true, capture: true });
-  window.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
-  window.addEventListener("keydown", onKeyDown, true);
+  const scrollBlockOptions = { passive: false, capture: true } as const;
+  const touchStartOptions = { passive: true, capture: true } as const;
+  const keyBlockOptions = { capture: true } as const;
+
+  window.addEventListener("wheel", onWheel, scrollBlockOptions);
+  window.addEventListener("touchstart", onTouchStart, touchStartOptions);
+  window.addEventListener("touchmove", onTouchMove, scrollBlockOptions);
+  window.addEventListener("keydown", onKeyDown, keyBlockOptions);
 
   return () => {
-    window.removeEventListener("wheel", onWheel, true);
-    window.removeEventListener("touchstart", onTouchStart, true);
-    window.removeEventListener("touchmove", onTouchMove, true);
-    window.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("wheel", onWheel, scrollBlockOptions);
+    window.removeEventListener("touchstart", onTouchStart, touchStartOptions);
+    window.removeEventListener("touchmove", onTouchMove, scrollBlockOptions);
+    window.removeEventListener("keydown", onKeyDown, keyBlockOptions);
   };
 }
 
@@ -238,27 +260,29 @@ function startReturnInteractionBlock() {
     event.preventDefault();
     event.stopPropagation();
   };
+  const touchBlockOptions = { passive: false, capture: true } as const;
+  const captureOptions = { capture: true } as const;
 
-  window.addEventListener("pointerdown", blockPointer, true);
-  window.addEventListener("pointerup", blockPointer, true);
-  window.addEventListener("mousedown", blockClickLike, true);
-  window.addEventListener("mouseup", blockClickLike, true);
-  window.addEventListener("click", blockClickLike, true);
-  window.addEventListener("dblclick", blockClickLike, true);
-  window.addEventListener("touchstart", blockPointer, { passive: false, capture: true });
-  window.addEventListener("touchend", blockPointer, { passive: false, capture: true });
-  window.addEventListener("contextmenu", blockClickLike, true);
+  window.addEventListener("pointerdown", blockPointer, captureOptions);
+  window.addEventListener("pointerup", blockPointer, captureOptions);
+  window.addEventListener("mousedown", blockClickLike, captureOptions);
+  window.addEventListener("mouseup", blockClickLike, captureOptions);
+  window.addEventListener("click", blockClickLike, captureOptions);
+  window.addEventListener("dblclick", blockClickLike, captureOptions);
+  window.addEventListener("touchstart", blockPointer, touchBlockOptions);
+  window.addEventListener("touchend", blockPointer, touchBlockOptions);
+  window.addEventListener("contextmenu", blockClickLike, captureOptions);
 
   return () => {
-    window.removeEventListener("pointerdown", blockPointer, true);
-    window.removeEventListener("pointerup", blockPointer, true);
-    window.removeEventListener("mousedown", blockClickLike, true);
-    window.removeEventListener("mouseup", blockClickLike, true);
-    window.removeEventListener("click", blockClickLike, true);
-    window.removeEventListener("dblclick", blockClickLike, true);
-    window.removeEventListener("touchstart", blockPointer, true);
-    window.removeEventListener("touchend", blockPointer, true);
-    window.removeEventListener("contextmenu", blockClickLike, true);
+    window.removeEventListener("pointerdown", blockPointer, captureOptions);
+    window.removeEventListener("pointerup", blockPointer, captureOptions);
+    window.removeEventListener("mousedown", blockClickLike, captureOptions);
+    window.removeEventListener("mouseup", blockClickLike, captureOptions);
+    window.removeEventListener("click", blockClickLike, captureOptions);
+    window.removeEventListener("dblclick", blockClickLike, captureOptions);
+    window.removeEventListener("touchstart", blockPointer, touchBlockOptions);
+    window.removeEventListener("touchend", blockPointer, touchBlockOptions);
+    window.removeEventListener("contextmenu", blockClickLike, captureOptions);
   };
 }
 
@@ -281,30 +305,67 @@ export function ProductViewCloseButton({
   const router = useRouter();
   const [isAnimating, setIsAnimating] = useState(false);
   const isAnimatingRef = useRef(false);
-  const CLOSE_DURATION_MS = 780;
-  const CLOSE_END_HOLD_MS = 48;
-  const CLOSE_TARGET_REVEAL_LEAD_MS = 360;
-  const CLOSE_TARGET_REVEAL_LEAD_IMMERSIVE_MS = 320;
+  const hasViewportResizedRef = useRef(false);
+  const initialViewportSizeRef = useRef<{ height: number; width: number } | null>(null);
+  const CLOSE_DURATION_MS = 640;
+  const CLOSE_END_HOLD_MS = 36;
+  const CLOSE_TARGET_PREPAINT_LEAD_MS = 80;
   const CLOSE_ROUTE_DELAY_MS = 260;
   const CLOSE_TEXT_EXIT_DELAY_MS = 120;
   const CLOSE_SHELL_FADE_DURATION_MS = 460;
   const CLOSE_SHELL_FADE_DELAY_MS = 70;
   const isImmersiveReturn = backHref.includes("/immersive");
-  const isWorld2Return = backHref.includes("/world-2");
-  const closeEndHoldMs = isImmersiveReturn ? 190 : isWorld2Return ? 80 : CLOSE_END_HOLD_MS;
+  const closeEndHoldMs = isImmersiveReturn ? 80 : CLOSE_END_HOLD_MS;
 
   useEffect(() => {
     router.prefetch(backHref);
   }, [backHref, router]);
 
-  const handleClose = useCallback(() => {
+  useEffect(() => {
+    let isArmed = false;
+    let raf1: number | null = null;
+    let raf2: number | null = null;
+
+    const readSize = () => ({
+      height: Math.round(window.visualViewport?.height ?? window.innerHeight),
+      width: Math.round(window.visualViewport?.width ?? window.innerWidth),
+    });
+
+    const markIfResized = () => {
+      if (!isArmed) return;
+      const initial = initialViewportSizeRef.current;
+      if (!initial) return;
+      const current = readSize();
+      if (Math.abs(current.width - initial.width) > 2 || Math.abs(current.height - initial.height) > 2) {
+        hasViewportResizedRef.current = true;
+      }
+    };
+
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        initialViewportSizeRef.current = readSize();
+        isArmed = true;
+      });
+    });
+
+    window.addEventListener("resize", markIfResized);
+    window.visualViewport?.addEventListener("resize", markIfResized);
+    return () => {
+      if (raf1 !== null) window.cancelAnimationFrame(raf1);
+      if (raf2 !== null) window.cancelAnimationFrame(raf2);
+      window.removeEventListener("resize", markIfResized);
+      window.visualViewport?.removeEventListener("resize", markIfResized);
+    };
+  }, []);
+
+  const handleClose = useCallback(async () => {
     if (isAnimatingRef.current) return;
     isAnimatingRef.current = true;
     setIsAnimating(true);
     lockPageScrollForReturn();
     const stopIntentCapture = startReturnIntentCapture();
     const stopScrollBlock = startReturnScrollBlock();
-    const stopInteractionBlock = startReturnInteractionBlock();
+    const stopInteractionBlock = isImmersiveReturn ? () => {} : startReturnInteractionBlock();
     let hardBlockReleased = false;
     let hardBlockReleaseTimer: number | null = null;
     const onReturnFlightFinished = () => {
@@ -329,25 +390,32 @@ export function ProductViewCloseButton({
     const imageRoot = document.querySelector('[data-pv-main-image-root="true"]') as HTMLElement | null;
     const imageTag = imageRoot?.querySelector("img") as HTMLImageElement | null;
     const imageRect = imageRoot?.getBoundingClientRect() ?? null;
-    const canUseImageReturn = Boolean(payload && imageRoot && imageRect && isRectMostlyInViewport(imageRect));
+    const useIndicatedImageReturn = isImmersiveReturn && !hasViewportResizedRef.current;
+    const canUseImageReturn = Boolean(
+      payload &&
+      imageRoot &&
+      imageRect &&
+      isRectMostlyInViewport(imageRect) &&
+      !hasViewportResizedRef.current,
+    );
+    const canUseExactImageReturn = canUseImageReturn && !useIndicatedImageReturn;
+    const canUseIndicatedImageReturn = canUseImageReturn && useIndicatedImageReturn;
     let closeDurationMs = CLOSE_DURATION_MS;
     let closeSettleHoldMs = closeEndHoldMs;
-    let world2TravelRatio = 0;
-    let world2MotionIntensity = 0;
     let closeFlightEasing = "cubic-bezier(0.22, 1, 0.36, 1)";
     let closeOverlay: HTMLDivElement | null = null;
-    const returnBackdropDetail = canUseImageReturn
+    const returnBackdropDetail = canUseExactImageReturn || canUseIndicatedImageReturn
       ? {
-          targetOpacity: 0.055,
+          targetOpacity: isImmersiveReturn ? 0.085 : 0.16,
           raiseMs: 240,
-          holdMs: 160,
-          fallMs: 1080,
+          holdMs: isImmersiveReturn ? 260 : 260,
+          fallMs: isImmersiveReturn ? 1260 : 780,
         }
       : {
-          targetOpacity: 0.05,
+          targetOpacity: isImmersiveReturn ? 0.08 : 0.18,
           raiseMs: 110,
-          holdMs: 220,
-          fallMs: 1700,
+          holdMs: isImmersiveReturn ? 300 : 280,
+          fallMs: isImmersiveReturn ? 1500 : 860,
         };
     window.dispatchEvent(
       new CustomEvent("unseen:return-transition-start", {
@@ -361,28 +429,43 @@ export function ProductViewCloseButton({
       }),
     );
 
-    if (imageRoot) {
+    const hideLiveImage = () => {
+      if (!imageRoot) return;
       imageRoot.style.willChange = "opacity";
       imageRoot.style.transition = "none";
       imageRoot.style.opacity = "0";
       imageRoot.style.visibility = "hidden";
+    };
+
+    if (imageRoot && !canUseExactImageReturn && !canUseIndicatedImageReturn) {
+      hideLiveImage();
     }
 
     if (textRoot) {
+      const textExit =
+        isImmersiveReturn && payload
+          ? getIndicatedTextExit(payload, textRoot.getBoundingClientRect())
+          : null;
+      const textTransform = textExit
+        ? `translate3d(${textExit.x}px, ${textExit.y}px, 0px) scale(${textExit.scale})`
+        : "translate3d(0px, -8px, 0px)";
       textRoot.style.willChange = "opacity, transform";
-      textRoot.style.transition = `opacity 460ms ease-out ${CLOSE_TEXT_EXIT_DELAY_MS}ms, transform 620ms cubic-bezier(0.22, 1, 0.36, 1) ${CLOSE_TEXT_EXIT_DELAY_MS}ms`;
+      textRoot.style.transformOrigin = "center center";
+      textRoot.style.transition = textExit
+        ? "opacity 440ms ease-out 80ms, transform 700ms cubic-bezier(0.22, 1, 0.36, 1) 60ms"
+        : `opacity 460ms ease-out ${CLOSE_TEXT_EXIT_DELAY_MS}ms, transform 620ms cubic-bezier(0.22, 1, 0.36, 1) ${CLOSE_TEXT_EXIT_DELAY_MS}ms`;
       textRoot.style.opacity = "0";
-      textRoot.style.transform = "translate3d(0px, -8px, 0px)";
+      textRoot.style.transform = textTransform;
     }
 
-    if (canUseImageReturn && shellRoot) {
+    if ((canUseExactImageReturn || canUseIndicatedImageReturn) && shellRoot) {
       shellRoot.style.willChange = "opacity";
       shellRoot.style.transition = `opacity ${CLOSE_SHELL_FADE_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) ${CLOSE_SHELL_FADE_DELAY_MS}ms`;
       shellRoot.style.opacity = "0";
       shellRoot.style.pointerEvents = "none";
     }
 
-    if (canUseImageReturn && payload && imageRoot) {
+    if (canUseExactImageReturn && payload && imageRoot) {
       const rootRect = imageRoot.getBoundingClientRect();
       const aspectRatio =
         payload.aspectRatio && payload.aspectRatio > 0
@@ -396,24 +479,22 @@ export function ProductViewCloseButton({
       const scaleX = payload.width / Math.max(start.width, 1);
       const scaleY = payload.height / Math.max(start.height, 1);
       const scale = (scaleX + scaleY) * 0.5;
-      if (isWorld2Return) {
+      if (isImmersiveReturn) {
         const travelDistancePx = Math.hypot(translateX, translateY);
         const viewportDiagonalPx = Math.max(1, Math.hypot(window.innerWidth, window.innerHeight));
         const travelRatio = Math.min(2.2, travelDistancePx / viewportDiagonalPx);
         const clampedScale = Math.max(0.08, Math.min(12, scale));
         const scaleDeltaRatio = Math.abs(Math.log(clampedScale));
         const motionIntensity = Math.min(3.2, travelRatio * 1.1 + scaleDeltaRatio * 0.7);
-        world2TravelRatio = travelRatio;
-        world2MotionIntensity = motionIntensity;
         closeDurationMs = Math.round(
-          Math.min(1820, Math.max(CLOSE_DURATION_MS, CLOSE_DURATION_MS + motionIntensity * 320)),
+          Math.min(1280, Math.max(CLOSE_DURATION_MS, CLOSE_DURATION_MS + motionIntensity * 205)),
         );
         closeSettleHoldMs = Math.round(
-          Math.min(170, Math.max(closeEndHoldMs, closeEndHoldMs + motionIntensity * 34)),
+          Math.min(140, Math.max(closeEndHoldMs, closeEndHoldMs + motionIntensity * 28)),
         );
         closeFlightEasing = "cubic-bezier(0.2, 0.88, 0.24, 1)";
       }
-      const visibleTop = getVisibleGridTop();
+      const visibleTop = isImmersiveReturn ? 0 : getVisibleGridTop();
 
       closeOverlay = document.createElement("div");
       closeOverlay.style.position = "fixed";
@@ -441,7 +522,9 @@ export function ProductViewCloseButton({
       motionLayer.style.transform = "translate3d(0px, 0px, 0px) scale(1, 1)";
       motionLayer.style.backfaceVisibility = "hidden";
       motionLayer.style.webkitBackfaceVisibility = "hidden";
+      motionLayer.style.transformStyle = "preserve-3d";
       motionLayer.style.contain = "layout paint style";
+      motionLayer.style.userSelect = "none";
 
       const overlayImg = document.createElement("img");
       overlayImg.src = imageTag?.currentSrc || imageTag?.src || payload.src;
@@ -455,9 +538,15 @@ export function ProductViewCloseButton({
       overlayImg.style.backfaceVisibility = "hidden";
       overlayImg.style.webkitBackfaceVisibility = "hidden";
       overlayImg.style.transform = "translateZ(0)";
+      overlayImg.style.userSelect = "none";
       motionLayer.appendChild(overlayImg);
       closeOverlay.appendChild(motionLayer);
       document.body.appendChild(closeOverlay);
+      await waitForProductImageDecode(overlayImg, payload.src, 90);
+      void warmProductImage(imageTag?.currentSrc || imageTag?.src || payload.src);
+      await nextAnimationFrame();
+      await nextAnimationFrame();
+      hideLiveImage();
       let cleanupTimerId: number | null = null;
       let didSignalFlightFinished = false;
 
@@ -496,6 +585,130 @@ export function ProductViewCloseButton({
             window.setTimeout(() => {
               removeCloseOverlay();
             }, Math.max(0, closeSettleHoldMs));
+          },
+          { once: true },
+        );
+      };
+      window.requestAnimationFrame(startFlight);
+      cleanupTimerId = window.setTimeout(() => {
+        motion?.cancel();
+        removeCloseOverlay();
+      }, closeDurationMs + closeSettleHoldMs + 500);
+    } else if (canUseIndicatedImageReturn && payload && imageRoot) {
+      closeDurationMs = 760;
+      closeSettleHoldMs = 70;
+      const rootRect = imageRoot.getBoundingClientRect();
+      const aspectRatio =
+        payload.aspectRatio && payload.aspectRatio > 0
+          ? payload.aspectRatio
+          : imageTag && imageTag.naturalWidth > 0 && imageTag.naturalHeight > 0
+            ? imageTag.naturalWidth / imageTag.naturalHeight
+            : 0;
+      const start = aspectRatio > 0 ? getContainRect(rootRect, aspectRatio) : imageTag?.getBoundingClientRect() ?? rootRect;
+      const startCenterX = start.left + start.width * 0.5;
+      const startCenterY = start.top + start.height * 0.5;
+      const sourceCenterX = payload.left + payload.width * 0.5;
+      const sourceCenterY = payload.top + payload.height * 0.5;
+      const deltaX = sourceCenterX - startCenterX;
+      const deltaY = sourceCenterY - startCenterY;
+      const distance = Math.max(1, Math.hypot(deltaX, deltaY));
+      const driftDistance = Math.min(74, Math.max(30, distance * 0.1));
+      const indicatedX = (deltaX / distance) * driftDistance;
+      const indicatedY = (deltaY / distance) * driftDistance;
+      const indicatedScale = 0.88;
+      const visibleTop = isImmersiveReturn ? 0 : getVisibleGridTop();
+
+      closeOverlay = document.createElement("div");
+      closeOverlay.style.position = "fixed";
+      closeOverlay.style.left = "0px";
+      closeOverlay.style.top = "0px";
+      closeOverlay.style.width = "100vw";
+      closeOverlay.style.height = "100vh";
+      closeOverlay.style.zIndex = "180";
+      closeOverlay.style.pointerEvents = "none";
+      closeOverlay.style.overflow = "hidden";
+      if (visibleTop > 0) {
+        const clip = `inset(${visibleTop}px 0px 0px 0px)`;
+        closeOverlay.style.clipPath = clip;
+        closeOverlay.style.setProperty("-webkit-clip-path", clip);
+      }
+
+      const motionLayer = document.createElement("div");
+      motionLayer.style.position = "absolute";
+      motionLayer.style.left = `${start.left}px`;
+      motionLayer.style.top = `${start.top}px`;
+      motionLayer.style.width = `${start.width}px`;
+      motionLayer.style.height = `${start.height}px`;
+      motionLayer.style.transformOrigin = "center center";
+      motionLayer.style.willChange = "transform, opacity";
+      motionLayer.style.transform = "translate3d(0px, 0px, 0px) scale(1, 1)";
+      motionLayer.style.backfaceVisibility = "hidden";
+      motionLayer.style.webkitBackfaceVisibility = "hidden";
+      motionLayer.style.transformStyle = "preserve-3d";
+      motionLayer.style.contain = "layout paint style";
+      motionLayer.style.userSelect = "none";
+
+      const overlayImg = document.createElement("img");
+      overlayImg.src = imageTag?.currentSrc || imageTag?.src || payload.src;
+      overlayImg.alt = "";
+      overlayImg.decoding = "sync";
+      overlayImg.loading = "eager";
+      overlayImg.style.width = "100%";
+      overlayImg.style.height = "100%";
+      overlayImg.style.objectFit = "contain";
+      overlayImg.style.display = "block";
+      overlayImg.style.backfaceVisibility = "hidden";
+      overlayImg.style.webkitBackfaceVisibility = "hidden";
+      overlayImg.style.transform = "translateZ(0)";
+      overlayImg.style.userSelect = "none";
+      motionLayer.appendChild(overlayImg);
+      closeOverlay.appendChild(motionLayer);
+      document.body.appendChild(closeOverlay);
+      await waitForProductImageDecode(overlayImg, payload.src, 70);
+      void warmProductImage(imageTag?.currentSrc || imageTag?.src || payload.src);
+      await nextAnimationFrame();
+      await nextAnimationFrame();
+      hideLiveImage();
+
+      let cleanupTimerId: number | null = null;
+      let didSignalFlightFinished = false;
+      const markFlightFinished = () => {
+        if (didSignalFlightFinished) return;
+        didSignalFlightFinished = true;
+        signalReturnFlightFinished();
+      };
+      const removeCloseOverlay = () => {
+        if (cleanupTimerId !== null) {
+          window.clearTimeout(cleanupTimerId);
+          cleanupTimerId = null;
+        }
+        closeOverlay?.remove();
+        closeOverlay = null;
+        markFlightFinished();
+      };
+
+      let motion: Animation | null = null;
+      const startFlight = () => {
+        motion = motionLayer.animate(
+          [
+            { transform: "translate3d(0px, 0px, 0px) scale(1, 1)", opacity: 1 },
+            {
+              transform: `translate3d(${indicatedX * 0.46}px, ${indicatedY * 0.46}px, 0px) scale(${1 - (1 - indicatedScale) * 0.46}, ${1 - (1 - indicatedScale) * 0.46})`,
+              opacity: 0.78,
+              offset: 0.52,
+            },
+            { transform: `translate3d(${indicatedX}px, ${indicatedY}px, 0px) scale(${indicatedScale}, ${indicatedScale})`, opacity: 0 },
+          ],
+          {
+            duration: closeDurationMs,
+            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            fill: "forwards",
+          },
+        );
+        motion.addEventListener(
+          "finish",
+          () => {
+            window.setTimeout(removeCloseOverlay, Math.max(0, closeSettleHoldMs));
           },
           { once: true },
         );
@@ -559,52 +772,48 @@ export function ProductViewCloseButton({
 
     window.setTimeout(() => {
       stopIntentCapture();
-      if (isWorld2Return) {
+      if (isImmersiveReturn) {
         try {
           const now = Date.now();
-          const remainingFlightMs = Math.max(0, closeDurationMs + closeSettleHoldMs - CLOSE_ROUTE_DELAY_MS);
-          const world2RevealLagMs = Math.round(72 + world2MotionIntensity * 22 + world2TravelRatio * 10);
-          const world2LockTailMs = Math.round(38 + world2MotionIntensity * 24);
+          const world2RevealLagMs = canUseIndicatedImageReturn
+            ? Math.max(500, closeDurationMs + closeSettleHoldMs - CLOSE_ROUTE_DELAY_MS - 40)
+            : 180;
+          const world2LockTailMs = canUseIndicatedImageReturn ? 80 : 60;
           window.sessionStorage.setItem(
             WORLD2_RETURN_REVEAL_KEY,
             JSON.stringify({
               at: now,
+              itemId: productId,
               href: backHref,
-              revealAt: now + remainingFlightMs + world2RevealLagMs,
-              lockUntil: now + remainingFlightMs + world2RevealLagMs + world2LockTailMs,
-              fadeMs: 260,
+              revealAt: now + world2RevealLagMs,
+              lockUntil: now + world2RevealLagMs + world2LockTailMs,
+              fadeMs: canUseIndicatedImageReturn ? 380 : 500,
             }),
           );
         } catch {
           // Optional return polish only.
         }
       }
-      if (canUseImageReturn) {
+      if (canUseExactImageReturn || canUseIndicatedImageReturn) {
         try {
           const closeSettleMs = Math.max(0, closeSettleHoldMs);
-          const hideBaseMs = closeDurationMs + closeSettleMs;
-          const targetRevealLeadMs = isImmersiveReturn
-            ? CLOSE_TARGET_REVEAL_LEAD_IMMERSIVE_MS
-            : CLOSE_TARGET_REVEAL_LEAD_MS;
+          const remainingHideBaseMs = Math.max(0, closeDurationMs + closeSettleMs - CLOSE_ROUTE_DELAY_MS);
+          const targetPrepaintLeadMs = canUseExactImageReturn ? CLOSE_TARGET_PREPAINT_LEAD_MS : 0;
           window.sessionStorage.setItem(
             RETURN_FOCUS_ITEM_KEY,
             JSON.stringify({
               itemId: productId,
               at: Date.now(),
-              hideUntil: Date.now() + Math.max(0, hideBaseMs - targetRevealLeadMs),
+              hideUntil: Date.now() + Math.max(0, remainingHideBaseMs - targetPrepaintLeadMs),
             }),
           );
         } catch {
           // Optional return polish only.
         }
       }
-      if (window.history.length > 1) {
-        router.back();
-        return;
-      }
-      router.push(backHref, { scroll: false });
+      router.replace(backHref, { scroll: false });
     }, CLOSE_ROUTE_DELAY_MS);
-  }, [backHref, closeEndHoldMs, isImmersiveReturn, isWorld2Return, productId, router]);
+  }, [backHref, closeEndHoldMs, isImmersiveReturn, productId, router]);
 
   useEffect(() => {
     if (!enableBackdropClose) return;
@@ -615,7 +824,6 @@ export function ProductViewCloseButton({
         if (!(entry instanceof Element)) return false;
         return (
           entry.matches('[data-pv-close-button="true"]') ||
-          entry.matches('[data-pv-info-block="true"]') ||
           entry.matches('[data-pv-info-hit="true"]') ||
           entry.matches('[data-pv-image-hit="true"]')
         );
@@ -625,7 +833,6 @@ export function ProductViewCloseButton({
       const target = event.target as Element | null;
       if (!target) return;
       if (target.closest('[data-pv-close-button="true"]')) return;
-      if (target.closest('[data-pv-info-block="true"]')) return;
       if (target.closest('[data-pv-info-hit="true"]')) return;
       if (target.closest('[data-pv-image-hit="true"]')) return;
 

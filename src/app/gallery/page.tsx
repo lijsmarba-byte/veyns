@@ -23,7 +23,7 @@ export default function GalleryPage() {
         <div
           data-gallery-left-nav="true"
           className="pointer-events-none fixed left-5 z-40 hidden -translate-y-1/2 lg:block"
-          style={{ top: "calc(var(--sticky-h) + (var(--viewport-h) - var(--sticky-h)) / 2 - 32px)" }}
+          style={{ top: "var(--gallery-category-nav-top)" }}
         >
           <div className="pointer-events-auto">
             <RightCategoryNav
@@ -33,9 +33,9 @@ export default function GalleryPage() {
           </div>
         </div>
         <section data-grid-root="true" className="relative w-full pb-24 pt-[64px]">
-          <div className="mx-auto max-w-[1333px] px-10 lg:pl-[220px]">
+          <div className="mx-auto max-w-[1333px] px-10 xl:pl-[220px]">
             <div className="min-w-0">
-              {sections.map((section) => (
+              {sections.map((section, sectionIndex) => (
                 <section
                   key={section.key}
                   id={`gallery-section-${section.key.toLowerCase()}`}
@@ -43,9 +43,15 @@ export default function GalleryPage() {
                   style={{ scrollMarginTop: "calc(var(--sticky-h) + 170px)" }}
                   aria-label={section.title}
                 >
-                  <div className="grid grid-cols-1 gap-y-[148px] md:grid-cols-2 md:gap-x-[64px] lg:grid-cols-3 lg:gap-x-[72px]">
-                    {section.items.map((item) => (
-                      <ProductTile key={item.id} item={item} mode="gallery" issueNumber="04" />
+                  <div className="grid grid-cols-1 gap-y-[148px] md:grid-cols-2 md:gap-x-[64px] xl:grid-cols-3 xl:gap-x-[72px]">
+                    {section.items.map((item, itemIndex) => (
+                      <ProductTile
+                        key={item.id}
+                        item={item}
+                        mode="gallery"
+                        issueNumber="04"
+                        imagePriority={sectionIndex === 0 && itemIndex === 0}
+                      />
                     ))}
                   </div>
                 </section>

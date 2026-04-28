@@ -74,6 +74,7 @@ export function World2CategoryNav({
   const markerWidthPx = 1.5;
   const inactiveTextLeftPx = markerLeftInsetPx + markerGapPx + markerWidthPx;
   const markerHeightPx = isExpanded ? expandedMarkerHeightPx : collapsedMarkerHeightPx;
+  const markerScale = markerHeightPx / expandedMarkerHeightPx;
   const markerCenterOffsetPx = isExpanded
     ? Math.round((((options.length - 1) / 2) - activeIndex) * expandedRowStepPx)
     : 0;
@@ -143,6 +144,7 @@ export function World2CategoryNav({
               <span className="relative inline-flex items-center">
                 <span
                   aria-hidden="true"
+                  data-world2-category-glow="true"
                   className="pointer-events-none absolute -inset-y-[14px]"
                   style={{
                     left: "-38px",
@@ -153,6 +155,7 @@ export function World2CategoryNav({
                 />
                 <span
                   aria-hidden="true"
+                  data-world2-category-glow="true"
                   className="pointer-events-none absolute -inset-y-[9px]"
                   style={{
                     left: "-28px",
@@ -163,6 +166,7 @@ export function World2CategoryNav({
                 />
                 <span
                   aria-hidden="true"
+                  data-world2-category-glow="true"
                   className="pointer-events-none absolute -inset-y-[5px]"
                   style={{
                     left: "-22px",
@@ -178,14 +182,26 @@ export function World2CategoryNav({
             </button>
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute left-0 top-1/2 block bg-ink transition-[height,transform] ease-out motion-reduce:transition-none"
+              className="pointer-events-none absolute left-0 top-1/2 flex items-center transition-transform ease-out motion-reduce:transition-none"
               style={{
                 width: `${markerWidthPx}px`,
-                height: `${markerHeightPx}px`,
+                height: `${expandedMarkerHeightPx}px`,
                 transform: `translateY(calc(-50% + ${markerCenterOffsetPx}px))`,
                 transitionDuration: `${motionDurationMs}ms`,
+                willChange: "transform",
               }}
-            />
+            >
+              <span
+                className="block origin-center bg-ink transition-transform ease-out motion-reduce:transition-none"
+                style={{
+                  width: `${markerWidthPx}px`,
+                  height: `${expandedMarkerHeightPx}px`,
+                  transform: `scaleY(${markerScale})`,
+                  transitionDuration: `${motionDurationMs}ms`,
+                  willChange: "transform",
+                }}
+              />
+            </span>
           </div>
         ) : null}
 
@@ -217,9 +233,10 @@ export function World2CategoryNav({
                   onClick={() => onSelect(option.key)}
                   className="relative z-10 inline-flex items-center justify-start text-left font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-inactive transition-colors duration-300 ease-out hover:text-meta focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
                 >
-                  <span className="relative inline-flex items-center px-[3px] py-[1px]">
+                  <span className="relative inline-flex items-center">
                     <span
                       aria-hidden="true"
+                      data-world2-category-glow="true"
                       className={`pointer-events-none absolute -inset-x-[20px] -inset-y-[12px] transition-opacity duration-200 ${
                         isExpanded ? "opacity-100" : "opacity-0"
                       }`}
@@ -230,6 +247,7 @@ export function World2CategoryNav({
                     />
                     <span
                       aria-hidden="true"
+                      data-world2-category-glow="true"
                       className={`pointer-events-none absolute -inset-x-[12px] -inset-y-[8px] transition-opacity duration-200 ${
                         isExpanded ? "opacity-100" : "opacity-0"
                       }`}
@@ -240,6 +258,7 @@ export function World2CategoryNav({
                     />
                     <span
                       aria-hidden="true"
+                      data-world2-category-glow="true"
                       className={`pointer-events-none absolute -inset-x-[6px] -inset-y-[4px] transition-opacity duration-200 ${
                         isExpanded ? "opacity-100" : "opacity-0"
                       }`}

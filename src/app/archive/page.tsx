@@ -53,8 +53,14 @@ export default async function ArchivePage({ searchParams }: ArchivePageProps) {
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-y-[132px] md:grid-cols-2 md:gap-x-[64px] lg:grid-cols-3 lg:gap-x-[72px]">
-                {sectionItems.map((item) => (
-                  <ProductTile key={item.id} item={item} mode="archive" issueNumber={issueLabel} />
+                {sectionItems.map((item, itemIndex) => (
+                  <ProductTile
+                    key={item.id}
+                    item={item}
+                    mode="archive"
+                    issueNumber={issueLabel}
+                    imagePriority={itemIndex === 0}
+                  />
                 ))}
               </div>
             )}

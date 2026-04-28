@@ -34,7 +34,7 @@ const rawSections: MockCatalogSectionBase[] = [
       {
         "id": "item-01",
         "idxLabel": "[01]",
-        "brand": "La DoubleJ",
+        "brand": "Seven For All Mankind",
         "price": "1560 EUR",
         "imgSrc": "/mock/OUTER/P01130772 Background Removed.png",
         "artsyName": "Floral Cascade",
@@ -47,7 +47,7 @@ const rawSections: MockCatalogSectionBase[] = [
       {
         "id": "item-02",
         "idxLabel": "[02]",
-        "brand": "Prada",
+        "brand": "APL: Athletic Propulsion Labs",
         "price": "3180 EUR",
         "imgSrc": "/mock/OUTER/P01136185 Background Removed.png",
         "artsyName": "Refined Simplicity",
@@ -378,7 +378,7 @@ const rawSections: MockCatalogSectionBase[] = [
       {
         "id": "item-53",
         "idxLabel": "[53]",
-        "brand": "Saint Laurent",
+        "brand": "Alexander McQueen Pre-Owned",
         "price": "1570 EUR",
         "imgSrc": "/mock/UPPER/P01107112 Background Removed.png",
         "artsyName": "Lucent Drape",
@@ -760,7 +760,7 @@ const rawSections: MockCatalogSectionBase[] = [
       {
         "id": "item-28",
         "idxLabel": "[28]",
-        "brand": "Bottega Veneta",
+        "brand": "Seven For All Mankind",
         "price": "1810 EUR",
         "imgSrc": "/mock/GROUND/P01130519 Background Removed.png",
         "artsyName": "Sculpted Terrain",
@@ -1203,10 +1203,16 @@ const shuffledArchiveItems = seededShuffle(
   sections.flatMap((section) => section.items),
   190734,
 );
+const archiveLongBrandTestItem = sections
+  .flatMap((section) => section.items)
+  .find((item) => item.id === "item-02");
 
 export const archiveCapsuleItems: Record<ArchiveCapsuleId, MockCatalogItem[]> = {
   main: takeWithWrap(shuffledArchiveItems, 0, ARCHIVE_ITEMS_PER_CAPSULE),
-  capsule1: takeWithWrap(shuffledArchiveItems, ARCHIVE_ITEMS_PER_CAPSULE, ARCHIVE_ITEMS_PER_CAPSULE),
+  capsule1: [
+    ...(archiveLongBrandTestItem ? [archiveLongBrandTestItem] : []),
+    ...takeWithWrap(shuffledArchiveItems, ARCHIVE_ITEMS_PER_CAPSULE, ARCHIVE_ITEMS_PER_CAPSULE),
+  ],
   capsule2: [],
   capsule3: takeWithWrap(shuffledArchiveItems, ARCHIVE_ITEMS_PER_CAPSULE * 3, ARCHIVE_PREVIEW_SHORT_CAPSULE_ITEMS),
 };

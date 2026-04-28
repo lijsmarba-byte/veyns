@@ -21,6 +21,9 @@ const RETURN_SCROLL_INTENT_KEY = "unseen:return-scroll-intent";
 const RETURN_FLIGHT_FINISHED_EVENT = "unseen:return-flight-finished";
 const RETURN_FLIGHT_FINISHED_KEY = "unseen:return-flight-finished-flag";
 const RETURN_PREV_BODY_PADDING_ATTR = "data-unseen-return-prev-pr";
+const ENTER_SCROLL_LOCK_KEY = "unseen:enter-scroll-lock";
+const ENTER_SCROLL_INTENT_KEY = "unseen:enter-scroll-intent";
+const ENTER_PREV_BODY_PADDING_ATTR = "data-unseen-enter-prev-pr";
 const DEFAULT_UNLOCK_FALLBACK_MS = 900;
 const IMMERSIVE_UNLOCK_FALLBACK_MS = 1350;
 
@@ -52,6 +55,38 @@ function unlockPageScrollFromReturn() {
   }
 }
 
+function clearStalePageScrollLocks() {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(ENTER_SCROLL_LOCK_KEY);
+    window.sessionStorage.removeItem(ENTER_SCROLL_INTENT_KEY);
+  } catch {
+    // Ignore storage failures and still try to unlock styles.
+  }
+
+  const root = document.documentElement;
+  const body = document.body;
+  root.style.overflow = "";
+  body.style.overflow = "";
+  root.style.overscrollBehavior = "";
+  body.style.overscrollBehavior = "";
+  root.style.overscrollBehaviorX = "";
+  body.style.overscrollBehaviorX = "";
+  root.style.touchAction = "";
+  body.style.touchAction = "";
+  body.style.position = "";
+  body.style.top = "";
+  body.style.left = "";
+  body.style.right = "";
+  body.style.width = "";
+
+  const prevEnterPaddingRight = body.getAttribute(ENTER_PREV_BODY_PADDING_ATTR);
+  if (prevEnterPaddingRight !== null) {
+    body.style.paddingRight = prevEnterPaddingRight;
+    body.removeAttribute(ENTER_PREV_BODY_PADDING_ATTR);
+  }
+}
+
 export function ReturnScrollRestore() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -59,7 +94,7 @@ export function ReturnScrollRestore() {
   const currentHref = query ? `${pathname}?${query}` : pathname;
 
   useLayoutEffect(() => {
-    const isImmersiveReturnRoot = /\/(immersive|world-2)$/.test(pathname);
+    const isImmersiveReturnRoot = /\/(focus|immersive)$/.test(pathname);
     const unlockFallbackMs = isImmersiveReturnRoot ? IMMERSIVE_UNLOCK_FALLBACK_MS : DEFAULT_UNLOCK_FALLBACK_MS;
     let hasReturnLock = false;
     let hasFinishedFlag = false;
@@ -69,6 +104,9 @@ export function ReturnScrollRestore() {
     } catch {
       hasReturnLock = false;
       hasFinishedFlag = false;
+    }
+    if (!hasReturnLock && !isImmersiveReturnRoot) {
+      clearStalePageScrollLocks();
     }
 
     let unlockFallbackTimer: number | null = null;
@@ -282,17 +320,19 @@ export function ReturnScrollRestore() {
       }
       event.preventDefault();
     };
+    const scrollBlockOptions = { passive: false, capture: true } as const;
+    const keyBlockOptions = { capture: true } as const;
 
     const attachBlockListeners = () => {
-      window.addEventListener("wheel", handleWheelBlock, { passive: false, capture: true });
-      window.addEventListener("touchmove", handleTouchMoveBlock, { passive: false, capture: true });
-      window.addEventListener("keydown", handleKeyBlock, true);
+      window.addEventListener("wheel", handleWheelBlock, scrollBlockOptions);
+      window.addEventListener("touchmove", handleTouchMoveBlock, scrollBlockOptions);
+      window.addEventListener("keydown", handleKeyBlock, keyBlockOptions);
     };
 
     const detachBlockListeners = () => {
-      window.removeEventListener("wheel", handleWheelBlock, true);
-      window.removeEventListener("touchmove", handleTouchMoveBlock, true);
-      window.removeEventListener("keydown", handleKeyBlock, true);
+      window.removeEventListener("wheel", handleWheelBlock, scrollBlockOptions);
+      window.removeEventListener("touchmove", handleTouchMoveBlock, scrollBlockOptions);
+      window.removeEventListener("keydown", handleKeyBlock, keyBlockOptions);
     };
 
     const handleFlightFinished = () => {
@@ -325,7 +365,9 @@ export function ReturnScrollRestore() {
     } else if (hasReturnLock) {
       pullStoredIntent();
       attachIntentListeners();
-      attachBlockListeners();
+      if (isImmersiveReturnRoot) {
+        attachBlockListeners();
+      }
       window.addEventListener(RETURN_FLIGHT_FINISHED_EVENT, handleFlightFinished as EventListener);
       unlockFallbackTimer = window.setTimeout(() => {
         handleFlightFinished();
@@ -351,6 +393,8 @@ export function ReturnScrollRestore() {
               window.scrollTo({ top: nextY, left: 0, behavior: "auto" });
             }
           };
+
+          attemptRestore();
 
           const schedule = [0, 56] as const;
           rafId = window.requestAnimationFrame(() => {

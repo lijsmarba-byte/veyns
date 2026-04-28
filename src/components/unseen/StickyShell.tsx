@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ModePill } from "@/components/unseen/ModePill";
 import { GalleryEditNav } from "@/components/unseen/GalleryEditNav";
 import { ViewToggle } from "@/components/unseen/ViewToggle";
@@ -13,7 +13,7 @@ type StickyMode = "gallery" | "archive";
 
 type StickyShellProps = {
   mode: StickyMode;
-  view: "grid" | "immersive" | "world2";
+  view: "grid" | "focus" | "immersive";
   issueNumber?: string;
   archiveActiveItemCount?: number;
 };
@@ -58,7 +58,7 @@ const ARCHIVE_STICKY_BACKDROP_HEIGHT_PX = 188;
 const GALLERY_STICKY_STACK_HEIGHT_PX = 203;
 const ARCHIVE_STICKY_STACK_HEIGHT_PX = 188;
 const DIVIDER_COLOR = "#ECEDEF";
-const DIVIDER_SHADOW = "0 1px 0.6px rgba(0,0,0,0.03)";
+const DIVIDER_SHADOW = "0 1px 1.2px rgba(0,0,0,0.018)";
 
 function formatCalibrationMonth(value: string | undefined): string {
   if (!value) return "";
@@ -73,12 +73,12 @@ export function StickyShell({
   issueNumber = "04",
   archiveActiveItemCount,
 }: StickyShellProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isQuickMenuOpen, setIsQuickMenuOpen] = useState(false);
   const [activeOverlaySurface, setActiveOverlaySurface] = useState<OverlaySurface | null>(null);
   const [activeProfileOverlayTab, setActiveProfileOverlayTab] = useState<ProfileOverlayTab>("signature");
+  const [profileOverlayEditFlow, setProfileOverlayEditFlow] = useState<"create" | null>(null);
   const [isEditActionMenuOpen, setIsEditActionMenuOpen] = useState(false);
   const [isProfileEntryFromClose, setIsProfileEntryFromClose] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -117,9 +117,9 @@ export function StickyShell({
   const dividerTopPx = 187 - lowerNavLiftPx;
   const galleryImmersiveStickyHeightPx = dividerTopPx + 1;
   const effectiveStickyBackdropHeightPx =
-    isGallery && view === "immersive" ? galleryImmersiveStickyHeightPx : stickyBackdropHeightPx;
+    isGallery && view === "focus" ? galleryImmersiveStickyHeightPx : stickyBackdropHeightPx;
   const effectiveStickyStackHeightPx =
-    isGallery && view === "immersive" ? galleryImmersiveStickyHeightPx : stickyStackHeightPx;
+    isGallery && view === "focus" ? galleryImmersiveStickyHeightPx : stickyStackHeightPx;
   const isProfileOverlayOpen = activeOverlaySurface === "profile";
   const isCompactOverlayOpen =
     activeOverlaySurface === "settings" || activeOverlaySurface === "feedback" || activeOverlaySurface === "about";
@@ -251,33 +251,18 @@ export function StickyShell({
 
   useEffect(() => {
     const root = document.documentElement;
-    if (isProfileOverlayOpen) {
+    if (isAnyOverlayOpen) {
       root.setAttribute("data-unseen-overlay-open", "true");
       return;
     }
     root.removeAttribute("data-unseen-overlay-open");
-  }, [isProfileOverlayOpen]);
+  }, [isAnyOverlayOpen]);
 
   useEffect(() => {
     return () => {
       document.documentElement.removeAttribute("data-unseen-overlay-open");
     };
   }, []);
-
-  const openProfile = (options?: { tab?: "reference-sets"; editFlow?: "create" }) => {
-    const query = searchParams.toString();
-    const backHref = query ? `${pathname}?${query}` : pathname;
-    const nextParams = new URLSearchParams();
-    nextParams.set("back", backHref);
-    nextParams.set("iconMorph", "1");
-    if (options?.tab) {
-      nextParams.set("tab", options.tab);
-    }
-    if (options?.editFlow) {
-      nextParams.set("editFlow", options.editFlow);
-    }
-    router.push(`/profile?${nextParams.toString()}`);
-  };
 
   const handleMenuTriggerClick = () => {
     if (isAnyOverlayOpen) {
@@ -289,12 +274,18 @@ export function StickyShell({
 
   const handleCreateNewEdit = () => {
     setIsEditActionMenuOpen(false);
-    openProfile({ tab: "reference-sets", editFlow: "create" });
+    setIsQuickMenuOpen(false);
+    setActiveProfileOverlayTab("reference-sets");
+    setProfileOverlayEditFlow("create");
+    setActiveOverlaySurface("profile");
   };
 
   const handleManageEdits = () => {
     setIsEditActionMenuOpen(false);
-    openProfile({ tab: "reference-sets" });
+    setIsQuickMenuOpen(false);
+    setActiveProfileOverlayTab("reference-sets");
+    setProfileOverlayEditFlow(null);
+    setActiveOverlaySurface("profile");
   };
 
   const currentQuery = searchParams.toString();
@@ -305,6 +296,9 @@ export function StickyShell({
     profileTab: activeProfileOverlayTab,
     back: currentPathWithQuery,
   });
+  if (profileOverlayEditFlow) {
+    profileOverlayParams.set("editFlow", profileOverlayEditFlow);
+  }
   const profileOverlayHref = `/profile?${profileOverlayParams.toString()}`;
 
   const compactOverlaySection = activeOverlaySurface === "feedback" ? "feedback" : activeOverlaySurface;
@@ -320,6 +314,7 @@ export function StickyShell({
 
   const openOverlaySurface = (surface: OverlaySurface) => {
     setIsQuickMenuOpen(false);
+    setProfileOverlayEditFlow(null);
     if (surface === "profile") {
       setActiveProfileOverlayTab("signature");
     }
@@ -332,7 +327,7 @@ export function StickyShell({
       <StickyHeightSync targetId="sticky-stack" />
       <div id="sticky-stack" className="relative w-full" style={{ height: `${effectiveStickyStackHeightPx}px` }}>
         <div
-          className="relative w-full bg-paper/90 backdrop-blur-md after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-8 after:h-8 after:bg-[linear-gradient(180deg,rgba(254,254,253,0.34)_0%,rgba(254,254,253,0.16)_42%,rgba(254,254,253,0.05)_72%,rgba(254,254,253,0)_100%)]"
+          className="relative w-full bg-paper/90 backdrop-blur-md after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-6 after:h-6 after:bg-[linear-gradient(180deg,rgba(254,254,253,0.24)_0%,rgba(254,254,253,0.10)_42%,rgba(254,254,253,0.03)_72%,rgba(254,254,253,0)_100%)]"
           style={{ height: `${effectiveStickyBackdropHeightPx}px` }}
           data-node-id={isGallery ? "768:2169" : "770:2181"}
         >
@@ -503,18 +498,18 @@ export function StickyShell({
           ) : null}
 
           <div
-            className="pointer-events-none absolute left-10 right-10 z-10 h-[1px]"
+            className="pointer-events-none absolute left-10 right-10 z-10 h-[1.5px]"
             data-sticky-divider="true"
             style={{ top: `${dividerTopPx}px`, backgroundColor: DIVIDER_COLOR, boxShadow: DIVIDER_SHADOW }}
           />
         </div>
       </div>
 
+      {isQuickMenuOpen && !isAnyOverlayOpen ? (
       <div
-        className={`fixed inset-0 z-[126] transition-opacity duration-280 ease-out ${
-          isQuickMenuOpen && !isAnyOverlayOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        aria-hidden={!isQuickMenuOpen || isAnyOverlayOpen}
+        data-unseen-shell-overlay="true"
+        className="fixed inset-0 z-[126] pointer-events-auto opacity-100 transition-opacity duration-280 ease-out"
+        aria-hidden="false"
       >
         <button
           type="button"
@@ -522,11 +517,7 @@ export function StickyShell({
           onClick={() => setIsQuickMenuOpen(false)}
           className="absolute inset-0"
         />
-        <div
-          className={`absolute inset-y-0 right-0 w-[202px] rounded-bl-[6px] rounded-tl-[6px] bg-paper shadow-[-10px_0_22px_rgba(0,0,0,0.08)] transition-transform duration-500 ease-[cubic-bezier(0.22,0.88,0.24,1)] ${
-            isQuickMenuOpen && !isAnyOverlayOpen ? "translate-x-0" : "translate-x-[102%]"
-          }`}
-        >
+        <div className="absolute inset-y-0 right-0 w-[202px] translate-x-0 rounded-bl-[6px] rounded-tl-[6px] bg-paper shadow-[-10px_0_22px_rgba(0,0,0,0.08)] transition-transform duration-500 ease-[cubic-bezier(0.22,0.88,0.24,1)]">
           <button
             type="button"
             aria-label="Close quick menu"
@@ -589,12 +580,13 @@ export function StickyShell({
           </div>
         </div>
       </div>
+      ) : null}
 
+      {isProfileOverlayOpen ? (
       <div
-        className={`fixed inset-0 z-[130] bg-paper pb-[16px] pl-[17px] pr-[17px] pt-[16px] transition-opacity duration-300 ease-out md:pb-[16px] md:pl-[17px] md:pr-[17px] md:pt-[16px] ${
-          isProfileOverlayOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        aria-hidden={!isProfileOverlayOpen}
+        data-unseen-shell-overlay="true"
+        className="fixed inset-0 z-[130] pointer-events-auto bg-paper pb-[16px] pl-[17px] pr-[17px] pt-[16px] opacity-100 transition-opacity duration-300 ease-out md:pb-[16px] md:pl-[17px] md:pr-[17px] md:pt-[16px]"
+        aria-hidden="false"
       >
         <button
           type="button"
@@ -619,11 +611,7 @@ export function StickyShell({
           />
         </button>
 
-        <div
-          className={`relative h-full w-full bg-paper transition-transform duration-300 ease-out ${
-            isProfileOverlayOpen ? "translate-y-0 scale-100" : "translate-y-[2px] scale-[0.996]"
-          }`}
-        >
+        <div className="relative h-full w-full translate-y-0 scale-100 bg-paper transition-transform duration-300 ease-out">
           <div className="absolute inset-x-0 top-0 z-10 px-10 pt-[24px]">
             <div className="mx-auto w-full max-w-[1200px]">
               <p
@@ -648,7 +636,10 @@ export function StickyShell({
                         <li key={tab.id} className="flex items-center justify-center">
                           <button
                             type="button"
-                            onClick={() => setActiveProfileOverlayTab(tab.id)}
+                            onClick={() => {
+                              setActiveProfileOverlayTab(tab.id);
+                              setProfileOverlayEditFlow(null);
+                            }}
                             className={`h-[32px] w-full rounded-[16px] px-3 text-center font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] transition-[background,color,box-shadow] duration-150 focus-visible:outline-none ${
                               isActive
                                 ? "bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)]"
@@ -676,12 +667,13 @@ export function StickyShell({
           </div>
         </div>
       </div>
+      ) : null}
 
+      {isCompactOverlayOpen ? (
       <div
-        className={`fixed inset-0 z-[130] bg-paper/80 px-5 py-8 transition-opacity duration-250 ease-out sm:px-10 ${
-          isCompactOverlayOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        aria-hidden={!isCompactOverlayOpen}
+        data-unseen-shell-overlay="true"
+        className="fixed inset-0 z-[130] pointer-events-auto bg-paper/80 px-5 py-8 opacity-100 transition-opacity duration-250 ease-out sm:px-10"
+        aria-hidden="false"
       >
         <button
           type="button"
@@ -700,10 +692,8 @@ export function StickyShell({
         </button>
         <div className={`relative mx-auto mt-[84px] w-full ${isSettingsOrFeedbackOverlay ? "max-w-[760px]" : "max-w-[840px]"}`}>
           <div
-            className={`mx-auto w-full rounded-[6px] bg-paper shadow-[0_8px_20px_rgba(0,0,0,0.06)] transition-transform duration-250 ease-out ${
+            className={`mx-auto w-full translate-y-0 scale-100 rounded-[6px] bg-paper shadow-[0_8px_20px_rgba(0,0,0,0.06)] transition-transform duration-250 ease-out ${
               isSettingsOrFeedbackOverlay ? "max-w-[740px]" : "max-w-[820px]"
-            } ${
-              isCompactOverlayOpen ? "translate-y-0 scale-100" : "translate-y-[2px] scale-[0.996]"
             }`}
           >
             <div
@@ -737,6 +727,7 @@ export function StickyShell({
           </div>
         </div>
       </div>
+      ) : null}
     </header>
   );
 }

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { MockCatalogItem } from "@/data/mockCatalog";
 import { World2CategoryNav } from "@/components/unseen/World2CategoryNav";
+import { showProductTransitionHold, warmProductImage } from "@/components/unseen/productImagePreload";
 
 export type World2CategoryKey = "OUTER" | "UPPER" | "LOWER" | "SILHOUETTE" | "GROUND" | "ARTIFACTS";
 
@@ -36,6 +37,7 @@ type World2CameraStatePayload = {
 type World2ReturnRevealPayload = {
   at?: number;
   href?: string;
+  itemId?: string;
   lockUntil?: number;
   revealAt?: number;
   fadeMs?: number;
@@ -55,6 +57,7 @@ const TILE_SIZE = 52;
 const TILE_STEP = 78;
 const MIN_ZOOM = 0.22;
 const MAX_ZOOM = 5.5;
+const WORLD2_TILE_RENDER_SCALE = MAX_ZOOM;
 const ZOOM_WHEEL_STRENGTH = 0.012;
 const ZOOM_SMOOTH = 0.42;
 const ZOOM_WHEEL_DELTA_LIMIT = 380;
@@ -68,9 +71,33 @@ const DRAG_CLICK_THRESHOLD_PX = 5;
 const WORLD2_CAMERA_STATE_KEY = "unseen:world2-camera-state";
 const WORLD2_RETURN_CAMERA_KEY = "unseen:world2-return-camera";
 const WORLD2_RETURN_REVEAL_KEY = "unseen:world2-return-reveal";
+const WORLD2_INITIAL_REVEAL_SEEN_KEY = "unseen:world2-initial-reveal-seen";
 const PAN_VISIBLE_MARGIN_MIN = 44;
 const PAN_VISIBLE_MARGIN_MAX = 200;
 const PAN_VISIBLE_MARGIN_FACTOR = 0.18;
+const WORLD2_RENDER_PROFILE = {
+  default: {
+    initialCount: 144,
+    batchSize: 72,
+    batchDelayMs: 32,
+    revealStaggerMs: 1,
+  },
+  safari: {
+    initialCount: 108,
+    batchSize: 54,
+    batchDelayMs: 44,
+    revealStaggerMs: 2,
+  },
+};
+const WORLD2_EAGER_IMAGE_COUNT = 144;
+const WORLD2_RETURN_DECODE_LIMIT_DEFAULT = 46;
+const WORLD2_RETURN_DECODE_LIMIT_SAFARI = 34;
+const WORLD2_RETURN_DECODE_TIMEOUT_DEFAULT = 360;
+const WORLD2_RETURN_DECODE_TIMEOUT_SAFARI = 460;
+const WORLD2_PRELOAD_BATCH_SIZE_DEFAULT = 10;
+const WORLD2_PRELOAD_BATCH_SIZE_SAFARI = 6;
+const WORLD2_PRELOAD_BATCH_DELAY_DEFAULT = 18;
+const WORLD2_PRELOAD_BATCH_DELAY_SAFARI = 36;
 const CATEGORY_ORDER: World2CategoryKey[] = [
   "OUTER",
   "UPPER",
@@ -100,6 +127,12 @@ function hashString(value: string) {
 
 function seededNoise(key: string, salt: number) {
   return hashString(`${key}-${salt}`) / 0x100000000;
+}
+
+function detectSafariBrowser() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /Safari\//.test(ua) && !/Chrome\/|CriOS\/|Chromium\/|Edg\//.test(ua);
 }
 
 function getContainRect(containerRect: DOMRect, aspectRatio: number) {
@@ -216,6 +249,215 @@ function buildSunflowerItems(items: World2ViewItem[]) {
   };
 }
 
+function getPrioritizedReturnImageSources({
+  camera,
+  container,
+  itemId,
+  limit,
+  renderedItems,
+}: {
+  camera: Camera;
+  container: HTMLDivElement | null;
+  itemId?: string;
+  limit: number;
+  renderedItems: World2RenderItem[];
+}) {
+  const seen = new Set<string>();
+  const sources: string[] = [];
+  const pushSource = (src: string | null | undefined) => {
+    const safeSrc = typeof src === "string" ? src.trim() : "";
+    if (!safeSrc || seen.has(safeSrc)) return;
+    seen.add(safeSrc);
+    sources.push(safeSrc);
+  };
+
+  if (itemId) {
+    const returningItem = renderedItems.find((entry) => entry.item.id === itemId);
+    pushSource(returningItem?.item.imgSrc);
+  }
+
+  if (!container) {
+    renderedItems.slice(0, limit).forEach((entry) => pushSource(entry.item.imgSrc));
+    return sources;
+  }
+
+  const frame = getContentViewportFrame(container);
+  const viewportCenterX = frame.width * 0.5;
+  const viewportCenterY = frame.stickyHeight + frame.height * 0.5;
+  const margin = Math.max(180, Math.min(frame.width, frame.height) * 0.22);
+  const projectedItems = renderedItems
+    .map((entry, index) => {
+      const screenX = viewportCenterX + camera.panX + entry.x * camera.zoom;
+      const screenY = viewportCenterY + camera.panY + entry.y * camera.zoom;
+      const screenSize = entry.size * camera.zoom;
+      const isNearViewport =
+        screenX + screenSize * 0.5 >= -margin &&
+        screenX - screenSize * 0.5 <= frame.width + margin &&
+        screenY + screenSize * 0.5 >= -margin &&
+        screenY - screenSize * 0.5 <= frame.stickyHeight + frame.height + margin;
+      const distanceToCenter = Math.hypot(screenX - viewportCenterX, screenY - viewportCenterY);
+      return { distanceToCenter, entry, index, isNearViewport };
+    })
+    .filter((entry) => entry.isNearViewport)
+    .sort((a, b) => a.distanceToCenter - b.distanceToCenter || a.index - b.index);
+
+  projectedItems.slice(0, limit).forEach(({ entry }) => pushSource(entry.item.imgSrc));
+
+  if (sources.length < Math.min(limit, 12)) {
+    renderedItems.slice(0, limit).forEach((entry) => pushSource(entry.item.imgSrc));
+  }
+
+  return sources.slice(0, limit);
+}
+
+const World2ItemButton = memo(function World2ItemButton({
+  animateReveal,
+  entry,
+  index,
+  isSafari,
+  onItemWarm,
+  onItemClick,
+}: {
+  animateReveal: boolean;
+  entry: World2RenderItem;
+  index: number;
+  isSafari: boolean;
+  onItemWarm: (entry: World2RenderItem) => void;
+  onItemClick: (entry: World2RenderItem, imageNode: HTMLElement | null) => void;
+}) {
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const revealTimerRef = useRef<number | null>(null);
+  const isMountedRef = useRef(false);
+  const [isImageReady, setIsImageReady] = useState(!animateReveal);
+  const highResolutionSize = entry.size * WORLD2_TILE_RENDER_SCALE;
+  const revealStaggerMs = isSafari
+    ? Math.round(seededNoise(entry.id, 391) * WORLD2_RENDER_PROFILE.safari.revealStaggerMs * 6)
+    : Math.round(seededNoise(entry.id, 391) * WORLD2_RENDER_PROFILE.default.revealStaggerMs * 5);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (revealTimerRef.current !== null) {
+        window.clearTimeout(revealTimerRef.current);
+        revealTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!animateReveal) {
+      setIsImageReady(true);
+      return;
+    }
+
+    setIsImageReady(false);
+    if (revealTimerRef.current !== null) {
+      window.clearTimeout(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+
+    const image = imageRef.current;
+    if (!image?.complete) return;
+
+    revealTimerRef.current = window.setTimeout(() => {
+      if (!isMountedRef.current) return;
+      setIsImageReady(true);
+      revealTimerRef.current = null;
+    }, revealStaggerMs);
+
+    return () => {
+      if (revealTimerRef.current !== null) {
+        window.clearTimeout(revealTimerRef.current);
+        revealTimerRef.current = null;
+      }
+    };
+  }, [animateReveal, entry.item.imgSrc, revealStaggerMs]);
+
+  const revealImage = useCallback((image: HTMLImageElement) => {
+    if (!animateReveal) {
+      setIsImageReady(true);
+      return;
+    }
+
+    const completeReveal = () => {
+      if (!isMountedRef.current) return;
+      if (revealTimerRef.current !== null) {
+        window.clearTimeout(revealTimerRef.current);
+      }
+      revealTimerRef.current = window.setTimeout(() => {
+        if (!isMountedRef.current) return;
+        setIsImageReady(true);
+        revealTimerRef.current = null;
+      }, revealStaggerMs);
+    };
+
+    if (!isSafari && typeof image.decode === "function") {
+      image.decode().then(completeReveal).catch(completeReveal);
+      return;
+    }
+
+    completeReveal();
+  }, [animateReveal, isSafari, revealStaggerMs]);
+
+  return (
+    <button
+      className="absolute overflow-visible"
+      style={{
+        left: 0,
+        top: 0,
+        width: entry.size,
+        height: entry.size,
+        transform: `translate3d(${entry.x - entry.size * 0.5}px, ${entry.y - entry.size * 0.5}px, 0)`,
+        pointerEvents: "auto",
+        cursor: "pointer",
+      }}
+      type="button"
+      aria-label={`${entry.item.brand} ${entry.item.artsyName}`}
+      onPointerEnter={() => onItemWarm(entry)}
+      onPointerDown={() => onItemWarm(entry)}
+      onFocus={() => onItemWarm(entry)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onItemClick(entry, event.currentTarget);
+      }}
+    >
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-1/2 block"
+        style={{
+          width: highResolutionSize,
+          height: highResolutionSize,
+          transform: `translate3d(-50%, -50%, 0) scale(${1 / WORLD2_TILE_RENDER_SCALE})`,
+          transformOrigin: "center",
+          willChange: "transform",
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- native img keeps deep-zoom detail crisp in this dense canvas */}
+        <img
+          ref={imageRef}
+          src={entry.item.imgSrc}
+          alt=""
+          className={`h-full w-full max-w-none object-contain ${
+            animateReveal ? "transition-opacity duration-100 ease-out" : ""
+          }`}
+          style={{
+            backfaceVisibility: "hidden",
+            imageRendering: "auto",
+            opacity: isImageReady ? 1 : 0,
+            WebkitBackfaceVisibility: "hidden",
+          }}
+          draggable={false}
+          loading={isSafari || index < WORLD2_EAGER_IMAGE_COUNT ? "eager" : "lazy"}
+          decoding="async"
+          onLoad={(event) => revealImage(event.currentTarget)}
+          onError={() => setIsImageReady(true)}
+        />
+      </span>
+    </button>
+  );
+});
+
 export function World2View({
   items,
   showCategoryNav = true,
@@ -229,16 +471,38 @@ export function World2View({
   const layoutRadiusRef = useRef(1);
   const velocityRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const draggingRef = useRef(false);
+  const persistCameraPayloadRef = useRef<World2CameraStatePayload | null>(null);
+  const persistCameraTimerRef = useRef<number | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [isSafariBrowser] = useState(() => detectSafariBrowser());
+  const [animateInitialReveal] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const isProductReturn = Boolean(
+        window.sessionStorage.getItem(WORLD2_RETURN_REVEAL_KEY) ||
+          window.sessionStorage.getItem(WORLD2_RETURN_CAMERA_KEY),
+      );
+      if (isProductReturn) return false;
+      if (window.sessionStorage.getItem(WORLD2_INITIAL_REVEAL_SEEN_KEY)) return false;
+      window.sessionStorage.setItem(WORLD2_INITIAL_REVEAL_SEEN_KEY, "1");
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  const renderProfile = isSafariBrowser ? WORLD2_RENDER_PROFILE.safari : WORLD2_RENDER_PROFILE.default;
   const [dragging, setDragging] = useState(false);
   const [camera, setCamera] = useState<Camera>({ panX: 0, panY: 0, zoom: 1 });
+  const [renderLimit, setRenderLimit] = useState(() =>
+    animateInitialReveal ? renderProfile.initialCount : Number.MAX_SAFE_INTEGER,
+  );
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isReturnRevealReady, setIsReturnRevealReady] = useState(false);
-  const [isReturnInteractionReady, setIsReturnInteractionReady] = useState(false);
-  const isReturnInteractionLocked = !isReturnInteractionReady;
-  const [returnRevealFadeMs, setReturnRevealFadeMs] = useState(220);
+  const [, setIsReturnInteractionReady] = useState(false);
+  const isReturnInteractionLocked = false;
+  const [returnRevealFadeMs, setReturnRevealFadeMs] = useState(120);
   const [activeCategory, setActiveCategory] = useState<World2CategoryKey | "all">("all");
   const pendingRestoreCameraRef = useRef<Camera | null>(null);
   const restoreActiveCategoryRef = useRef<World2CategoryKey | "all" | null>(null);
@@ -370,6 +634,20 @@ export function World2View({
   );
 
   const layout = useMemo(() => buildSunflowerItems(visibleItems), [visibleItems]);
+  const renderedItems = useMemo(
+    () => layout.items.slice(0, Math.min(renderLimit, layout.items.length)),
+    [layout.items, renderLimit],
+  );
+  const preloadImageSources = useMemo(() => {
+    const seen = new Set<string>();
+    return layout.items.reduce<string[]>((sources, entry) => {
+      const src = entry.item.imgSrc.trim();
+      if (!src || seen.has(src)) return sources;
+      seen.add(src);
+      sources.push(src);
+      return sources;
+    }, []);
+  }, [layout.items]);
   const navOptions = useMemo(
     () => [
       { key: "all", label: "All" },
@@ -386,34 +664,132 @@ export function World2View({
     layoutRadiusRef.current = layout.radius;
   }, [layout.radius]);
 
+  useEffect(() => {
+    setRenderLimit(
+      animateInitialReveal
+        ? Math.min(renderProfile.initialCount, layout.items.length)
+        : layout.items.length,
+    );
+  }, [animateInitialReveal, layout.items.length, renderProfile.initialCount]);
+
+  useEffect(() => {
+    if (!animateInitialReveal) return;
+    if (renderLimit >= layout.items.length) return;
+
+    const timerId = window.setTimeout(() => {
+      setRenderLimit((currentLimit) =>
+        Math.min(currentLimit + renderProfile.batchSize, layout.items.length),
+      );
+    }, renderProfile.batchDelayMs);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [animateInitialReveal, layout.items.length, renderLimit, renderProfile.batchDelayMs, renderProfile.batchSize]);
+
+  useEffect(() => {
+    if (preloadImageSources.length === 0) return;
+
+    let cancelled = false;
+    let sourceIndex = 0;
+    let timerId: number | null = null;
+    const pendingImages: HTMLImageElement[] = [];
+    const batchSize = isSafariBrowser
+      ? WORLD2_PRELOAD_BATCH_SIZE_SAFARI
+      : WORLD2_PRELOAD_BATCH_SIZE_DEFAULT;
+    const batchDelay = isSafariBrowser
+      ? WORLD2_PRELOAD_BATCH_DELAY_SAFARI
+      : WORLD2_PRELOAD_BATCH_DELAY_DEFAULT;
+
+    const preloadBatch = () => {
+      if (cancelled) return;
+
+      const endIndex = Math.min(sourceIndex + batchSize, preloadImageSources.length);
+      for (; sourceIndex < endIndex; sourceIndex += 1) {
+        const image = new window.Image();
+        image.decoding = "async";
+        image.loading = "eager";
+        image.src = preloadImageSources[sourceIndex];
+        pendingImages.push(image);
+      }
+
+      if (sourceIndex < preloadImageSources.length) {
+        timerId = window.setTimeout(preloadBatch, batchDelay);
+      }
+    };
+
+    timerId = window.setTimeout(preloadBatch, 0);
+
+    return () => {
+      cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+      pendingImages.length = 0;
+    };
+  }, [isSafariBrowser, preloadImageSources]);
+
   useLayoutEffect(() => {
     let revealTimerId: number | null = null;
     let interactionTimerId: number | null = null;
+    let decodeTimeoutId: number | null = null;
+    let cancelled = false;
     setIsReturnRevealReady(false);
     setIsReturnInteractionReady(false);
 
-    const scheduleReady = (revealDelayMs: number, interactionDelayMs: number, fadeMs: number) => {
-      const safeFade = Math.min(480, Math.max(120, fadeMs));
+    const scheduleReady = (
+      revealDelayMs: number,
+      interactionDelayMs: number,
+      fadeMs: number,
+      decodeSources: string[] = [],
+    ) => {
+      const safeFade = Math.min(680, Math.max(120, fadeMs));
       window.requestAnimationFrame(() => {
         setReturnRevealFadeMs(safeFade);
       });
 
-      if (revealDelayMs <= 0) {
+      const markRevealReady = () => {
+        if (cancelled) return;
         window.requestAnimationFrame(() => {
+          if (cancelled) return;
           setIsReturnRevealReady(true);
         });
-      } else {
-        revealTimerId = window.setTimeout(() => {
-          setIsReturnRevealReady(true);
-        }, revealDelayMs);
-      }
+      };
+
+      const startRevealGate = () => {
+        const uniqueSources = Array.from(new Set(decodeSources.map((src) => src.trim()).filter(Boolean)));
+        if (uniqueSources.length === 0) {
+          markRevealReady();
+          return;
+        }
+
+        let didFinish = false;
+        const finish = () => {
+          if (didFinish) return;
+          didFinish = true;
+          if (decodeTimeoutId !== null) {
+            window.clearTimeout(decodeTimeoutId);
+            decodeTimeoutId = null;
+          }
+          markRevealReady();
+        };
+        decodeTimeoutId = window.setTimeout(
+          finish,
+          isSafariBrowser ? WORLD2_RETURN_DECODE_TIMEOUT_SAFARI : WORLD2_RETURN_DECODE_TIMEOUT_DEFAULT,
+        );
+        Promise.all(uniqueSources.map((src) => warmProductImage(src))).then(finish).catch(finish);
+      };
+
+      revealTimerId = window.setTimeout(startRevealGate, Math.max(0, revealDelayMs));
 
       if (interactionDelayMs <= 0) {
         window.requestAnimationFrame(() => {
+          if (cancelled) return;
           setIsReturnInteractionReady(true);
         });
       } else {
         interactionTimerId = window.setTimeout(() => {
+          if (cancelled) return;
           setIsReturnInteractionReady(true);
         }, interactionDelayMs);
       }
@@ -422,10 +798,12 @@ export function World2View({
     try {
       const raw = window.sessionStorage.getItem(WORLD2_RETURN_REVEAL_KEY);
       if (!raw) {
-        scheduleReady(0, 0, 220);
+        scheduleReady(0, 0, 120);
         return () => {
+          cancelled = true;
           if (revealTimerId !== null) window.clearTimeout(revealTimerId);
           if (interactionTimerId !== null) window.clearTimeout(interactionTimerId);
+          if (decodeTimeoutId !== null) window.clearTimeout(decodeTimeoutId);
         };
       }
       const parsed = JSON.parse(raw) as World2ReturnRevealPayload;
@@ -438,20 +816,54 @@ export function World2View({
       const interactionDelayMs = Math.max(0, lockUntil - Date.now());
       const fadeMs = typeof parsed.fadeMs === "number" ? parsed.fadeMs : 220;
       if (!isFresh || payloadPath !== currentPath) {
-        scheduleReady(0, 0, 220);
+        scheduleReady(0, 0, 120);
       } else {
-        scheduleReady(revealDelayMs, interactionDelayMs, fadeMs);
+        let returnCamera: Camera | null = null;
+        try {
+          const cameraRaw = window.sessionStorage.getItem(WORLD2_RETURN_CAMERA_KEY);
+          if (cameraRaw) {
+            const cameraPayload = JSON.parse(cameraRaw) as World2CameraStatePayload;
+            const cameraPayloadPath = typeof cameraPayload.href === "string" ? cameraPayload.href.split("?")[0] : "";
+            const isCameraFresh = typeof cameraPayload.at === "number" && Date.now() - cameraPayload.at < 30 * 60 * 1000;
+            if (
+              isCameraFresh &&
+              cameraPayload.mode === mode &&
+              cameraPayloadPath === currentPath &&
+              cameraPayload.camera &&
+              Number.isFinite(cameraPayload.camera.panX) &&
+              Number.isFinite(cameraPayload.camera.panY) &&
+              Number.isFinite(cameraPayload.camera.zoom)
+            ) {
+              returnCamera = cameraPayload.camera;
+            }
+          }
+        } catch {
+          returnCamera = null;
+        }
+        const returnDecodeLimit = isSafariBrowser
+          ? WORLD2_RETURN_DECODE_LIMIT_SAFARI
+          : WORLD2_RETURN_DECODE_LIMIT_DEFAULT;
+        const decodeSources = getPrioritizedReturnImageSources({
+          camera: returnCamera ?? cameraRef.current,
+          container: containerRef.current,
+          itemId: parsed.itemId,
+          limit: returnDecodeLimit,
+          renderedItems: layout.items,
+        });
+        scheduleReady(revealDelayMs, interactionDelayMs, fadeMs, decodeSources);
       }
       window.sessionStorage.removeItem(WORLD2_RETURN_REVEAL_KEY);
     } catch {
-      scheduleReady(0, 0, 220);
+      scheduleReady(0, 0, 120);
     }
 
     return () => {
+      cancelled = true;
       if (revealTimerId !== null) window.clearTimeout(revealTimerId);
       if (interactionTimerId !== null) window.clearTimeout(interactionTimerId);
+      if (decodeTimeoutId !== null) window.clearTimeout(decodeTimeoutId);
     };
-  }, [currentHref]);
+  }, [currentHref, isSafariBrowser, layout.items, mode]);
 
   const buildProductViewHref = useCallback((entry: World2RenderItem) => {
     const nextParams = new URLSearchParams({
@@ -467,6 +879,12 @@ export function World2View({
 
     return `/product-view?${nextParams.toString()}`;
   }, [backHref, editParam, mode]);
+
+  const warmProductTransition = useCallback((entry: World2RenderItem) => {
+    const productViewHref = buildProductViewHref(entry);
+    void warmProductImage(entry.item.imgSrc);
+    router.prefetch(productViewHref);
+  }, [buildProductViewHref, router]);
 
   const clampPanToBounds = useCallback((panX: number, panY: number, zoom: number) => {
     const container = containerRef.current;
@@ -594,19 +1012,48 @@ export function World2View({
 
   useEffect(() => {
     if (!isCameraReady) return;
-    try {
-      const payload: World2CameraStatePayload = {
-        at: Date.now(),
-        href: currentHref,
-        mode,
-        activeCategory: effectiveActiveCategory,
-        camera: targetCameraRef.current,
-      };
-      window.sessionStorage.setItem(WORLD2_CAMERA_STATE_KEY, JSON.stringify(payload));
-    } catch {
-      // Optional restore convenience only.
-    }
+
+    persistCameraPayloadRef.current = {
+      at: Date.now(),
+      href: currentHref,
+      mode,
+      activeCategory: effectiveActiveCategory,
+      camera: targetCameraRef.current,
+    };
+
+    if (persistCameraTimerRef.current !== null) return;
+
+    persistCameraTimerRef.current = window.setTimeout(() => {
+      persistCameraTimerRef.current = null;
+      const payload = persistCameraPayloadRef.current;
+      if (!payload) return;
+
+      try {
+        window.sessionStorage.setItem(WORLD2_CAMERA_STATE_KEY, JSON.stringify(payload));
+      } catch {
+        // Optional restore convenience only.
+      }
+    }, 180);
   }, [camera, currentHref, effectiveActiveCategory, isCameraReady, mode]);
+
+  useEffect(
+    () => () => {
+      if (persistCameraTimerRef.current !== null) {
+        window.clearTimeout(persistCameraTimerRef.current);
+        persistCameraTimerRef.current = null;
+      }
+
+      const payload = persistCameraPayloadRef.current;
+      if (!payload) return;
+
+      try {
+        window.sessionStorage.setItem(WORLD2_CAMERA_STATE_KEY, JSON.stringify(payload));
+      } catch {
+        // Optional restore convenience only.
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -712,8 +1159,30 @@ export function World2View({
       startAnimation();
     };
 
+    const beginMouseDrag = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-world2-control="true"]')) return;
+
+      event.preventDefault();
+      hasInteractedRef.current = true;
+      dragRef.current.active = true;
+      dragRef.current.captured = false;
+      dragRef.current.pointerId = null;
+      dragRef.current.moved = false;
+      dragRef.current.startX = event.clientX;
+      dragRef.current.startY = event.clientY;
+      dragRef.current.lastX = event.clientX;
+      dragRef.current.lastY = event.clientY;
+      velocityRef.current = { x: 0, y: 0 };
+      draggingRef.current = false;
+      setDragging(false);
+    };
+
+    container.addEventListener("mousedown", beginMouseDrag, { capture: true });
     container.addEventListener("wheel", handleWheel, { passive: false });
     return () => {
+      container.removeEventListener("mousedown", beginMouseDrag, { capture: true });
       container.removeEventListener("wheel", handleWheel);
     };
   }, [clampPanToBounds, isReturnInteractionLocked, startAnimation, zoomAtPoint]);
@@ -727,9 +1196,12 @@ export function World2View({
     const target = event.target as HTMLElement | null;
     if (target?.closest('[data-world2-control="true"]')) return;
 
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
     hasInteractedRef.current = true;
     dragRef.current.active = true;
-    dragRef.current.captured = false;
+    dragRef.current.captured = true;
     dragRef.current.pointerId = event.pointerId;
     dragRef.current.moved = false;
     dragRef.current.startX = event.clientX;
@@ -737,34 +1209,29 @@ export function World2View({
     dragRef.current.lastX = event.clientX;
     dragRef.current.lastY = event.clientY;
     velocityRef.current = { x: 0, y: 0 };
-    draggingRef.current = true;
-    setDragging(true);
+    draggingRef.current = false;
+    setDragging(false);
   }, [isReturnInteractionLocked]);
 
-  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (isReturnInteractionLocked) {
-      event.preventDefault();
-      return;
-    }
+  const applyDragMove = useCallback((clientX: number, clientY: number, pointerId: number | null) => {
     const drag = dragRef.current;
-    if (!drag.active || drag.pointerId !== event.pointerId) return;
+    if (!drag.active) return;
+    if (pointerId !== null && drag.pointerId !== null && drag.pointerId !== pointerId) return;
 
-    const movedDistance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    const movedDistance = Math.hypot(clientX - drag.startX, clientY - drag.startY);
     if (!drag.moved && movedDistance > DRAG_CLICK_THRESHOLD_PX) {
       drag.moved = true;
-      if (!drag.captured) {
-        event.currentTarget.setPointerCapture(event.pointerId);
-        drag.captured = true;
-      }
+      draggingRef.current = true;
+      setDragging(true);
     }
     if (!drag.moved) {
       return;
     }
 
-    const dx = event.clientX - drag.lastX;
-    const dy = event.clientY - drag.lastY;
-    drag.lastX = event.clientX;
-    drag.lastY = event.clientY;
+    const dx = clientX - drag.lastX;
+    const dy = clientY - drag.lastY;
+    drag.lastX = clientX;
+    drag.lastY = clientY;
     const target = targetCameraRef.current;
     const nextPan = clampPanToBounds(
       target.panX + dx,
@@ -781,15 +1248,12 @@ export function World2View({
     cameraRef.current = nextTarget;
     setCamera(nextTarget);
     velocityRef.current = { x: dx, y: dy };
-  }, [clampPanToBounds, isReturnInteractionLocked]);
+  }, [clampPanToBounds]);
 
-  const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (isReturnInteractionLocked) {
-      event.preventDefault();
-      return;
-    }
+  const finishDrag = useCallback((pointerId: number | null) => {
     const drag = dragRef.current;
-    if (drag.pointerId !== event.pointerId) return;
+    if (!drag.active) return false;
+    if (pointerId !== null && drag.pointerId !== null && drag.pointerId !== pointerId) return false;
 
     const hadCapture = drag.captured;
     drag.active = false;
@@ -804,11 +1268,59 @@ export function World2View({
     drag.captured = false;
     draggingRef.current = false;
     setDragging(false);
-    startAnimation();
+    if (!isReturnInteractionLocked) {
+      startAnimation();
+    }
+    return hadCapture;
+  }, [isReturnInteractionLocked, startAnimation]);
+
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (isReturnInteractionLocked) {
+      event.preventDefault();
+      return;
+    }
+    applyDragMove(event.clientX, event.clientY, event.pointerId);
+  }, [applyDragMove, isReturnInteractionLocked]);
+
+  const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const hadCapture = finishDrag(event.pointerId);
     if (hadCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-  }, [isReturnInteractionLocked, startAnimation]);
+  }, [finishDrag]);
+
+  useEffect(() => {
+    const resetDragState = () => {
+      finishDrag(null);
+    };
+    const handleWindowPointerMove = (event: PointerEvent) => {
+      applyDragMove(event.clientX, event.clientY, event.pointerId);
+    };
+    const handleWindowPointerUp = (event: PointerEvent) => {
+      finishDrag(event.pointerId);
+    };
+    const handleWindowMouseMove = (event: MouseEvent) => {
+      applyDragMove(event.clientX, event.clientY, null);
+    };
+    const handleWindowMouseUp = () => {
+      finishDrag(null);
+    };
+
+    window.addEventListener("pointermove", handleWindowPointerMove);
+    window.addEventListener("pointerup", handleWindowPointerUp);
+    window.addEventListener("pointercancel", handleWindowPointerUp);
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("mouseup", handleWindowMouseUp);
+    window.addEventListener("blur", resetDragState);
+    return () => {
+      window.removeEventListener("pointermove", handleWindowPointerMove);
+      window.removeEventListener("pointerup", handleWindowPointerUp);
+      window.removeEventListener("pointercancel", handleWindowPointerUp);
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
+      window.removeEventListener("blur", resetDragState);
+    };
+  }, [applyDragMove, finishDrag]);
 
   useEffect(
     () => () => {
@@ -842,6 +1354,7 @@ export function World2View({
     const containRect =
       containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
     const sourceRect = containRect ?? imgRect ?? containerRect;
+    showProductTransitionHold(imageNode, entry.item.imgSrc, aspectRatio, entry.item.id);
 
     if (sourceRect) {
       try {
@@ -908,7 +1421,11 @@ export function World2View({
       // Ignore storage failures.
     }
 
-    router.push(productViewHref);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        router.push(productViewHref);
+      });
+    });
   }, [backHref, buildProductViewHref, currentHref, effectiveActiveCategory, isReturnInteractionLocked, mode, router]);
 
   const centerX = "50%";
@@ -974,7 +1491,7 @@ export function World2View({
         <div
           data-world2-control="true"
           className="pointer-events-none fixed left-5 z-40 hidden -translate-y-1/2 lg:block"
-          style={{ top: "calc(var(--sticky-h) + (var(--viewport-h) - var(--sticky-h)) / 2 - 32px)" }}
+          style={{ top: "var(--gallery-category-nav-top)" }}
         >
           <div className="pointer-events-auto">
             <World2CategoryNav
@@ -995,42 +1512,23 @@ export function World2View({
         style={{
           left: centerX,
           top: centerY,
-          transform: `translate3d(${camera.panX}px, ${camera.panY}px, 0)`,
+          transform: `translate3d(${camera.panX}px, ${camera.panY}px, 0) scale(${camera.zoom})`,
           transformOrigin: "0 0",
           willChange: "transform",
           opacity: isCameraReady && isReturnRevealReady ? 1 : 0,
           transition: `opacity ${returnRevealFadeMs}ms ease-out`,
         }}
       >
-        {layout.items.map((entry, index) => (
-          <button
+        {renderedItems.map((entry, index) => (
+          <World2ItemButton
             key={entry.id}
-            className="absolute overflow-hidden"
-            style={{
-              left: entry.x * camera.zoom - (entry.size * camera.zoom) * 0.5,
-              top: entry.y * camera.zoom - (entry.size * camera.zoom) * 0.5,
-              width: entry.size * camera.zoom,
-              height: entry.size * camera.zoom,
-              pointerEvents: "auto",
-              cursor: "pointer",
-            }}
-            type="button"
-            aria-label={`${entry.item.brand} ${entry.item.artsyName}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              handleItemClick(entry, event.currentTarget);
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element -- native img keeps deep-zoom detail crisp in this dense canvas */}
-            <img
-              src={entry.item.imgSrc}
-              alt={`${entry.item.brand} ${entry.item.artsyName}`}
-              className="h-full w-full object-contain"
-              draggable={false}
-              loading={index < 20 ? "eager" : "lazy"}
-              decoding="async"
-            />
-          </button>
+            animateReveal={animateInitialReveal}
+            entry={entry}
+            index={index}
+            isSafari={isSafariBrowser}
+            onItemWarm={warmProductTransition}
+            onItemClick={handleItemClick}
+          />
         ))}
       </div>
 

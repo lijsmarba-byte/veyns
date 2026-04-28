@@ -12,6 +12,8 @@
   --sticky-h: 156px;
   --viewport-h: max(100vh, 450px);
   --viewport-w: 100vw;
+  --viewport-half-w: 50vw;
+  --gallery-category-nav-top: calc(var(--viewport-h) / 2 + 58px);
 }
 
 @supports (height: 100dvh) {
@@ -23,6 +25,7 @@
 @supports (width: 100dvw) {
   :root {
     --viewport-w: 100dvw;
+    --viewport-half-w: 50dvw;
   }
 }
 
@@ -128,12 +131,11 @@ html[data-browser="safari"] [data-sticky-divider="true"] {
   box-shadow: 0 1px 0.8px rgba(0, 0, 0, 0.03);
 }
 
-html[data-browser="safari"] [data-gallery-edit-nav="true"] button::after {
-  height: 1px !important;
-}
-
-html[data-browser="safari"] [data-archive-capsule-nav="true"] button[class*="font-semibold"] {
-  font-weight: 500;
+html[data-browser="safari"] [data-world2-category-glow="true"] {
+  display: block;
+  opacity: 0.82;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 
 a {
@@ -222,8 +224,10 @@ a {
   }
 }
 
-/* Force-hide floating category nav only while the profile overlay is open. */
-html[data-unseen-overlay-open="true"] [aria-label="Category navigation"] {
+/* Force-hide floating category nav only while a shell overlay is open. */
+html[data-unseen-overlay-open="true"] [aria-label="Category navigation"],
+html[data-unseen-overlay-open="true"] [aria-label="Immersive category navigation"],
+html[data-unseen-overlay-open="true"] [data-gallery-immersive-left-nav="true"] {
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;

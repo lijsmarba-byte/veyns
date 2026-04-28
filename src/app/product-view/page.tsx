@@ -107,39 +107,41 @@ export default async function ProductViewPage({
             className="pt-8 sm:pt-12 md:pt-16 lg:sticky lg:self-start lg:pt-0"
             style={{ top: leftStickyTop }}
           >
-            <h1 className={`relative w-full max-w-[460px] inline-flex items-center justify-start text-left text-[28px] leading-none ${productTitleToneClass}`}>
-              <span className={`inline-flex items-center font-ui text-[26px] font-normal tracking-[-0.06em] ${productTitleToneClass}`}>
-                <span aria-hidden="true" className="text-[24px] leading-none">|</span>
-                <span className="px-[2px]">{formatPipeLabel(current.item.idxLabel)}</span>
-                <span aria-hidden="true" className="text-[24px] leading-none">|</span>
-              </span>
-              <span className={`-ml-[2px] px-[2px] font-ui text-[26px] font-normal tracking-[-0.06em] ${productTitleToneClass}`}>–</span>
-              <span className="ml-[1px] font-instrument italic tracking-[0.01em]">{current.item.artsyName}</span>
-            </h1>
+            <div data-pv-info-hit="true" className="w-full max-w-[460px]">
+              <h1 className={`relative inline-flex w-full items-center justify-start text-left text-[28px] leading-none ${productTitleToneClass}`}>
+                <span className={`inline-flex items-center font-ui text-[26px] font-normal tracking-[-0.06em] ${productTitleToneClass}`}>
+                  <span aria-hidden="true" className="text-[24px] leading-none">|</span>
+                  <span className="px-[2px]">{formatPipeLabel(current.item.idxLabel)}</span>
+                  <span aria-hidden="true" className="text-[24px] leading-none">|</span>
+                </span>
+                <span className={`-ml-[2px] px-[2px] font-ui text-[26px] font-normal tracking-[-0.06em] ${productTitleToneClass}`}>–</span>
+                <span className="ml-[1px] font-instrument italic tracking-[0.01em]">{current.item.artsyName}</span>
+              </h1>
 
-            <div className="mt-16 flex w-full max-w-[460px] flex-col gap-8">
-              <div className="flex w-full items-center justify-between text-[14px] font-medium leading-5 tracking-[0.02em] text-meta">
-                <div className="flex items-center gap-[7px]">
-                  <p>{current.item.brand}</p>
-                  {isPreOwned ? (
-                    <span className="inline-flex h-[26px] items-center gap-[8px] bg-transparent font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-ink">
-                      <span
-                        aria-hidden="true"
-                        className="h-[7px] w-[7px] rounded-full bg-ink"
-                      />
-                      Pre-owned
-                    </span>
-                  ) : null}
+              <div className="mt-16 flex w-full flex-col gap-8">
+                <div className="flex w-full items-center justify-between text-[14px] font-medium leading-5 tracking-[0.02em] text-meta">
+                  <div className="flex items-center gap-[7px]">
+                    <p>{current.item.brand}</p>
+                    {isPreOwned ? (
+                      <span className="inline-flex h-[26px] items-center gap-[8px] bg-transparent font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-ink">
+                        <span
+                          aria-hidden="true"
+                          className="h-[7px] w-[7px] rounded-full bg-ink"
+                        />
+                        Pre-owned
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-right">{current.item.price}</p>
                 </div>
-                <p className="text-right">{current.item.price}</p>
-              </div>
 
-              <p className="text-justify text-[14px] font-normal leading-5 tracking-[0.02em] text-ink">
-                {current.item.artsyDesc}
-              </p>
+                <p className="text-justify text-[14px] font-normal leading-5 tracking-[0.02em] text-ink">
+                  {current.item.artsyDesc}
+                </p>
 
-              <div>
-                <ProductActionRow itemId={current.item.id} mode={mode === "archive" ? "archive" : "gallery"} editId={editId ?? null} />
+                <div>
+                  <ProductActionRow itemId={current.item.id} mode={mode === "archive" ? "archive" : "gallery"} editId={editId ?? null} />
+                </div>
               </div>
             </div>
           </ProductInfoTransition>

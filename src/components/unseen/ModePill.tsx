@@ -12,14 +12,18 @@ export function ModePill({ selected }: ModePillProps) {
   const pathname = usePathname();
   const prefetchedHrefRef = useRef<Set<string>>(new Set());
 
-  const immersiveSuffix = useMemo(() => (pathname?.endsWith("/immersive") ? "/immersive" : ""), [pathname]);
+  const viewSuffix = useMemo(() => {
+    if (pathname?.endsWith("/focus")) return "/focus";
+    if (pathname?.endsWith("/immersive")) return "/immersive";
+    return "";
+  }, [pathname]);
 
   const routeFor = useCallback(
     (target: "gallery" | "archive") => {
       const base = target === "gallery" ? "/gallery" : "/archive";
-      return `${base}${immersiveSuffix}`;
+      return `${base}${viewSuffix}`;
     },
-    [immersiveSuffix],
+    [viewSuffix],
   );
 
   const prefetchRoute = useCallback(
@@ -63,7 +67,7 @@ export function ModePill({ selected }: ModePillProps) {
     >
       <div className="pointer-events-none absolute inset-[2px] z-[1]">
         <div
-          className={`h-[32px] rounded-[16px] transition-[transform,background,box-shadow] duration-[540ms] ease-[cubic-bezier(0.22,0.9,0.24,1)] ${sliderClass}`}
+          className={`h-[32px] rounded-[16px] border-[0.5px] border-[#F0F0F1] transition-[transform,background,box-shadow] duration-[540ms] ease-[cubic-bezier(0.22,0.9,0.24,1)] ${sliderClass}`}
           style={{ width: "96px", transform: `translateX(${sliderTranslatePx}px)` }}
         />
       </div>

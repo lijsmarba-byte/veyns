@@ -5,9 +5,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import type { MockCatalogItem } from "@/data/mockCatalog";
 import { GalleryHoverActions } from "@/components/unseen/GalleryHoverActions";
+import { showProductTransitionHold, warmProductImage } from "@/components/unseen/productImagePreload";
 
 type ProductTileProps = {
   item: MockCatalogItem;
+  imagePriority?: boolean;
   mode?: "gallery" | "archive";
   issueNumber?: string;
 };
@@ -16,6 +18,7 @@ const RETURN_FOCUS_ITEM_KEY = "unseen:return-focus-item";
 const RETURN_FLIGHT_FINISHED_EVENT = "unseen:return-flight-finished";
 const RETURN_FLIGHT_FINISHED_KEY = "unseen:return-flight-finished-flag";
 const DEFAULT_RETURN_REVEAL_DELAY_MS = 820;
+let hasPrefetchedProductViewRoute = false;
 
 type ReturnFocusPayload = {
   at?: number;
@@ -79,6 +82,7 @@ function getItemNumber(item: MockCatalogItem) {
 
 export function ProductTile({
   item,
+  imagePriority = false,
   mode = "archive",
   issueNumber = "04",
 }: ProductTileProps) {
@@ -121,15 +125,16 @@ export function ProductTile({
     return `/product-view?${nextParams.toString()}`;
   }, [backHref, editParam, item.id, item.imgSrc, mode]);
 
-  const prefetchProductView = () => {
-    if (prefetchedHrefRef.current === productViewHref) return;
-    prefetchedHrefRef.current = productViewHref;
-    router.prefetch(productViewHref);
-  };
+  useEffect(() => {
+    if (hasPrefetchedProductViewRoute) return;
+    hasPrefetchedProductViewRoute = true;
+    router.prefetch("/product-view");
+  }, [router]);
 
   useEffect(() => {
-    prefetchProductView();
-  }, [productViewHref]);
+    if (!imagePriority) return;
+    warmProductTransition();
+  }, [imagePriority, productViewHref]);
 
   useLayoutEffect(() => {
     if (returnImageState.hidden) return;
@@ -172,10 +177,23 @@ export function ProductTile({
     const element = target instanceof Element ? target : target.parentElement;
     return Boolean(element?.closest('[data-grid-action-hit="true"]'));
   };
+  const warmTransitionImage = () => {
+    void warmProductImage(item.imgSrc);
+  };
+  const warmProductTransition = () => {
+    warmTransitionImage();
+    if (prefetchedHrefRef.current === productViewHref) return;
+    prefetchedHrefRef.current = productViewHref;
+    router.prefetch(productViewHref);
+  };
 
   const openProductView = () => {
-    prefetchProductView();
+    warmProductTransition();
     const imgEl = imageAreaRef.current?.querySelector("img");
+    if (imgEl) {
+      imgEl.style.filter = "none";
+      imgEl.style.transition = "none";
+    }
     const containerRect = imageAreaRef.current?.getBoundingClientRect();
     const imgRect = imgEl?.getBoundingClientRect();
     const aspectRatio =
@@ -185,6 +203,7 @@ export function ProductTile({
     const containRect =
       containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
     const rect = containRect ?? imgRect ?? containerRect;
+    showProductTransitionHold(imageAreaRef.current, item.imgSrc, aspectRatio, item.id);
     if (rect) {
       try {
         window.sessionStorage.setItem(
@@ -235,20 +254,21 @@ export function ProductTile({
     } catch {
       // Ignore storage failures.
     }
-    router.push(productViewHref);
+    window.requestAnimationFrame(() => {
+      router.push(productViewHref);
+    });
   };
   return (
     <article
       className="group/product flex w-full flex-col items-center"
-      onMouseEnter={prefetchProductView}
       onMouseLeave={handleHoverReset}
-      onFocus={prefetchProductView}
       onBlur={(event) => {
         if (!hasHoverActions) return;
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
           handleHoverReset();
         }
       }}
+      onPointerEnter={warmProductTransition}
     >
       <div
         ref={imageAreaRef}
@@ -256,6 +276,8 @@ export function ProductTile({
         className={`relative mx-auto h-[280px] w-full max-w-[210px] cursor-pointer ${
           returnImageState.hidden ? "pointer-events-none opacity-0" : "opacity-100"
         }`}
+        onPointerDown={warmProductTransition}
+        onFocus={warmProductTransition}
         onClick={(event) => {
           if (isGridActionEventTarget(event.target)) return;
           openProductView();
@@ -269,13 +291,16 @@ export function ProductTile({
             hasHoverActions ? "group-hover/product:blur-[1.8px] group-focus-within/product:blur-[1.8px]" : ""
           }`}
           sizes="(max-width: 768px) 70vw, (max-width: 1024px) 42vw, 19vw"
-          priority={false}
+          loading={imagePriority ? "eager" : "lazy"}
+          fetchPriority={imagePriority ? "high" : "auto"}
         />
         {hasHoverActions ? <GalleryHoverActions itemId={item.id} mode={mode} hoverResetKey={hoverResetKey} /> : null}
       </div>
 
       <div
         className="mt-[16px] flex w-full cursor-pointer flex-col items-center gap-[3px] text-center text-[13px] font-medium leading-5 tracking-[0.02em] text-meta"
+        onPointerDown={warmProductTransition}
+        onFocus={warmProductTransition}
         onClick={openProductView}
       >
         <p

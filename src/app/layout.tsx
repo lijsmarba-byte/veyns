@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { BrowserEnvSync } from "@/components/unseen/BrowserEnvSync";
+import { BrowserCompatibilityNotice } from "@/components/unseen/BrowserCompatibilityNotice";
+import { ProductTransitionOverlayHost } from "@/components/unseen/ProductTransitionOverlayHost";
 import { ReturnTransitionBridge } from "@/components/unseen/ReturnTransitionBridge";
 import "./globals.css";
 
@@ -15,6 +17,11 @@ const inter = localFont({
     {
       path: "../../public/fonts/inter/Inter-Medium.ttf",
       weight: "500",
+      style: "normal",
+    },
+    {
+      path: "../../public/fonts/inter/Inter-SemiBold.ttf",
+      weight: "600",
       style: "normal",
     },
     {
@@ -84,6 +91,8 @@ export default function RootLayout({
         className={`${inter.variable} ${instrumentSerif.variable} ${ibmPlexMono.variable} ${belmonteBallpoint.variable} antialiased`}
       >
         <BrowserEnvSync />
+        <BrowserCompatibilityNotice />
+        <ProductTransitionOverlayHost />
         {children}
         <ReturnTransitionBridge />
       </body>
