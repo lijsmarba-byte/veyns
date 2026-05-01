@@ -20,19 +20,22 @@ export default function GalleryPage() {
         <StickyShell mode="gallery" view="grid" />
         <GalleryArrivalReveal />
         <GalleryShowAround />
-        <div
-          data-gallery-left-nav="true"
-          className="pointer-events-none fixed left-5 z-40 hidden -translate-y-1/2 lg:block"
-          style={{ top: "var(--gallery-category-nav-top)" }}
-        >
-          <div className="pointer-events-auto">
-            <RightCategoryNav
-              sectionKeys={sectionKeys}
-              sectionIdPrefix="gallery-section-"
-            />
-          </div>
-        </div>
         <section data-grid-root="true" className="relative w-full pb-24 pt-[64px]">
+          <div
+            data-gallery-left-nav="true"
+            className="pointer-events-none absolute left-5 top-0 z-30 hidden h-full lg:block"
+          >
+            <div
+              className="pointer-events-auto sticky -translate-y-1/2"
+              style={{ top: "var(--gallery-category-nav-top)" }}
+            >
+              <RightCategoryNav
+                sectionKeys={sectionKeys}
+                sectionIdPrefix="gallery-section-"
+              />
+            </div>
+          </div>
+
           <div className="mx-auto max-w-[1333px] px-10 xl:pl-[220px]">
             <div className="min-w-0">
               {sections.map((section, sectionIndex) => (

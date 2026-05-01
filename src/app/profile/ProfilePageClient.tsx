@@ -11,7 +11,389 @@ import { mockUsers } from "@/data/mockUsers";
 type ProfileTab = "signature" | "reference-sets" | "quiet-constraints" | "feedback" | "settings";
 type OverlaySection = "profile" | "settings" | "feedback" | "about";
 type SettingsField = "email" | "name" | "password";
-type QuietConstraintAction = "price" | "sizing";
+type PriceCategory = "outer" | "upper" | "lower" | "silhouette" | "ground" | "artifacts";
+type LetterSize = "XXS" | "XS" | "S" | "M" | "L" | "XL" | "XXL";
+type QuietSizingCategory = "clothing" | "pants" | "shoes";
+type ShoeSize = "35" | "35.5" | "36" | "36.5" | "37" | "37.5" | "38" | "38.5" | "39" | "39.5" | "40" | "40.5" | "41" | "41.5" | "42" | "42.5" | "43" | "43.5" | "44" | "44.5" | "45" | "45.5" | "46";
+type PantSize = string;
+type GenderMode = "all" | "men" | "women";
+type GenderExceptionMode = "none" | "include-men" | "include-women";
+type PreOwnedPreference = "default" | "prefer" | "only" | "exclude";
+
+type QuietConstraints = {
+  price: Record<PriceCategory, { floor: number; ceiling: number }>;
+  sizing: {
+    clothing: LetterSize[];
+    pants: PantSize[];
+    shoes: ShoeSize[];
+  };
+  gender: {
+    main: GenderMode;
+    exceptionMode: GenderExceptionMode;
+    exceptionCategories: PriceCategory[];
+  };
+  preOwned: PreOwnedPreference;
+  updatedAt: string;
+  activeFromIssue: number;
+};
+
+type QuietConstraintEditor = {
+  section: "price";
+  category: PriceCategory;
+} | {
+  section: "sizing";
+  category: QuietSizingCategory;
+} | {
+  section: "gender";
+} | {
+  section: "pre-owned";
+};
+type ConstraintsPageVersion = "coming-soon" | "active";
+
+const QUIET_CONSTRAINT_STORAGE_KEY = "unseen:quiet-constraints";
+const QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE = 2;
+
+const CATEGORY_LABELS: Record<PriceCategory, string> = {
+  outer: "Outer",
+  upper: "Upper",
+  lower: "Lower",
+  silhouette: "Silhouette",
+  ground: "Ground",
+  artifacts: "Artifacts",
+};
+const PRICE_CATEGORIES: PriceCategory[] = ["outer", "upper", "lower", "silhouette", "ground", "artifacts"];
+const SIZING_CATEGORIES: QuietSizingCategory[] = ["clothing", "pants", "shoes"];
+const LETTER_SIZES: LetterSize[] = ["XXS", "XS", "S", "M", "L", "XL", "XXL"];
+const PANTS_SIZES: PantSize[] = ["32", "34", "36", "38", "40", "42", "44"];
+const SHOE_SIZES: ShoeSize[] = [
+  "35",
+  "35.5",
+  "36",
+  "36.5",
+  "37",
+  "37.5",
+  "38",
+  "38.5",
+  "39",
+  "39.5",
+  "40",
+  "40.5",
+  "41",
+  "41.5",
+  "42",
+  "42.5",
+  "43",
+  "43.5",
+  "44",
+  "44.5",
+  "45",
+  "45.5",
+  "46",
+];
+const QUIET_SIZE_LABELS: Record<QuietSizingCategory, string> = {
+  clothing: "Clothing",
+  pants: "Pants",
+  shoes: "Shoes",
+};
+const GENDER_OPTIONS: { value: GenderMode; label: string }[] = [
+  { value: "all", label: "all gender" },
+  { value: "women", label: "women" },
+  { value: "men", label: "men" },
+];
+const PRE_OWNED_OPTIONS: { value: PreOwnedPreference; label: string }[] = [
+  { value: "default", label: "default" },
+  { value: "prefer", label: "prefer" },
+  { value: "only", label: "only" },
+  { value: "exclude", label: "exclude" },
+];
+const PRICE_RANGE_STEPS: Record<PriceCategory, number> = {
+  outer: 100,
+  upper: 50,
+  lower: 100,
+  silhouette: 100,
+  ground: 100,
+  artifacts: 500,
+};
+const PRICE_RANGE_LIMITS: Record<PriceCategory, { min: number; max: number }> = {
+  outer: { min: 0, max: 6000 },
+  upper: { min: 0, max: 2000 },
+  lower: { min: 0, max: 2500 },
+  silhouette: { min: 0, max: 6000 },
+  ground: { min: 0, max: 6000 },
+  artifacts: { min: 0, max: 20000 },
+};
+// Switch constraints experience here: "coming-soon" | "active".
+const CONSTRAINTS_PAGE_VERSION: ConstraintsPageVersion = "coming-soon";
+
+const womensClothingConversionTable = [
+  { standard: "XXS", numeric: "0", eu: 32, fr: 34, it: 36, uk: "4", us: "0" },
+  { standard: "XS", numeric: "1", eu: 34, fr: 36, it: 38, uk: "6", us: "2" },
+  { standard: "S", numeric: "2", eu: 36, fr: 38, it: 40, uk: "8", us: "4" },
+  { standard: "M", numeric: "3", eu: 38, fr: 40, it: 42, uk: "10", us: "6" },
+  { standard: "L", numeric: "4", eu: 40, fr: 42, it: 44, uk: "12", us: "8" },
+  { standard: "XL", numeric: "5", eu: 42, fr: 44, it: 46, uk: "14", us: "10" },
+  { standard: "XXL", numeric: "6", eu: 44, fr: 46, it: 48, uk: "16", us: "12" },
+] as const;
+
+const mensClothingConversionTable = [
+  { standard: "XS", numeric: "1", eu: 44, uk: "34", us: "34" },
+  { standard: "S", numeric: "2", eu: 46, uk: "36", us: "36" },
+  { standard: "M", numeric: "3", eu: 48, uk: "38", us: "38" },
+  { standard: "L", numeric: "4", eu: 50, uk: "40", us: "40" },
+  { standard: "XL", numeric: "5", eu: 52, uk: "42", us: "42" },
+  { standard: "XXL", numeric: "6", eu: 54, uk: "44", us: "44" },
+] as const;
+
+const womensShoeConversionTable = [
+  { eu: 35, fr: 35, it: 34, uk: "2.5", us: 5 },
+  { eu: 36, fr: 36, it: 35, uk: "3.5", us: 6 },
+  { eu: 37, fr: 37, it: 36, uk: "4.5", us: 7 },
+  { eu: 38, fr: 38, it: 37, uk: "5.5", us: 8 },
+  { eu: 39, fr: 39, it: 38, uk: "6.5", us: 9 },
+  { eu: 40, fr: 40, it: 39, uk: "7.5", us: 10 },
+  { eu: 41, fr: 41, it: 40, uk: "8.5", us: 11 },
+] as const;
+
+const mensShoeConversionTable = [
+  { eu: 40, it: 40, uk: "6", us: 7 },
+  { eu: 41, it: 41, uk: "7", us: 8 },
+  { eu: 42, it: 42, uk: "8", us: 9 },
+  { eu: 43, it: 43, uk: "9", us: 10 },
+  { eu: 44, it: 44, uk: "10", us: 11 },
+  { eu: 45, it: 45, uk: "11", us: 12 },
+  { eu: 46, it: 46, uk: "12", us: 13 },
+] as const;
+
+const womensPantsConversionTable = [
+  { standard: "XXS", waistRange: "24-25", eu: 32, example: "24/30 or 24/32" },
+  { standard: "XS", waistRange: "26-27", eu: 34, example: "26/32" },
+  { standard: "S", waistRange: "27-28", eu: 36, example: "27/32" },
+  { standard: "M", waistRange: "29-30", eu: 38, example: "29/32" },
+  { standard: "L", waistRange: "31-32", eu: 40, example: "31/32" },
+  { standard: "XL", waistRange: "32-33", eu: 42, example: "32/32" },
+] as const;
+
+const mensPantsConversionTable = [
+  { standard: "XS", waistRange: "28-29", example: "28/32" },
+  { standard: "S", waistRange: "30-31", example: "30/32" },
+  { standard: "M", waistRange: "32-33", example: "32/32" },
+  { standard: "L", waistRange: "34-35", example: "34/32" },
+  { standard: "XL", waistRange: "36-37", example: "36/34" },
+  { standard: "XXL", waistRange: "38-39", example: "38/34" },
+] as const;
+
+const DEFAULT_QUIET_CONSTRAINTS: QuietConstraints = {
+  price: {
+    outer: { floor: 200, ceiling: 4500 },
+    upper: { floor: 50, ceiling: 800 },
+    lower: { floor: 80, ceiling: 1400 },
+    silhouette: { floor: 150, ceiling: 3500 },
+    ground: { floor: 100, ceiling: 1800 },
+    artifacts: { floor: 100, ceiling: 14000 },
+  },
+  sizing: {
+    clothing: [],
+    pants: [],
+    shoes: [],
+  },
+  gender: {
+    main: "all",
+    exceptionMode: "none",
+    exceptionCategories: [],
+  },
+  preOwned: "default",
+  updatedAt: "",
+  activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+};
+
+function isLetterSize(value: string): value is LetterSize {
+  return (LETTER_SIZES as ReadonlyArray<string>).includes(value);
+}
+function isPantSize(value: string): value is PantSize {
+  return PANTS_SIZES.includes(value);
+}
+function isShoeSize(value: string): value is ShoeSize {
+  return (SHOE_SIZES as ReadonlyArray<string>).includes(value);
+}
+function isGenderMode(value: string): value is GenderMode {
+  return value === "all" || value === "men" || value === "women";
+}
+function isGenderExceptionMode(value: string): value is GenderExceptionMode {
+  return value === "none" || value === "include-men" || value === "include-women";
+}
+function isPreOwned(value: string): value is PreOwnedPreference {
+  return value === "default" || value === "prefer" || value === "only" || value === "exclude";
+}
+function isPriceCategory(value: string): value is PriceCategory {
+  return PRICE_CATEGORIES.includes(value as PriceCategory);
+}
+function parseConstraintStringArray(raw: unknown): string[] {
+  if (typeof raw === "string") return raw.trim() ? [raw.trim()] : [];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseQuietConstraints(raw: string | null, fallback: QuietConstraints): QuietConstraints {
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") {
+      return fallback;
+    }
+
+    const next: QuietConstraints = {
+      ...fallback,
+      price: {
+        ...fallback.price,
+      },
+      sizing: {
+        ...fallback.sizing,
+      },
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : fallback.updatedAt,
+    };
+
+    if (typeof parsed.activeFromIssue === "number" && Number.isFinite(parsed.activeFromIssue)) {
+      next.activeFromIssue = parsed.activeFromIssue;
+    }
+
+    if (
+      parsed.price &&
+      typeof parsed.price === "object" &&
+      !Array.isArray(parsed.price)
+    ) {
+      PRICE_CATEGORIES.forEach((category) => {
+        const nextValue = parsed.price[category];
+        const floor = Number(nextValue?.floor);
+        const ceiling = Number(nextValue?.ceiling);
+        if (Number.isFinite(floor) && Number.isFinite(ceiling) && floor >= 0 && ceiling >= 0) {
+          next.price[category] = {
+            floor: Math.round(floor),
+            ceiling: Math.round(ceiling),
+          };
+        }
+      });
+    }
+
+    if (parsed.sizing && typeof parsed.sizing === "object" && !Array.isArray(parsed.sizing)) {
+      const parsedSizing = parsed.sizing as Record<string, unknown>;
+      const legacySizing = parsedSizing as Partial<
+        Record<PriceCategory | QuietSizingCategory | "outer" | "upper" | "lower" | "silhouette" | "ground", unknown>
+      >;
+
+      const legacyClothingValues = parseConstraintStringArray(
+        (legacySizing.clothing as unknown) ??
+          parsedSizing.upper ??
+          parsedSizing.outer ??
+          parsedSizing.lower ??
+          parsedSizing.silhouette ??
+          parsedSizing.ground,
+      );
+      if (legacyClothingValues[0] && isLetterSize(legacyClothingValues[0])) {
+        next.sizing.clothing = legacyClothingValues.filter(isLetterSize);
+      }
+
+      const pantsValues = parseConstraintStringArray(legacySizing.pants).filter(isPantSize);
+      if (pantsValues.length > 0) next.sizing.pants = pantsValues;
+      const shoeValues = parseConstraintStringArray(legacySizing.shoes).filter(isShoeSize);
+      if (shoeValues.length > 0) next.sizing.shoes = shoeValues;
+      if (
+        typeof parsedSizing.gender === "object" &&
+        parsedSizing.gender &&
+        !Array.isArray(parsedSizing.gender)
+      ) {
+        const rawGender = parsedSizing.gender as Record<string, unknown>;
+        const main = typeof rawGender.main === "string" ? rawGender.main : "";
+        const exceptionMode = typeof rawGender.exceptionMode === "string" ? rawGender.exceptionMode : "";
+        const preOwned = typeof parsedSizing.preOwned === "string" ? parsedSizing.preOwned : "";
+        const exceptionCategories = parseConstraintStringArray(rawGender.exceptionCategories).filter(isPriceCategory);
+        if (isGenderMode(main)) next.gender.main = main;
+        if (isGenderExceptionMode(exceptionMode)) {
+          next.gender.exceptionMode = exceptionMode;
+        }
+        next.gender.exceptionCategories = exceptionCategories;
+        if (isPreOwned(preOwned)) {
+          next.preOwned = preOwned;
+        }
+      }
+    }
+
+    return next;
+  } catch {
+    return fallback;
+  }
+}
+
+function formatPriceValue(value: number): string {
+  return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function safeIntegerInputValue(value: string): string {
+  return value.replace(/[^0-9]/g, "");
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function snapToStep(value: number, min: number, step: number): number {
+  if (step <= 0) return value;
+  const relative = value - min;
+  return min + Math.round(relative / step) * step;
+}
+
+function labelForPriceCategory(category: PriceCategory): string {
+  return CATEGORY_LABELS[category];
+}
+
+function labelForSizingCategory(category: QuietSizingCategory): string {
+  return QUIET_SIZE_LABELS[category];
+}
+
+function getGenderInclusionOption(main: GenderMode): Exclude<GenderExceptionMode, "none"> | null {
+  if (main === "women") return "include-men";
+  if (main === "men") return "include-women";
+  return null;
+}
+
+function getGenderInclusionLabel(main: GenderMode): string | null {
+  if (main === "women") return "include men";
+  if (main === "men") return "include women";
+  return null;
+}
+
+function formatGenderMainValue(main: GenderMode): string {
+  if (main === "all") return "all gender";
+  return main;
+}
+
+function formatGenderInclusionValue(gender: QuietConstraints["gender"]): string {
+  const inclusionOption = getGenderInclusionOption(gender.main);
+  if (!inclusionOption || gender.exceptionMode === "none" || gender.exceptionMode !== inclusionOption) {
+    return "none";
+  }
+  return getGenderInclusionLabel(gender.main) ?? "none";
+}
+
+function formatGenderCategoryValue(categories: PriceCategory[]): string {
+  if (categories.length === 0) return "—";
+  return categories.map((category) => labelForPriceCategory(category)).join(", ");
+}
+
+function mapProfileGenderToGenderMode(value: string | null | undefined): GenderMode {
+  if (value === "woman" || value === "women" || value === "female") return "women";
+  if (value === "man" || value === "men" || value === "male") return "men";
+  return "all";
+}
+
+function formatSizingValue(category: QuietSizingCategory, value: string[]): string {
+  if (value.length === 0) return "—";
+  return value.join(", ");
+}
+
 
 type ReferenceSet = {
   id: string;
@@ -25,6 +407,10 @@ type FeedbackEntry = {
   quality: string;
   trust: string;
 };
+type PriceDragState = {
+  category: PriceCategory;
+  edge: "floor" | "ceiling";
+} | null;
 
 const NEW_EDIT_TARGET = "__new_edit__";
 const MAIN_EDIT_SET_ID = "main-edit";
@@ -181,6 +567,27 @@ export default function ProfilePage() {
   const isCompactEmbeddedOverlay =
     isEmbedded && (overlaySection === "settings" || overlaySection === "feedback");
   const activeUser = mockUsers[0] ?? null;
+  const defaultConstraintGenderMain = mapProfileGenderToGenderMode(activeUser?.profileGender);
+  const defaultQuietConstraints = useMemo<QuietConstraints>(
+    () => ({
+      ...DEFAULT_QUIET_CONSTRAINTS,
+      price: { ...DEFAULT_QUIET_CONSTRAINTS.price },
+      sizing: {
+        clothing: [...DEFAULT_QUIET_CONSTRAINTS.sizing.clothing],
+        pants: [...DEFAULT_QUIET_CONSTRAINTS.sizing.pants],
+        shoes: [...DEFAULT_QUIET_CONSTRAINTS.sizing.shoes],
+      },
+      gender: {
+        main: defaultConstraintGenderMain,
+        exceptionMode: "none",
+        exceptionCategories: [],
+      },
+      preOwned: DEFAULT_QUIET_CONSTRAINTS.preOwned,
+      updatedAt: DEFAULT_QUIET_CONSTRAINTS.updatedAt,
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+    }),
+    [defaultConstraintGenderMain],
+  );
   const [activeTab, setActiveTab] = useState<ProfileTab>(() => {
     if (isEmbedded) return embeddedInitialTab;
     if (isProfileTab(requestedTab)) return requestedTab;
@@ -213,7 +620,23 @@ export default function ProfilePage() {
   const [isSettingsEditMode, setIsSettingsEditMode] = useState(() => isEmbedded && embeddedInitialTab === "settings");
   const [activeSettingsField, setActiveSettingsField] = useState<SettingsField | null>(null);
   const [settingsFieldDraft, setSettingsFieldDraft] = useState("");
-  const [activeConstraintHint, setActiveConstraintHint] = useState<QuietConstraintAction | null>(null);
+  const [constraints, setConstraints] = useState<QuietConstraints>(defaultQuietConstraints);
+  const [activeConstraintEditor, setActiveConstraintEditor] = useState<QuietConstraintEditor | null>(null);
+  const [activeConstraintSectionEditor, setActiveConstraintSectionEditor] = useState<"price" | "sizing" | null>(null);
+  const [editingPriceRanges, setEditingPriceRanges] = useState<QuietConstraints["price"]>(defaultQuietConstraints.price);
+  const [editingSizingDraft, setEditingSizingDraft] = useState<QuietConstraints["sizing"]>(defaultQuietConstraints.sizing);
+  const [editingPriceFloor, setEditingPriceFloor] = useState("");
+  const [editingPriceCeiling, setEditingPriceCeiling] = useState("");
+  const [editingSizingValues, setEditingSizingValues] = useState<string[]>([]);
+  const [editingSizingCategory, setEditingSizingCategory] = useState<QuietSizingCategory | null>(null);
+  const [editingGenderMain, setEditingGenderMain] = useState<GenderMode>(defaultConstraintGenderMain);
+  const [editingGenderExceptionMode, setEditingGenderExceptionMode] = useState<GenderExceptionMode>("none");
+  const [editingGenderExceptionCategories, setEditingGenderExceptionCategories] = useState<PriceCategory[]>([]);
+  const [editingPreOwnedPreference, setEditingPreOwnedPreference] = useState<PreOwnedPreference>("default");
+  const [editingFieldShake, setEditingFieldShake] = useState<"floor" | "ceiling" | null>(null);
+  const [isConversionOpen, setIsConversionOpen] = useState(false);
+  const [isConversionMenuOpen, setIsConversionMenuOpen] = useState(false);
+  const [isResetConstraintsConfirmOpen, setIsResetConstraintsConfirmOpen] = useState(false);
   const [newEditName, setNewEditName] = useState("");
   const [newEditReferences, setNewEditReferences] = useState<MockReferenceVisual[]>([]);
   const [renameDraft, setRenameDraft] = useState("");
@@ -223,15 +646,7 @@ export default function ProfilePage() {
   const [referenceSets, setReferenceSets] = useState<ReferenceSet[]>(
     () => buildReferenceSets(activeUser?.referenceSetForMainEdit ?? []),
   );
-  const [isMainEditHintDismissedForAccount, setIsMainEditHintDismissedForAccount] = useState(() => {
-    if (!activeUser || typeof window === "undefined") return false;
-    const key = `unseen:main-edit-meta-dismissed-profile-create:${activeUser.userId}`;
-    try {
-      return window.localStorage.getItem(key) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [isMainEditHintDismissedForAccount, setIsMainEditHintDismissedForAccount] = useState(false);
   const [mainEditRecalibrationCount, setMainEditRecalibrationCount] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(1440);
   const [isCloseIconMorphed, setIsCloseIconMorphed] = useState(!shouldMorphCloseIcon);
@@ -255,6 +670,19 @@ export default function ProfilePage() {
   const primaryActionsRowRef = useRef<HTMLDivElement | null>(null);
   const constraintHintTimeoutRef = useRef<number | null>(null);
   const newEditUploadPulseTimeoutRef = useRef<number | null>(null);
+  const conversionPopoverRef = useRef<HTMLDivElement | null>(null);
+  const conversionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const conversionMenuRef = useRef<HTMLDivElement | null>(null);
+  const priceSliderTrackRefs = useRef<Record<PriceCategory, HTMLDivElement | null>>({
+    outer: null,
+    upper: null,
+    lower: null,
+    silhouette: null,
+    ground: null,
+    artifacts: null,
+  });
+  const constraintsStorageKeyRef = useRef<string>(`${QUIET_CONSTRAINT_STORAGE_KEY}:${activeUser?.userId ?? "default"}`);
+  const [draggingPrice, setDraggingPrice] = useState<PriceDragState>(null);
   const isCompactHeaderLayout = viewportWidth < 980;
 
   const mainEditImages = useMemo(
@@ -268,6 +696,16 @@ export default function ProfilePage() {
     window.addEventListener("resize", syncViewportWidth);
     return () => window.removeEventListener("resize", syncViewportWidth);
   }, []);
+
+  useEffect(() => {
+    if (!activeUser) return;
+    const key = `unseen:main-edit-meta-dismissed-profile-create:${activeUser.userId}`;
+    try {
+      setIsMainEditHintDismissedForAccount(window.localStorage.getItem(key) === "1");
+    } catch {
+      setIsMainEditHintDismissedForAccount(false);
+    }
+  }, [activeUser]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -289,6 +727,93 @@ export default function ProfilePage() {
       body.style.overscrollBehaviorY = prevBodyOverscrollY;
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeUser) return;
+    const key = `${QUIET_CONSTRAINT_STORAGE_KEY}:${activeUser.userId}`;
+    constraintsStorageKeyRef.current = key;
+    try {
+      const stored = window.localStorage.getItem(key);
+      const parsed = parseQuietConstraints(stored, defaultQuietConstraints);
+      const shouldBootstrapGenderFromProfile =
+        parsed.updatedAt.trim().length === 0 && parsed.gender.main !== defaultConstraintGenderMain;
+      if (shouldBootstrapGenderFromProfile) {
+        setConstraints({
+          ...parsed,
+          gender: {
+            main: defaultConstraintGenderMain,
+            exceptionMode: "none",
+            exceptionCategories: [],
+          },
+        });
+      } else {
+        setConstraints(parsed);
+      }
+    } catch {
+      setConstraints(defaultQuietConstraints);
+    }
+  }, [activeUser, defaultConstraintGenderMain, defaultQuietConstraints]);
+
+  useEffect(() => {
+    if (!activeUser) return;
+    if (constraintsStorageKeyRef.current !== `${QUIET_CONSTRAINT_STORAGE_KEY}:${activeUser.userId}`) {
+      constraintsStorageKeyRef.current = `${QUIET_CONSTRAINT_STORAGE_KEY}:${activeUser.userId}`;
+    }
+    try {
+      window.localStorage.setItem(constraintsStorageKeyRef.current, JSON.stringify(constraints));
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [activeUser, constraints]);
+
+  useEffect(() => {
+    if (!isConversionOpen && !isConversionMenuOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeConstraintConversion();
+      closeConversionMenu();
+    };
+
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !conversionPopoverRef.current?.contains(target) &&
+        !conversionTriggerRef.current?.contains(target) &&
+        !conversionMenuRef.current?.contains(target)
+      ) {
+        closeConversionMenu();
+        setIsConversionMenuOpen(false);
+        closeConstraintConversion();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("touchstart", onPointerDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [isConversionOpen, isConversionMenuOpen]);
+
+  useEffect(() => {
+    if (!isConversionOpen) return;
+    const root = document.documentElement;
+    const body = document.body;
+    const prevRootOverflow = root.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    root.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      root.style.overflow = prevRootOverflow;
+      body.style.overflow = prevBodyOverflow;
+    };
+  }, [isConversionOpen]);
 
   useEffect(() => {
     if (!shouldMorphCloseIcon) return;
@@ -329,11 +854,12 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (activeTab !== "feedback") return;
+    if (isEmbedded) return;
     const raf = window.requestAnimationFrame(() => {
       feedbackClarityRef.current?.focus();
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [activeTab]);
+  }, [activeTab, isEmbedded]);
 
   useEffect(() => {
     if (!isCompactEmbeddedOverlay) return;
@@ -459,22 +985,84 @@ export default function ProfilePage() {
   );
   const signatureTitleDisplay = signatureTitle.replace(/[.!?]+$/g, "");
   const settingsActionPillClass =
-    "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink";
+    `inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] ${
+      isEmbedded ? "bg-[#F5F5F6]" : "bg-[#F5F5F6]"
+    } px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink`;
   const settingsDeletePillClass =
-    "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] outline-none transition-colors duration-150 hover:border-[#D94343] hover:bg-[#D94343] hover:text-paper focus:outline-none focus-visible:outline-none focus-visible:ring-0";
+    `inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] ${
+      isEmbedded ? "bg-[#F5F5F6]" : "bg-[#F5F5F6]"
+    } px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] outline-none transition-colors duration-150 hover:border-[#D94343] hover:bg-[#D94343] hover:text-paper focus:outline-none focus-visible:outline-none focus-visible:ring-0`;
   const overlayTitleClass = "font-ui text-[16px] font-medium leading-5 text-ink";
-  const formFieldTitleClass = "font-ui text-[13px] font-medium leading-5 text-ink";
-  const overlayInfoCardClass = "rounded-[6px] bg-[#F5F5F6] px-5 py-5";
+  const formFieldTitleClass = "font-ui text-[13px] font-medium leading-5 text-meta";
+  const embeddedProfileContentClass = isEmbedded ? "mx-auto w-full max-w-[940px]" : "w-full";
+  const overlayInfoCardClass = isEmbedded ? "px-5 py-5" : "rounded-[6px] bg-[#F5F5F6] px-5 py-5";
+  const aboutInfoCardClass = isEmbedded ? "px-5 py-5" : "rounded-[6px] bg-[#F5F5F6] px-6 py-6";
   const overlayInputClass =
-    "mt-2 h-9 w-full rounded-[4px] border border-line/80 bg-paper px-3 font-ui text-[13px] font-normal text-meta outline-none placeholder:text-meta/75";
+    `mt-2 h-9 w-full ${
+      isEmbedded ? "rounded-[4px] border border-line/80 bg-[#F5F5F6] px-3" : "rounded-[4px] border border-line/80 bg-paper px-3"
+    } font-ui text-[13px] font-normal text-meta outline-none placeholder:text-meta/75`;
   const overlayReadOnlyFieldClass =
-    "mt-2 w-full rounded-[4px] border border-transparent bg-paper/65 px-3 py-2 text-left font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none transition-colors duration-150 hover:text-meta";
+    `mt-2 w-full ${
+      isEmbedded ? "rounded-[4px] border border-transparent bg-[#F5F5F6] px-3 py-2" : "rounded-[4px] border border-transparent bg-paper/65 px-3 py-2"
+    } text-left font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none transition-colors duration-150 hover:text-meta`;
   const profileTabHoverPillClass =
-    "pointer-events-none absolute left-1/2 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center -translate-x-[calc(50%-8px)] translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381]/55 bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-all duration-150 ease-out group-hover/tab:translate-y-0 group-hover/tab:opacity-100 group-focus-visible/tab:translate-y-0 group-focus-visible/tab:opacity-100";
-  const constraintHoverPillClass =
-    "pointer-events-none absolute bottom-[5px] left-full z-20 ml-[8px] inline-flex h-[29px] items-center justify-center translate-y-1 whitespace-nowrap rounded-[999px] border border-[#6F7381]/55 bg-[#6F7381] px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-all duration-150 ease-out group-hover/constraint:translate-y-0 group-hover/constraint:opacity-100 group-focus-within/constraint:translate-y-0 group-focus-within/constraint:opacity-100";
+    "pointer-events-none absolute left-1/2 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center -translate-x-[calc(50%-8px)] translate-y-1 whitespace-nowrap rounded-[999px] border border-ink bg-ink px-[11px] font-ui text-[14px] font-normal leading-[18px] tracking-[-0.03em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.12)] transition-all duration-150 ease-out group-hover/tab:translate-y-0 group-hover/tab:opacity-100 group-focus-visible/tab:translate-y-0 group-focus-visible/tab:opacity-100";
+  const constraintSectionMetaClass =
+    "font-ui text-[13px] leading-5 tracking-[0.02em] text-meta";
   const expandTextButtonClass =
     "inline-flex items-center gap-2 whitespace-nowrap border-0 bg-transparent p-0 font-ui text-[13px] leading-5 tracking-[0.02em] text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none";
+  const constraintListRowValueClass =
+    "text-[13px] font-ui leading-[1.25] text-meta";
+  const constraintPriceRowLabelClass = "inline-flex h-7 items-center text-[13px] font-ui leading-[1.25] text-meta";
+  const constraintPriceRowReadClass = "grid min-h-[44px] grid-cols-[112px_minmax(0,1fr)] items-center gap-4 py-2";
+  const constraintPriceRowEditClass = "grid min-h-[58px] grid-cols-[112px_minmax(0,1fr)] items-start gap-4 py-2";
+  const constraintPriceInlineValueClass =
+    "inline-flex h-7 items-center justify-center whitespace-nowrap font-ui text-[13px] leading-5 text-meta";
+  const constraintPriceValueSlotClass =
+    "inline-flex h-7 w-[60px] items-center justify-center text-[13px] font-ui leading-5 text-meta";
+  const constraintPriceDashClass = "inline-flex h-7 w-[12px] items-center justify-center text-[13px] font-ui leading-5 text-meta";
+  const constraintPriceSliderWidthPx = 220;
+  const constraintPriceSliderHandleSizePx = 14;
+  const constraintPriceSliderWrapClass =
+    "relative h-7 select-none touch-none";
+  const constraintPriceSliderTrackClass =
+    "pointer-events-none absolute left-0 right-0 top-1/2 z-0 -translate-y-1/2 rounded-full";
+  const constraintPriceSliderActiveTrackClass =
+    "pointer-events-none absolute top-1/2 z-[1] -translate-y-1/2 rounded-full";
+  const constraintPriceSliderHandleClass =
+    "absolute top-1/2 z-[20] m-0 inline-flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-ink p-0 shadow-[0_0_0_1px_var(--paper),0_1px_2px_rgba(0,0,0,0.18)] transition-transform duration-120 hover:scale-105 focus-visible:scale-105 focus-visible:outline-none";
+  const constraintOptionRowClass = "flex flex-wrap items-center gap-x-3 gap-y-1";
+  const constraintOptionButtonClass =
+    "inline-flex h-7 items-center rounded-[4px] bg-transparent px-1 font-ui text-[13px] font-normal leading-5 text-meta transition-colors duration-150 focus-visible:outline-none";
+  const constraintSizingOptionButtonClass = "w-[54px] justify-center";
+  const constraintOptionButtonActiveClass = "bg-transparent !text-ink font-semibold";
+  const constraintReadRowClass =
+    "grid min-h-[44px] grid-cols-[112px_minmax(0,1fr)] items-center gap-4 py-2";
+  const constraintEditRowClass =
+    "grid min-h-[44px] grid-cols-[112px_minmax(0,1fr)] items-center gap-4 py-2";
+  const constraintActionPillClass = `${settingsActionPillClass} active:text-ink`;
+  const constraintComingSoonPillClass =
+    "pointer-events-none absolute left-1/2 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center -translate-x-1/2 translate-y-1 whitespace-nowrap rounded-[999px] border border-ink bg-ink px-[11px] font-ui text-[13px] font-normal leading-[18px] tracking-[-0.02em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.12)] transition-all duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100 group-active:translate-y-0 group-active:opacity-100";
+  const constraintsPageVersionConfig: Record<
+    ConstraintsPageVersion,
+    {
+      isComingSoonMode: boolean;
+      priceComingSoonValueLabel: string;
+    }
+  > = {
+    "coming-soon": {
+      isComingSoonMode: true,
+      priceComingSoonValueLabel: "none",
+    },
+    active: {
+      isComingSoonMode: false,
+      priceComingSoonValueLabel: "none",
+    },
+  };
+  const activeConstraintsPageVersion = constraintsPageVersionConfig[CONSTRAINTS_PAGE_VERSION];
+  const isConstraintsComingSoonMode = activeConstraintsPageVersion.isComingSoonMode;
+  const constraintPriceComingSoonValueLabel = activeConstraintsPageVersion.priceComingSoonValueLabel;
+  const constraintSizingComingSoonValueLabel = "not specified";
   const isShortcutCreateFlowActive = isFocusedCreateFlow && isCreateEditOpen;
   const canSendFeedback =
     feedbackAnswers.clarity.trim().length > 0 ||
@@ -492,7 +1080,6 @@ export default function ProfilePage() {
   const pendingRebuildSet = pendingRebuildSetId ? referenceSets.find((set) => set.id === pendingRebuildSetId) ?? null : null;
   const isPendingRebuildMainEdit = pendingRebuildSet?.id === MAIN_EDIT_SET_ID;
   const pendingDeleteSet = pendingDeleteSetId ? referenceSets.find((set) => set.id === pendingDeleteSetId) ?? null : null;
-
   const dismissMainEditMetaHint = () => {
     if (!activeUser) return;
     const key = `unseen:main-edit-meta-dismissed-profile-create:${activeUser.userId}`;
@@ -504,23 +1091,449 @@ export default function ProfilePage() {
     }
   };
 
-  const showConstraintHint = (target: QuietConstraintAction) => {
-    setActiveConstraintHint(target);
+  const openConstraintConversion = () => {
+    setIsConversionOpen(true);
+    setIsConversionMenuOpen(false);
+  };
+
+  const closeConstraintConversion = () => {
+    setIsConversionOpen(false);
+  };
+
+  const toggleConversionMenu = () => {
+    openConstraintConversion();
+  };
+
+  const closeConversionMenu = () => {
+    setIsConversionMenuOpen(false);
+  };
+
+  const beginPriceConstraintEditor = (category: PriceCategory) => {
+    const range = constraints.price[category];
+    setIsConversionOpen(false);
+    setIsResetConstraintsConfirmOpen(false);
+    setActiveConstraintEditor({ section: "price", category });
+    setEditingPriceFloor(String(range.floor));
+    setEditingPriceCeiling(String(range.ceiling));
+  };
+
+  const beginPriceSectionEditor = () => {
+    setIsConversionOpen(false);
+    setIsResetConstraintsConfirmOpen(false);
+    setActiveConstraintEditor(null);
+    setActiveConstraintSectionEditor("price");
+    setEditingPriceRanges({
+      outer: { ...constraints.price.outer },
+      upper: { ...constraints.price.upper },
+      lower: { ...constraints.price.lower },
+      silhouette: { ...constraints.price.silhouette },
+      ground: { ...constraints.price.ground },
+      artifacts: { ...constraints.price.artifacts },
+    });
+  };
+
+  const beginSizingSectionEditor = () => {
+    setIsConversionOpen(false);
+    setIsResetConstraintsConfirmOpen(false);
+    setActiveConstraintEditor(null);
+    setActiveConstraintSectionEditor("sizing");
+    setEditingSizingDraft({
+      clothing: [...constraints.sizing.clothing],
+      pants: [...constraints.sizing.pants],
+      shoes: [...constraints.sizing.shoes],
+    });
+  };
+
+  const beginSizingConstraintEditor = (category: QuietSizingCategory) => {
+    setIsConversionOpen(false);
+    setIsResetConstraintsConfirmOpen(false);
+    setActiveConstraintEditor({ section: "sizing", category });
+    setEditingSizingCategory(category);
+    const nextValues =
+      category === "clothing"
+        ? [...constraints.sizing.clothing]
+        : category === "pants"
+          ? [...constraints.sizing.pants]
+          : [...constraints.sizing.shoes];
+    setEditingSizingValues(nextValues);
+  };
+
+  const beginGenderConstraintEditor = () => {
+    setIsConversionOpen(false);
+    setIsResetConstraintsConfirmOpen(false);
+    setActiveConstraintEditor({ section: "gender" });
+    setEditingGenderMain(constraints.gender.main);
+    const allowedExceptionMode = getGenderInclusionOption(constraints.gender.main);
+    if (
+      constraints.gender.exceptionMode === "none" ||
+      (allowedExceptionMode && constraints.gender.exceptionMode === allowedExceptionMode)
+    ) {
+      setEditingGenderExceptionMode(constraints.gender.exceptionMode);
+      setEditingGenderExceptionCategories(
+        constraints.gender.exceptionMode === "none" ? [] : [...constraints.gender.exceptionCategories],
+      );
+      return;
+    }
+    setEditingGenderExceptionMode("none");
+    setEditingGenderExceptionCategories([]);
+  };
+
+  const beginPreOwnedConstraintEditor = () => {
+    setIsConversionOpen(false);
+    setIsResetConstraintsConfirmOpen(false);
+    setActiveConstraintEditor({ section: "pre-owned" });
+    setEditingPreOwnedPreference(constraints.preOwned);
+  };
+
+  const cancelConstraintEditor = () => {
+    setActiveConstraintEditor(null);
+    setActiveConstraintSectionEditor(null);
+    setEditingPriceRanges(defaultQuietConstraints.price);
+    setEditingSizingDraft(defaultQuietConstraints.sizing);
+    setEditingPriceFloor("");
+    setEditingPriceCeiling("");
+    setEditingSizingCategory(null);
+    setEditingSizingValues([]);
+    setEditingGenderMain(defaultConstraintGenderMain);
+    setEditingGenderExceptionMode("none");
+    setEditingGenderExceptionCategories([]);
+    setEditingPreOwnedPreference(defaultQuietConstraints.preOwned);
+    setEditingFieldShake(null);
+  };
+
+  const triggerConstraintFieldShake = (field: "floor" | "ceiling") => {
+    setEditingFieldShake(field);
     if (constraintHintTimeoutRef.current !== null) {
       window.clearTimeout(constraintHintTimeoutRef.current);
     }
     constraintHintTimeoutRef.current = window.setTimeout(() => {
-      setActiveConstraintHint((current) => (current === target ? null : current));
+      setEditingFieldShake(null);
       constraintHintTimeoutRef.current = null;
-    }, 1300);
+    }, 240);
   };
 
-  const hideConstraintHint = (target: QuietConstraintAction) => {
-    setActiveConstraintHint((current) => (current === target ? null : current));
-    if (constraintHintTimeoutRef.current !== null) {
-      window.clearTimeout(constraintHintTimeoutRef.current);
-      constraintHintTimeoutRef.current = null;
+  const setEditingPriceRangeValue = (category: PriceCategory, edge: "floor" | "ceiling", value: number) => {
+    const limits = PRICE_RANGE_LIMITS[category];
+    const step = PRICE_RANGE_STEPS[category];
+    const nextValue = clampNumber(snapToStep(value, limits.min, step), limits.min, limits.max);
+    setEditingPriceRanges((current) => ({
+      ...current,
+      [category]:
+        edge === "floor"
+          ? {
+              ...current[category],
+              floor: Math.min(nextValue, current[category].ceiling),
+            }
+          : {
+              ...current[category],
+              ceiling: Math.max(nextValue, current[category].floor),
+            },
+    }));
+  };
+
+  const normalizeEditingPriceRange = (category: PriceCategory) => {
+    const limits = PRICE_RANGE_LIMITS[category];
+    const step = PRICE_RANGE_STEPS[category];
+    setEditingPriceRanges((current) => {
+      const floor = clampNumber(snapToStep(current[category].floor, limits.min, step), limits.min, limits.max);
+      const ceiling = clampNumber(snapToStep(current[category].ceiling, limits.min, step), limits.min, limits.max);
+      return {
+        ...current,
+        [category]: {
+          floor: Math.min(floor, ceiling),
+          ceiling: Math.max(floor, ceiling),
+        },
+      };
+    });
+  };
+
+  const getPriceValueFromClientX = (category: PriceCategory, clientX: number): number | null => {
+    const track = priceSliderTrackRefs.current[category];
+    if (!track) return null;
+    const limits = PRICE_RANGE_LIMITS[category];
+    const step = PRICE_RANGE_STEPS[category];
+    const rect = track.getBoundingClientRect();
+    const ratio = clampNumber((clientX - rect.left) / Math.max(rect.width, 1), 0, 1);
+    const raw = limits.min + ratio * (limits.max - limits.min);
+    return clampNumber(snapToStep(raw, limits.min, step), limits.min, limits.max);
+  };
+
+  const updatePriceFromClientX = (category: PriceCategory, edge: "floor" | "ceiling", clientX: number) => {
+    const nextValue = getPriceValueFromClientX(category, clientX);
+    if (nextValue === null) return;
+    setEditingPriceRangeValue(category, edge, nextValue);
+  };
+
+  const beginPriceDrag = (
+    category: PriceCategory,
+    edge: "floor" | "ceiling",
+    clientX: number,
+  ) => {
+    setDraggingPrice({ category, edge });
+    updatePriceFromClientX(category, edge, clientX);
+  };
+
+  useEffect(() => {
+    if (!draggingPrice) return;
+
+    const onMouseMove = (event: globalThis.MouseEvent) => {
+      updatePriceFromClientX(draggingPrice.category, draggingPrice.edge, event.clientX);
+    };
+    const onMouseUp = () => {
+      normalizeEditingPriceRange(draggingPrice.category);
+      setDraggingPrice(null);
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      updatePriceFromClientX(draggingPrice.category, draggingPrice.edge, touch.clientX);
+      event.preventDefault();
+    };
+    const onTouchEnd = () => {
+      normalizeEditingPriceRange(draggingPrice.category);
+      setDraggingPrice(null);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onTouchEnd);
+
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [draggingPrice]);
+
+  const savePriceSection = () => {
+    const nextPrice = { ...editingPriceRanges };
+
+    PRICE_CATEGORIES.forEach((category) => {
+      const limits = PRICE_RANGE_LIMITS[category];
+      const step = PRICE_RANGE_STEPS[category];
+      const floor = clampNumber(snapToStep(Math.round(Number(nextPrice[category].floor)), limits.min, step), limits.min, limits.max);
+      const ceiling = clampNumber(
+        snapToStep(Math.round(Number(nextPrice[category].ceiling)), limits.min, step),
+        limits.min,
+        limits.max,
+      );
+      nextPrice[category] = {
+        floor: Math.min(floor, ceiling),
+        ceiling: Math.max(floor, ceiling),
+      };
+    });
+
+    setConstraints((current) => ({
+      ...current,
+      price: nextPrice,
+      updatedAt: new Date().toISOString(),
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+    }));
+    setActiveConstraintSectionEditor(null);
+  };
+
+  const toggleSizingDraftValue = (category: QuietSizingCategory, value: string) => {
+    setEditingSizingDraft((current) => {
+      const currentValues = [...current[category]];
+      const nextValues = currentValues.includes(value)
+        ? currentValues.filter((item) => item !== value)
+        : [...currentValues, value];
+
+      return {
+        ...current,
+        [category]:
+          category === "clothing"
+            ? nextValues.filter(isLetterSize)
+            : category === "pants"
+              ? nextValues.filter(isPantSize)
+              : nextValues.filter(isShoeSize),
+      };
+    });
+  };
+
+  const saveSizingSection = () => {
+    setConstraints((current) => ({
+      ...current,
+      sizing: {
+        clothing: editingSizingDraft.clothing.filter(isLetterSize),
+        pants: editingSizingDraft.pants.filter(isPantSize),
+        shoes: editingSizingDraft.shoes.filter(isShoeSize),
+      },
+      updatedAt: new Date().toISOString(),
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+    }));
+    setActiveConstraintSectionEditor(null);
+  };
+
+  const savePriceConstraint = () => {
+    if (!activeConstraintEditor || activeConstraintEditor.section !== "price") return;
+
+    const rawFloor = Number(editingPriceFloor);
+    const rawCeiling = Number(editingPriceCeiling);
+    const isFloorInvalid = !Number.isFinite(rawFloor) || !Number.isInteger(rawFloor) || rawFloor < 0;
+    const isCeilingInvalid = !Number.isFinite(rawCeiling) || !Number.isInteger(rawCeiling) || rawCeiling < 0;
+
+    if (isFloorInvalid) {
+      triggerConstraintFieldShake("floor");
+      return;
     }
+
+    if (isCeilingInvalid) {
+      triggerConstraintFieldShake("ceiling");
+      return;
+    }
+
+    const nextFloor = Math.min(rawFloor, rawCeiling);
+    const nextCeiling = Math.max(rawFloor, rawCeiling);
+
+    setConstraints((current) => ({
+      ...current,
+      price: {
+        ...current.price,
+        [activeConstraintEditor.category]: {
+          floor: nextFloor,
+          ceiling: nextCeiling,
+        },
+      },
+      updatedAt: new Date().toISOString(),
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+    }));
+    setActiveConstraintEditor(null);
+  };
+
+  const saveSizingConstraint = () => {
+    if (activeConstraintEditor?.section !== "sizing") return;
+    const category = activeConstraintEditor.category;
+
+    if (category === "clothing") {
+      const nextValue = editingSizingValues.filter(isLetterSize);
+
+      setConstraints((current) => ({
+        ...current,
+        sizing: {
+          ...current.sizing,
+          clothing: nextValue,
+        },
+        updatedAt: new Date().toISOString(),
+        activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+      }));
+      setActiveConstraintEditor(null);
+      return;
+    }
+
+    if (category === "pants") {
+      const nextValue = editingSizingValues.filter(isPantSize);
+      setConstraints((current) => ({
+        ...current,
+        sizing: {
+          ...current.sizing,
+          pants: nextValue,
+        },
+        updatedAt: new Date().toISOString(),
+        activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+      }));
+      setActiveConstraintEditor(null);
+      return;
+    }
+
+    const nextShoes = editingSizingValues.filter(isShoeSize);
+    setConstraints((current) => ({
+      ...current,
+      sizing: {
+        ...current.sizing,
+        shoes: nextShoes,
+      },
+      updatedAt: new Date().toISOString(),
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+    }));
+    setActiveConstraintEditor(null);
+  };
+
+  const toggleSizingValue = (category: QuietSizingCategory, value: string) => {
+    setEditingSizingValues((current) => {
+      if (current.includes(value)) {
+        return current.filter((item) => item !== value);
+      }
+      return [...current, value];
+    });
+  };
+
+  const saveGenderConstraint = () => {
+    if (activeConstraintEditor?.section !== "gender") return;
+    const inclusionOption = getGenderInclusionOption(editingGenderMain);
+    const normalizedExceptionMode =
+      editingGenderExceptionMode === "none"
+        ? "none"
+        : inclusionOption && editingGenderExceptionMode === inclusionOption
+          ? editingGenderExceptionMode
+          : "none";
+    const normalizedExceptionCategories =
+      normalizedExceptionMode === "none"
+        ? []
+        : editingGenderExceptionCategories.filter((category, index, arr) => arr.indexOf(category) === index);
+    setConstraints((current) => ({
+      ...current,
+      gender: {
+        main: editingGenderMain,
+        exceptionMode: normalizedExceptionMode,
+        exceptionCategories: normalizedExceptionCategories,
+      },
+      updatedAt: new Date().toISOString(),
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+    }));
+    setActiveConstraintEditor(null);
+  };
+
+  const toggleGenderExceptionCategory = (category: PriceCategory) => {
+    setEditingGenderExceptionCategories((current) => {
+      if (current.includes(category)) return current.filter((item) => item !== category);
+      return [...current, category];
+    });
+  };
+
+  const savePreOwnedConstraint = () => {
+    if (activeConstraintEditor?.section !== "pre-owned") return;
+    setConstraints((current) => ({
+      ...current,
+      preOwned: editingPreOwnedPreference,
+      updatedAt: new Date().toISOString(),
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+    }));
+    setActiveConstraintEditor(null);
+  };
+
+  const resetConstraintsToCalibration = () => {
+    setConstraints({
+      ...defaultQuietConstraints,
+      price: { ...defaultQuietConstraints.price },
+      sizing: {
+        clothing: [...defaultQuietConstraints.sizing.clothing],
+        pants: [...defaultQuietConstraints.sizing.pants],
+        shoes: [...defaultQuietConstraints.sizing.shoes],
+      },
+      gender: {
+        main: defaultQuietConstraints.gender.main,
+        exceptionMode: "none",
+        exceptionCategories: [],
+      },
+      preOwned: defaultQuietConstraints.preOwned,
+      updatedAt: new Date().toISOString(),
+      activeFromIssue: QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE,
+    });
+    setEditingPriceFloor("");
+    setEditingPriceCeiling("");
+    setEditingSizingValues([]);
+    setEditingSizingCategory(null);
+    setEditingGenderMain(defaultConstraintGenderMain);
+    setEditingGenderExceptionMode("none");
+    setEditingGenderExceptionCategories([]);
+    setEditingPreOwnedPreference(defaultQuietConstraints.preOwned);
+    setEditingFieldShake(null);
+    setActiveConstraintEditor(null);
+    setActiveConstraintSectionEditor(null);
+    setIsResetConstraintsConfirmOpen(false);
   };
 
   const bumpMainEditRecalibration = () => {
@@ -1002,14 +2015,15 @@ export default function ProfilePage() {
             }}
           >
             {visibleNewEditReferences.map((image) => (
-              <div key={image.id} className="group relative aspect-square w-full overflow-hidden rounded-[4px] bg-mist">
+              <div key={image.id} className="group relative aspect-square w-full overflow-hidden rounded-[3px] bg-mist">
                 <img
                   src={image.publicPath}
                   alt={image.fileName}
                   loading="eager"
                   decoding="async"
-                  className="h-full w-full object-cover"
+                  className="pointer-events-none select-none h-full w-full object-cover"
                   draggable={false}
+                  onDragStart={(event) => event.preventDefault()}
                 />
                 <button
                   type="button"
@@ -1089,21 +2103,21 @@ export default function ProfilePage() {
           type="button"
           aria-label="Close profile"
           onClick={handleCloseProfile}
-          className="fixed right-5 top-[30px] z-50 inline-flex h-[11px] w-[15px] items-center justify-center text-inactive transition-colors duration-150 hover:text-ink focus-visible:outline-none sm:right-10"
+          className="fixed right-4 top-[23px] z-50 inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none md:right-10"
         >
           <span
-            className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
-              isCloseIconMorphed ? "translate-y-0 rotate-45" : "-translate-y-[4px] rotate-0"
+            className={`absolute left-1/2 top-1/2 block h-[1.5px] w-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+              isCloseIconMorphed ? "translate-y-0 rotate-45" : "-translate-y-[3px] rotate-0"
             }`}
           />
           <span
-            className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+            className={`absolute left-1/2 top-1/2 block h-[1.5px] w-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current transition-all duration-220 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
               isCloseIconMorphed ? "opacity-0" : "opacity-100"
             }`}
           />
           <span
-            className={`absolute block h-[1.5px] w-[15px] rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
-              isCloseIconMorphed ? "translate-y-0 -rotate-45" : "translate-y-[4px] rotate-0"
+            className={`absolute left-1/2 top-1/2 block h-[1.5px] w-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
+              isCloseIconMorphed ? "translate-y-0 -rotate-45" : "translate-y-[3px] rotate-0"
             }`}
           />
         </button>
@@ -1134,7 +2148,7 @@ export default function ProfilePage() {
               <h1
                 className="m-0 text-left font-ui text-[20px] leading-none tracking-[-0.03em] text-ink sm:text-[26px]"
                 style={{
-                  fontFamily: "var(--font-meta-mono), monospace",
+                  fontFamily: "var(--font-ui-sans), sans-serif",
                   whiteSpace: "nowrap",
                 }}
               >
@@ -1143,9 +2157,9 @@ export default function ProfilePage() {
               <p
                 ref={headerMetaRef}
                 aria-hidden={shouldFoldHeaderMeta}
-                className="m-0 mt-[14px] text-left font-ui text-[12px] font-bold leading-4 tracking-[0.02em] text-ink sm:mt-[8px]"
+                className="m-0 mt-[14px] text-left font-ui text-[12px] font-medium leading-4 tracking-[0.02em] text-ink sm:mt-[8px]"
                 style={{
-                  fontFamily: "var(--font-meta-mono), monospace",
+                  fontFamily: "var(--font-ui-sans), sans-serif",
                   whiteSpace: "nowrap",
                   visibility: shouldFoldHeaderMeta ? "hidden" : "visible",
                 }}
@@ -1242,29 +2256,52 @@ export default function ProfilePage() {
           <section className="mt-10">
             <div className="mx-auto w-full px-10">
               <div
-                className="mx-auto w-full max-w-[1080px] overflow-hidden rounded-[10px]"
+                className={`mx-auto w-full ${isEmbedded ? "max-w-[900px]" : "max-w-[1080px]"} overflow-hidden`}
                 style={{
                   backgroundColor: "#F5F5F6",
-                  boxShadow: "0 10px 26px rgba(17,17,17,0.12)",
+                  borderRadius: "36px",
+                  boxShadow: "0 2px 8px rgba(17,17,17,0.06)",
                 }}
               >
-                <div className="grid w-full gap-0 lg:grid-cols-[0.44fr_0.56fr]">
-                  <div className="min-h-[392px] p-3 md:p-4" style={{ backgroundColor: "#F5F5F6" }}>
-                    <div className="h-full min-h-[352px] rounded-[10px] bg-ink px-7 py-7 md:px-8 md:py-8">
-                      <h2 className="mb-7 inline-flex w-full items-end justify-start text-[25px] leading-none text-paper">
+                <div className={`grid w-full gap-0 ${isEmbedded ? "md:grid-cols-[0.42fr_0.58fr]" : "lg:grid-cols-[0.43fr_0.57fr]"}`}>
+                  <div
+                    className={`min-w-0 ${
+                      isEmbedded
+                        ? "flex min-h-[292px] items-stretch justify-start py-4 pr-3 md:py-4 md:pr-3"
+                        : "flex min-h-[430px] items-stretch justify-start py-4 pr-4 md:py-4 md:pr-4"
+                    }`}
+                    style={{
+                      backgroundColor: "#F5F5F6",
+                      paddingLeft: isEmbedded ? "37px" : "56px",
+                    }}
+                  >
+                    <div
+                      className={`bg-ink ${
+                        isEmbedded
+                          ? "min-h-[218px] w-full max-w-[374px] self-center px-7 py-6"
+                          : "min-h-[352px] w-full self-center px-7 py-7 md:px-8 md:py-8"
+                      }`}
+                      style={isEmbedded ? { borderRadius: "32px", maxWidth: "374px" } : { borderRadius: "32px" }}
+                    >
+                      <h2 className={`${isEmbedded ? "mb-5 text-[22px]" : "mb-7 text-[25px]"} inline-flex w-full items-end justify-start leading-none text-paper`}>
                         <span className="font-ui font-normal tracking-[-0.06em]">{activeUser.name}</span>
                         <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">–</span>
                         <span className="ml-[1px] font-instrument italic tracking-[0.01em]">{signatureTitleDisplay}</span>
                       </h2>
 
-                      <p className="max-w-[52ch] text-left font-ui text-[14px] font-normal leading-[1.8] text-paper">
+                      <p className={`${isEmbedded ? "text-[13px] leading-[1.75]" : "text-[14px] leading-[1.8]"} max-w-[52ch] text-left font-ui font-normal text-paper/88`}>
                         {shortSummary}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex min-h-[392px] items-center px-4 py-4 md:px-5 md:py-5" style={{ backgroundColor: "#F5F5F6" }}>
-                    <div className="mx-auto w-[82%] overflow-visible rounded-[10px]">
+                  <div
+                    className={`flex ${isEmbedded ? "min-h-[292px]" : "min-h-[430px]"} min-w-0 items-center justify-center py-4 ${
+                      isEmbedded ? "pl-2 pr-3 md:pl-2 md:pr-3" : "px-4 md:px-5"
+                    }`}
+                    style={{ backgroundColor: "#F5F5F6" }}
+                  >
+                    <div className={`${isEmbedded ? "mx-auto w-full max-w-[560px] md:w-[136%] md:max-w-none" : "mx-auto w-[96%]"} overflow-visible rounded-[32px]`}>
                       <ProfileSignatureContourInline
                         user={activeUser}
                         backgroundColor="#F5F5F6"
@@ -1279,7 +2316,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              <div className="mx-auto mt-4 flex w-full max-w-[1080px] items-center justify-end gap-[10px]">
+              <div className={`mx-auto mt-4 flex w-full ${isEmbedded ? "max-w-[900px]" : "max-w-[1080px]"} items-center justify-end gap-[10px]`}>
                 <button
                   type="button"
                   onClick={() =>
@@ -1309,7 +2346,7 @@ export default function ProfilePage() {
 
         {showReferenceSetsSection ? (
           <div className="mx-[calc(50%-50vw)] px-10">
-            <section>
+            <section className={embeddedProfileContentClass}>
               {isShortcutCreateFlowActive ? (
                 <div
                   ref={createEditSectionRef}
@@ -1328,7 +2365,9 @@ export default function ProfilePage() {
                 const isRenaming = renamingSetId === set.id;
                 const isMainEdit = set.id === MAIN_EDIT_SET_ID;
                 const shouldShowMainEditMetaHint = isMainEdit && !isMainEditHintDismissedForAccount;
-                const previewColumns = getReferencePreviewColumns(viewportWidth);
+                const previewColumns = isEmbedded
+                  ? Math.min(getReferencePreviewColumns(viewportWidth), 5)
+                  : getReferencePreviewColumns(viewportWidth);
                 const previewRows = 1;
                 const previewCount = previewColumns * previewRows;
                 const visibleImages = isExpanded ? set.images : set.images.slice(0, previewCount);
@@ -1368,7 +2407,7 @@ export default function ProfilePage() {
                           {visibleImages.map((image) => (
                             <div
                               key={image.id}
-                              className="relative aspect-square w-full overflow-hidden rounded-[4px]"
+                              className="relative aspect-square w-full overflow-hidden rounded-[3px]"
                               onMouseEnter={() => setHoveredImageId(image.id)}
                               onMouseLeave={() => setHoveredImageId(null)}
                             >
@@ -1378,7 +2417,9 @@ export default function ProfilePage() {
                                 fill
                                 unoptimized
                                 sizes="(max-width: 1024px) 100vw, 220px"
-                                className="object-cover"
+                                className="pointer-events-none select-none object-cover"
+                                draggable={false}
+                                onDragStart={(event) => event.preventDefault()}
                               />
                               {isEditing && hoveredImageId === image.id ? (
                                 <button
@@ -1754,61 +2795,780 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
+        {isResetConstraintsConfirmOpen ? (
+          <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
+            <button
+              type="button"
+              aria-label="Cancel reset"
+              onClick={() => setIsResetConstraintsConfirmOpen(false)}
+              className="absolute inset-0 bg-paper/72"
+            />
+            <div className="relative w-full max-w-[440px] rounded-[6px] bg-paper px-6 py-8 shadow-[0_8px_20px_rgba(0,0,0,0.06)]">
+              <p className="font-ui text-[14px] font-normal leading-[1.7] text-ink">
+                Reset all constraints to calibration defaults?
+              </p>
+              <div className="mt-6 flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsResetConstraintsConfirmOpen(false)}
+                  className={settingsActionPillClass}
+                >
+                  cancel
+                </button>
+                <button type="button" onClick={resetConstraintsToCalibration} className={settingsActionPillClass}>
+                  reset
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isConversionOpen ? (
+          <div className="fixed inset-0 z-[85] flex items-center justify-center px-6">
+            <button
+              type="button"
+              aria-label="Close conversion table"
+              onClick={closeConstraintConversion}
+              className="absolute inset-0 bg-paper/72"
+            />
+            <div
+              ref={conversionPopoverRef}
+              className="relative flex h-[50vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[6px] bg-paper px-5 py-5 shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-6 md:py-6"
+            >
+              <div>
+                <p className={overlayTitleClass}>Sizing conversion</p>
+              </div>
+              <div
+                className="mt-3 min-h-0 flex-1 overflow-y-scroll overscroll-contain pr-1"
+                style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}
+              >
+                <div className="grid gap-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <p className="font-ui text-[13px] font-medium leading-5 text-ink">Women</p>
+                    <p className="font-ui text-[13px] font-medium leading-5 text-ink">Men</p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <section className="rounded-[8px] bg-[#F5F5F6] p-4">
+                      <p className="font-ui text-[12px] font-medium leading-5 text-ink">Clothing</p>
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full border-collapse font-ui text-[13px] leading-5 text-meta">
+                          <thead>
+                            <tr>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">Standard</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">Numeric</th>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">EU</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">FR</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">IT</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">UK</th>
+                              <th className="py-1 text-left font-medium text-meta">US</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {womensClothingConversionTable.map((entry) => (
+                              <tr key={`women-clothing-${entry.standard}`}>
+                                <td className="py-1 pr-3 text-ink">{entry.standard}</td>
+                                <td className="py-1 pr-3">{entry.numeric}</td>
+                                <td className="py-1 pr-3 text-ink">{entry.eu}</td>
+                                <td className="py-1 pr-3">{entry.fr}</td>
+                                <td className="py-1 pr-3">{entry.it}</td>
+                                <td className="py-1 pr-3">{entry.uk}</td>
+                                <td className="py-1">{entry.us}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                    <section className="rounded-[8px] bg-[#F5F5F6] p-4">
+                      <p className="font-ui text-[12px] font-medium leading-5 text-ink">Clothing</p>
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full border-collapse font-ui text-[13px] leading-5 text-meta">
+                          <thead>
+                            <tr>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">Standard</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">Numeric</th>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">EU / FR / IT</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">UK</th>
+                              <th className="py-1 text-left font-medium text-meta">US</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {mensClothingConversionTable.map((entry) => (
+                              <tr key={`men-clothing-${entry.standard}`}>
+                                <td className="py-1 pr-3 text-ink">{entry.standard}</td>
+                                <td className="py-1 pr-3">{entry.numeric}</td>
+                                <td className="py-1 pr-3 text-ink">{entry.eu}</td>
+                                <td className="py-1 pr-3">{entry.uk}</td>
+                                <td className="py-1">{entry.us}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <section className="rounded-[8px] bg-[#F5F5F6] p-4">
+                      <p className="font-ui text-[12px] font-medium leading-5 text-ink">Shoes</p>
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full border-collapse font-ui text-[13px] leading-5 text-meta">
+                          <thead>
+                            <tr>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">EU</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">FR</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">IT</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">UK</th>
+                              <th className="py-1 text-left font-medium text-meta">US</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {womensShoeConversionTable.map((entry) => (
+                              <tr key={`women-shoes-${entry.eu}`}>
+                                <td className="py-1 pr-3 text-ink">{entry.eu}</td>
+                                <td className="py-1 pr-3">{entry.fr}</td>
+                                <td className="py-1 pr-3">{entry.it}</td>
+                                <td className="py-1 pr-3">{entry.uk}</td>
+                                <td className="py-1">{entry.us}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                    <section className="rounded-[8px] bg-[#F5F5F6] p-4">
+                      <p className="font-ui text-[12px] font-medium leading-5 text-ink">Shoes</p>
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full border-collapse font-ui text-[13px] leading-5 text-meta">
+                          <thead>
+                            <tr>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">EU</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">IT</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">UK</th>
+                              <th className="py-1 text-left font-medium text-meta">US</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {mensShoeConversionTable.map((entry) => (
+                              <tr key={`men-shoes-${entry.eu}`}>
+                                <td className="py-1 pr-3 text-ink">{entry.eu}</td>
+                                <td className="py-1 pr-3">{entry.it}</td>
+                                <td className="py-1 pr-3">{entry.uk}</td>
+                                <td className="py-1">{entry.us}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <section className="rounded-[8px] bg-[#F5F5F6] p-4">
+                      <p className="font-ui text-[12px] font-medium leading-5 text-ink">Pants</p>
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full border-collapse font-ui text-[13px] leading-5 text-meta">
+                          <thead>
+                            <tr>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">Standard</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">Waist Range</th>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">EU</th>
+                              <th className="py-1 text-left font-medium text-meta">Example W/L</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {womensPantsConversionTable.map((entry) => (
+                              <tr key={`women-pants-${entry.standard}`}>
+                                <td className="py-1 pr-3 text-ink">{entry.standard}</td>
+                                <td className="py-1 pr-3">{entry.waistRange}</td>
+                                <td className="py-1 pr-3 text-ink">{entry.eu}</td>
+                                <td className="py-1">{entry.example}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                    <section className="rounded-[8px] bg-[#F5F5F6] p-4">
+                      <p className="font-ui text-[12px] font-medium leading-5 text-ink">Pants</p>
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full border-collapse font-ui text-[13px] leading-5 text-meta">
+                          <thead>
+                            <tr>
+                              <th className="py-1 pr-3 text-left font-medium text-ink">Standard</th>
+                              <th className="py-1 pr-3 text-left font-medium text-meta">Waist Range</th>
+                              <th className="py-1 text-left font-medium text-meta">Example W/L</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {mensPantsConversionTable.map((entry) => (
+                              <tr key={`men-pants-${entry.standard}`}>
+                                <td className="py-1 pr-3 text-ink">{entry.standard}</td>
+                                <td className="py-1 pr-3">{entry.waistRange}</td>
+                                <td className="py-1">{entry.example}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 flex justify-center pt-3">
+                <button type="button" onClick={closeConstraintConversion} className={constraintActionPillClass}>
+                  close
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {showConstraintsSection ? (
           <div className="mx-[calc(50%-50vw)] px-10">
             <section className="mt-12 w-full">
-              <div className="w-full space-y-5">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="min-w-0">
-                      <p className="font-ui text-[14px] font-normal leading-[1.8] text-meta">
-                        Preferred <span className="font-ui font-medium text-ink">price range</span> by category
-                      </p>
+              <div className="mx-auto w-full max-w-[960px] px-4 md:translate-x-[128px] md:px-8">
+                <div className="grid gap-4 md:grid-cols-2 md:gap-5">
+                  <article className={`${overlayInfoCardClass} h-full`}>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">
+                        Price Range{" "}
+                        <span className="font-ui text-[13px] font-normal leading-5 text-meta">(in EUR)</span>
+                      </h2>
+                      {isConstraintsComingSoonMode ? (
+                        <div className="group relative inline-flex">
+                          <button
+                            type="button"
+                            aria-disabled="true"
+                            className={`${constraintActionPillClass} cursor-default`}
+                          >
+                            edit
+                          </button>
+                          <span className={constraintComingSoonPillClass}>coming soon</span>
+                        </div>
+                      ) : activeConstraintSectionEditor === "price" ? (
+                        <div className="flex items-center gap-3">
+                          <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
+                            cancel
+                          </button>
+                          <button type="button" onClick={savePriceSection} className={constraintActionPillClass}>
+                            save
+                          </button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={beginPriceSectionEditor} className={constraintActionPillClass}>
+                          edit
+                        </button>
+                      )}
                     </div>
-                    <div
-                      className="group/constraint relative inline-flex"
-                      onMouseLeave={() => hideConstraintHint("price")}
-                    >
-                      <button
-                        type="button"
-                        className={settingsActionPillClass}
-                        onClick={() => showConstraintHint("price")}
-                      >
-                        set range
-                      </button>
-                      <span
-                        aria-hidden="true"
-                        className={`${constraintHoverPillClass} ${activeConstraintHint === "price" ? "translate-y-0 opacity-100" : ""}`}
-                      >
-                        coming soon
-                      </span>
+                    <div className="mt-4 space-y-0">
+                      {PRICE_CATEGORIES.map((category) => {
+                        const range = constraints.price[category];
+                        const isEditing = activeConstraintSectionEditor === "price";
+                        const draftRange = editingPriceRanges[category];
+                        return (
+                          <div
+                            key={category}
+                            className={isEditing ? constraintPriceRowEditClass : constraintPriceRowReadClass}
+                          >
+                            <p className={constraintPriceRowLabelClass}>{labelForPriceCategory(category)}</p>
+                            <div className="min-w-0">
+                              <div
+                                className={constraintPriceInlineValueClass}
+                                style={{ width: `${constraintPriceSliderWidthPx}px` }}
+                              >
+                                {isConstraintsComingSoonMode ? (
+                                  <span className={constraintPriceValueSlotClass}>{constraintPriceComingSoonValueLabel}</span>
+                                ) : (
+                                  <>
+                                    {isEditing ? (
+                                      <span className={constraintPriceValueSlotClass}>{formatPriceValue(draftRange.floor)}</span>
+                                    ) : (
+                                      <span className={constraintPriceValueSlotClass}>{formatPriceValue(range.floor)}</span>
+                                    )}
+                                    <span className={constraintPriceDashClass}>—</span>
+                                    {isEditing ? (
+                                      <span className={constraintPriceValueSlotClass}>{formatPriceValue(draftRange.ceiling)}</span>
+                                    ) : (
+                                      <span className={constraintPriceValueSlotClass}>{formatPriceValue(range.ceiling)}</span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                              {isEditing ? (
+                                <div className="mt-0">
+                                  {(() => {
+                                    const limits = PRICE_RANGE_LIMITS[category];
+                                    const min = limits.min;
+                                    const max = limits.max;
+                                    const span = Math.max(max - min, 1);
+                                    const floor = clampNumber(draftRange.floor, min, max);
+                                    const ceiling = clampNumber(draftRange.ceiling, min, max);
+                                    const floorPercent = ((floor - min) / span) * 100;
+                                    const ceilingPercent = ((ceiling - min) / span) * 100;
+                                    const floorPx = (floorPercent / 100) * constraintPriceSliderWidthPx;
+                                    const ceilingPx = (ceilingPercent / 100) * constraintPriceSliderWidthPx;
+                                    const handleRadiusPx = constraintPriceSliderHandleSizePx / 2;
+                                    const activeLeftPx = floorPx + handleRadiusPx;
+                                    const activeWidthPx = Math.max(ceilingPx - floorPx - handleRadiusPx * 2, 0);
+                                    return (
+                                      <div
+                                        ref={(node) => {
+                                          priceSliderTrackRefs.current[category] = node;
+                                        }}
+                                        className={constraintPriceSliderWrapClass}
+                                        style={{ width: `${constraintPriceSliderWidthPx}px` }}
+                                        onMouseDown={(event) => {
+                                          const clickedValue = getPriceValueFromClientX(category, event.clientX);
+                                          if (clickedValue === null) return;
+                                          const edge =
+                                            Math.abs(clickedValue - floor) <= Math.abs(clickedValue - ceiling)
+                                              ? "floor"
+                                              : "ceiling";
+                                          beginPriceDrag(category, edge, event.clientX);
+                                        }}
+                                        onTouchStart={(event) => {
+                                          const touch = event.touches[0];
+                                          if (!touch) return;
+                                          const touchedValue = getPriceValueFromClientX(category, touch.clientX);
+                                          if (touchedValue === null) return;
+                                          const edge =
+                                            Math.abs(touchedValue - floor) <= Math.abs(touchedValue - ceiling)
+                                              ? "floor"
+                                              : "ceiling";
+                                          beginPriceDrag(category, edge, touch.clientX);
+                                          event.preventDefault();
+                                        }}
+                                      >
+                                        <div
+                                          className={constraintPriceSliderTrackClass}
+                                          style={{
+                                            height: "4px",
+                                            backgroundColor: "var(--inactive)",
+                                            opacity: 1,
+                                          }}
+                                        />
+                                        <div
+                                          className={constraintPriceSliderActiveTrackClass}
+                                          style={{
+                                            height: "4px",
+                                            backgroundColor: "var(--meta)",
+                                            left: `${activeLeftPx}px`,
+                                            width: `${activeWidthPx}px`,
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          aria-label={`Adjust minimum ${labelForPriceCategory(category)} price`}
+                                          onMouseDown={(event) => {
+                                            event.stopPropagation();
+                                            beginPriceDrag(category, "floor", event.clientX);
+                                          }}
+                                          onTouchStart={(event) => {
+                                            const touch = event.touches[0];
+                                            if (!touch) return;
+                                            event.stopPropagation();
+                                            beginPriceDrag(category, "floor", touch.clientX);
+                                            event.preventDefault();
+                                          }}
+                                          className={`${constraintPriceSliderHandleClass} cursor-ew-resize`}
+                                          style={{
+                                            left: `${floorPercent}%`,
+                                            width: `${constraintPriceSliderHandleSizePx}px`,
+                                            height: `${constraintPriceSliderHandleSizePx}px`,
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          aria-label={`Adjust maximum ${labelForPriceCategory(category)} price`}
+                                          onMouseDown={(event) => {
+                                            event.stopPropagation();
+                                            beginPriceDrag(category, "ceiling", event.clientX);
+                                          }}
+                                          onTouchStart={(event) => {
+                                            const touch = event.touches[0];
+                                            if (!touch) return;
+                                            event.stopPropagation();
+                                            beginPriceDrag(category, "ceiling", touch.clientX);
+                                            event.preventDefault();
+                                          }}
+                                          className={`${constraintPriceSliderHandleClass} cursor-ew-resize`}
+                                          style={{
+                                            left: `${ceilingPercent}%`,
+                                            width: `${constraintPriceSliderHandleSizePx}px`,
+                                            height: `${constraintPriceSliderHandleSizePx}px`,
+                                          }}
+                                        />
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
+                  </article>
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="min-w-0">
-                      <p className="font-ui text-[14px] font-normal leading-[1.8] text-meta">
-                        Preferred <span className="font-ui font-medium text-ink">sizing</span> and fit flexibility
-                      </p>
-                    </div>
-                    <div
-                      className="group/constraint relative inline-flex"
-                      onMouseLeave={() => hideConstraintHint("sizing")}
-                    >
+                  <article className={`${overlayInfoCardClass} h-full`}>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Sizing</h2>
                       <button
+                        ref={conversionTriggerRef}
                         type="button"
-                        className={settingsActionPillClass}
-                        onClick={() => showConstraintHint("sizing")}
+                        onClick={openConstraintConversion}
+                        className={expandTextButtonClass}
                       >
-                        set sizing
+                        (conversion chart)
                       </button>
-                      <span
-                        aria-hidden="true"
-                        className={`${constraintHoverPillClass} ${activeConstraintHint === "sizing" ? "translate-y-0 opacity-100" : ""}`}
-                      >
-                        coming soon
-                      </span>
+                      {isConstraintsComingSoonMode ? (
+                        <div className="group relative inline-flex">
+                          <button
+                            type="button"
+                            aria-disabled="true"
+                            className={`${constraintActionPillClass} cursor-default`}
+                          >
+                            edit
+                          </button>
+                          <span className={constraintComingSoonPillClass}>coming soon</span>
+                        </div>
+                      ) : activeConstraintSectionEditor === "sizing" ? (
+                        <div className="flex items-center gap-3">
+                          <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
+                            cancel
+                          </button>
+                          <button type="button" onClick={saveSizingSection} className={constraintActionPillClass}>
+                            save
+                          </button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={beginSizingSectionEditor} className={constraintActionPillClass}>
+                          edit
+                        </button>
+                      )}
                     </div>
-                  </div>
+                    <div className="mt-4 space-y-0">
+                      {SIZING_CATEGORIES.map((category) => {
+                        const isClothing = category === "clothing";
+                        const clothingValue = (() => {
+                          if (isClothing) {
+                            return constraints.sizing.clothing;
+                          }
+                          return category === "pants" ? constraints.sizing.pants : constraints.sizing.shoes;
+                        })();
+                        const isEditing = activeConstraintSectionEditor === "sizing";
+                        const sizingOptions =
+                          isClothing
+                            ? LETTER_SIZES
+                            : category === "pants"
+                              ? PANTS_SIZES
+                              : SHOE_SIZES;
+                        const draftValues = editingSizingDraft[category];
+                        return (
+                          <div
+                            key={category}
+                            className={isEditing ? constraintEditRowClass : constraintReadRowClass}
+                          >
+                            <p className={formFieldTitleClass}>
+                              {labelForSizingCategory(category)}
+                            </p>
+                            {isEditing ? (
+                              <div className="min-w-0 flex-1">
+                                <div className={constraintOptionRowClass}>
+                                  {sizingOptions.map((option, index) => {
+                                    const isActive = draftValues.includes(option as never);
+                                    return (
+                                      <div key={option} className="inline-flex items-center gap-3">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            toggleSizingDraftValue(category, option);
+                                          }}
+                                          aria-pressed={isActive}
+                                          style={isActive ? { color: "var(--ink)", fontWeight: 600 } : undefined}
+                                          className={`${constraintOptionButtonClass} ${constraintSizingOptionButtonClass} ${
+                                            isActive ? constraintOptionButtonActiveClass : ""
+                                          }`}
+                                        >
+                                          {option}
+                                        </button>
+                                        {index < sizingOptions.length - 1 ? (
+                                          <span aria-hidden="true" className="font-ui text-[13px] leading-5 text-meta/55">·</span>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <p className={constraintListRowValueClass}>
+                                  {isConstraintsComingSoonMode
+                                    ? constraintSizingComingSoonValueLabel
+                                    : formatSizingValue(category, clothingValue)}
+                                </p>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </article>
+
+                  <article className={`${overlayInfoCardClass} h-full`}>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Gender</h2>
+                      {isConstraintsComingSoonMode ? (
+                        <div className="group relative inline-flex">
+                          <button
+                            type="button"
+                            aria-disabled="true"
+                            className={`${constraintActionPillClass} cursor-default`}
+                          >
+                            edit
+                          </button>
+                          <span className={constraintComingSoonPillClass}>coming soon</span>
+                        </div>
+                      ) : activeConstraintEditor?.section === "gender" ? (
+                        <div className="flex items-center gap-3">
+                          <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
+                            cancel
+                          </button>
+                          <button type="button" onClick={saveGenderConstraint} className={constraintActionPillClass}>
+                            save
+                          </button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={beginGenderConstraintEditor} className={constraintActionPillClass}>
+                          edit
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-4 space-y-0">
+                      {(() => {
+                        const isEditing = activeConstraintEditor?.section === "gender";
+                        const hasInclusionInReadMode =
+                          constraints.gender.exceptionMode !== "none" &&
+                          getGenderInclusionOption(constraints.gender.main) === constraints.gender.exceptionMode;
+                        const canEditInclusion = getGenderInclusionOption(editingGenderMain) !== null;
+                        const shouldShowCategoryScopeInEdit =
+                          canEditInclusion && editingGenderExceptionMode !== "none";
+                        return (
+                          <div className="space-y-0">
+                            <div className={isEditing ? constraintEditRowClass : constraintReadRowClass}>
+                              <p className={formFieldTitleClass}>Preference</p>
+                              {isEditing ? (
+                                <div className="min-w-0 flex-1">
+                                  <div className={constraintOptionRowClass}>
+                                    {GENDER_OPTIONS.map((option, index) => {
+                                      const isActive = editingGenderMain === option.value;
+                                      return (
+                                        <div key={option.value} className="inline-flex items-center gap-3">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingGenderMain(option.value);
+                                              const nextInclusionOption = getGenderInclusionOption(option.value);
+                                              if (!nextInclusionOption) {
+                                                setEditingGenderExceptionMode("none");
+                                                setEditingGenderExceptionCategories([]);
+                                              } else if (editingGenderExceptionMode !== "none" && editingGenderExceptionMode !== nextInclusionOption) {
+                                                setEditingGenderExceptionMode("none");
+                                                setEditingGenderExceptionCategories([]);
+                                              }
+                                            }}
+                                            aria-pressed={isActive}
+                                            style={isActive ? { color: "var(--ink)", fontWeight: 600 } : undefined}
+                                            className={`${constraintOptionButtonClass} ${
+                                              isActive ? constraintOptionButtonActiveClass : ""
+                                            }`}
+                                          >
+                                            {option.label}
+                                          </button>
+                                          {index < GENDER_OPTIONS.length - 1 ? (
+                                            <span aria-hidden="true" className="font-ui text-[13px] leading-5 text-meta/55">·</span>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className={constraintListRowValueClass}>
+                                  {formatGenderMainValue(constraints.gender.main)}
+                                </p>
+                              )}
+                            </div>
+                            {isEditing && canEditInclusion ? (
+                              <div className={constraintEditRowClass}>
+                                <p className={formFieldTitleClass}>Inclusion</p>
+                                <div className="min-w-0 flex-1">
+                                  <div className={constraintOptionRowClass}>
+                                    {[
+                                      { value: "none" as const, label: "none" },
+                                      ...(getGenderInclusionOption(editingGenderMain)
+                                        ? [{
+                                            value: getGenderInclusionOption(editingGenderMain) as Exclude<GenderExceptionMode, "none">,
+                                            label: getGenderInclusionLabel(editingGenderMain) as string,
+                                          }]
+                                        : []),
+                                    ].map((option, index, list) => {
+                                      const isActive = editingGenderExceptionMode === option.value;
+                                      return (
+                                        <div key={option.value} className="inline-flex items-center gap-3">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingGenderExceptionMode(option.value);
+                                              if (option.value === "none") {
+                                                setEditingGenderExceptionCategories([]);
+                                              }
+                                            }}
+                                            aria-pressed={isActive}
+                                            style={isActive ? { color: "var(--ink)", fontWeight: 600 } : undefined}
+                                            className={`${constraintOptionButtonClass} ${
+                                              isActive ? constraintOptionButtonActiveClass : ""
+                                            }`}
+                                          >
+                                            {option.label}
+                                          </button>
+                                          {index < list.length - 1 ? (
+                                            <span aria-hidden="true" className="font-ui text-[13px] leading-5 text-meta/55">·</span>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              hasInclusionInReadMode ? (
+                                <div className={constraintReadRowClass}>
+                                  <p className={formFieldTitleClass}>Inclusion</p>
+                                  <p className={constraintListRowValueClass}>
+                                    {formatGenderInclusionValue(constraints.gender)}
+                                  </p>
+                                </div>
+                              ) : null
+                            )}
+                            {isEditing && shouldShowCategoryScopeInEdit ? (
+                              <div className={constraintEditRowClass}>
+                                <p className={formFieldTitleClass}>Categories</p>
+                                <div className="min-w-0 flex-1">
+                                  <div className={constraintOptionRowClass}>
+                                    {PRICE_CATEGORIES.map((category, index) => {
+                                      const isActive = editingGenderExceptionCategories.includes(category);
+                                      return (
+                                        <div key={category} className="inline-flex items-center gap-3">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              toggleGenderExceptionCategory(category);
+                                            }}
+                                            aria-pressed={isActive}
+                                            style={isActive ? { color: "var(--ink)", fontWeight: 600 } : undefined}
+                                            className={`${constraintOptionButtonClass} ${
+                                              isActive ? constraintOptionButtonActiveClass : ""
+                                            }`}
+                                          >
+                                            {labelForPriceCategory(category)}
+                                          </button>
+                                          {index < PRICE_CATEGORIES.length - 1 ? (
+                                            <span aria-hidden="true" className="font-ui text-[13px] leading-5 text-meta/55">·</span>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : null}
+                            {!isEditing && hasInclusionInReadMode && constraints.gender.exceptionCategories.length > 0 ? (
+                              <div className={constraintReadRowClass}>
+                                <p className={formFieldTitleClass}>Categories</p>
+                                <p className={constraintListRowValueClass}>
+                                  {formatGenderCategoryValue(constraints.gender.exceptionCategories)}
+                                </p>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </article>
+
+                  <article className={`${overlayInfoCardClass} h-full`}>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Pre-owned items</h2>
+                      {isConstraintsComingSoonMode ? (
+                        <div className="group relative inline-flex">
+                          <button
+                            type="button"
+                            aria-disabled="true"
+                            className={`${constraintActionPillClass} cursor-default`}
+                          >
+                            edit
+                          </button>
+                          <span className={constraintComingSoonPillClass}>coming soon</span>
+                        </div>
+                      ) : activeConstraintEditor?.section === "pre-owned" ? (
+                        <div className="flex items-center gap-3">
+                          <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
+                            cancel
+                          </button>
+                          <button type="button" onClick={savePreOwnedConstraint} className={constraintActionPillClass}>
+                            save
+                          </button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={beginPreOwnedConstraintEditor} className={constraintActionPillClass}>
+                          edit
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-4 space-y-0">
+                      <div className={activeConstraintEditor?.section === "pre-owned" ? constraintEditRowClass : constraintReadRowClass}>
+                        <p className={formFieldTitleClass}>Preference</p>
+                        {activeConstraintEditor?.section === "pre-owned" ? (
+                          <div className="min-w-0 flex-1">
+                            <div className={constraintOptionRowClass}>
+                              {PRE_OWNED_OPTIONS.map((option, index) => {
+                                const isActive = editingPreOwnedPreference === option.value;
+                                return (
+                                  <div key={option.value} className="inline-flex items-center gap-3">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingPreOwnedPreference(option.value);
+                                      }}
+                                      aria-pressed={isActive}
+                                      style={isActive ? { color: "var(--ink)", fontWeight: 600 } : undefined}
+                                      className={`${constraintOptionButtonClass} ${
+                                        isActive ? constraintOptionButtonActiveClass : ""
+                                      }`}
+                                    >
+                                      {option.label}
+                                    </button>
+                                    {index < PRE_OWNED_OPTIONS.length - 1 ? (
+                                      <span aria-hidden="true" className="font-ui text-[13px] leading-5 text-meta/55">·</span>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <p className={constraintListRowValueClass}>{constraints.preOwned}</p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
               </div>
             </section>
           </div>
@@ -1819,7 +3579,7 @@ export default function ProfilePage() {
             data-compact-overlay-content={isEmbedded ? "settings" : undefined}
             className={`mx-[calc(50%-50vw)] px-10 ${isEmbedded ? "pb-4" : ""}`}
           >
-            <section className={`${isEmbedded ? "pt-10" : "mt-4"} w-full`}>
+            <section className={`${isEmbedded ? "pt-[66px]" : "mt-4"} w-full`}>
               <div className="w-full space-y-4">
                 <article className={overlayInfoCardClass}>
                   <h2 className={overlayTitleClass}>Settings</h2>
@@ -1921,7 +3681,7 @@ export default function ProfilePage() {
                     </div>
                   </div>
                 </article>
-                <div className="flex w-full items-center justify-start gap-3">
+                <div className={`${isEmbedded ? "px-5" : ""} flex w-full items-center justify-start gap-3`}>
                   <button type="button" className={settingsActionPillClass}>
                     log out
                   </button>
@@ -1976,13 +3736,16 @@ export default function ProfilePage() {
         ) : null}
 
         {showAboutSection ? (
-          <div className="mx-[calc(50%-50vw)] px-10">
-            <section className="mt-10 w-full">
-              <div className="w-full space-y-8 [&_h2]:text-[16px] [&_h3]:text-[13px] [&_p]:text-[13px] [&_li]:text-[13px] [&_th]:text-[12px] [&_td]:text-[12px]">
-                <article className="rounded-[6px] bg-[#F5F5F6] px-6 py-6">
-                  <h2 className="font-ui text-[18px] font-medium leading-6 text-ink">Impressum</h2>
+          <div
+            data-compact-overlay-content={isEmbedded ? "about" : undefined}
+            className={`mx-[calc(50%-50vw)] px-10 ${isEmbedded ? "pb-4" : ""}`}
+          >
+            <section className={`${isEmbedded ? "pt-[66px]" : "mt-10"} w-full`}>
+              <div className="w-full space-y-8 [&_h2]:text-[16px] [&_h3]:text-[13px] [&_h3]:text-meta [&_p]:text-[13px] [&_li]:text-[13px] [&_th]:text-[12px] [&_th]:text-meta [&_td]:text-[12px]">
+                <article className={aboutInfoCardClass}>
+                  <h2 className={overlayTitleClass}>Impressum</h2>
                   <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
-                    <span className="font-medium text-ink">Operator of cenoir.co (the Service)</span>
+                    <span className="font-medium text-meta">Operator of cenoir.co (the Service)</span>
                     <br />
                     J. A.
                     <br />
@@ -1995,7 +3758,7 @@ export default function ProfilePage() {
                     Switzerland
                   </p>
                   <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
-                    <span className="font-medium text-ink">Contact:</span> hello@cenoir.co
+                    <span className="font-medium text-meta">Contact:</span> hello@cenoir.co
                   </p>
                   <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     Cenoir is operated as an unincorporated sole proprietorship. The operator is personally
@@ -2008,15 +3771,15 @@ export default function ProfilePage() {
                   <p className="mt-4 font-ui text-[13px] font-normal leading-5 text-meta">Last updated: 22 April 2026</p>
                 </article>
 
-                <article className="rounded-[6px] bg-[#F5F5F6] px-6 py-6">
+                <article className={aboutInfoCardClass}>
                   <h2 className="font-ui text-[18px] font-medium leading-6 text-ink">Privacy Policy</h2>
                   <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
-                    <span className="font-medium text-ink">Effective date:</span> 22 April 2026
+                    <span className="font-medium text-meta">Effective date:</span> 22 April 2026
                     <br />
-                    <span className="font-medium text-ink">Controller:</span> J. A., sole proprietor trading as
+                    <span className="font-medium text-meta">Controller:</span> J. A., sole proprietor trading as
                     "Cenoir", Fritz-Fleiner-Weg 11, 8044 Zurich, Switzerland
                     <br />
-                    <span className="font-medium text-ink">Contact:</span> hello@cenoir.co
+                    <span className="font-medium text-meta">Contact:</span> hello@cenoir.co
                   </p>
                   <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     This policy explains how Cenoir - a private, invitation-only beta of a fashion-technology service
@@ -2024,26 +3787,26 @@ export default function ProfilePage() {
                     GDPR.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">1. What we collect</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">1. What we collect</h3>
                   <ul className="mt-2 list-disc space-y-1 pl-5 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     <li>
-                      <span className="font-medium text-ink">Account:</span> your email and a password (stored only
+                      <span className="font-medium text-meta">Account:</span> your email and a password (stored only
                       hashed). Optionally a display name.
                     </li>
                     <li>
-                      <span className="font-medium text-ink">Profile inputs:</span> the preferences, tags, and
+                      <span className="font-medium text-meta">Profile inputs:</span> the preferences, tags, and
                       selections you give us while using the Service.
                     </li>
                     <li>
-                      <span className="font-medium text-ink">Uploaded images:</span> photos you upload as inputs to
+                      <span className="font-medium text-meta">Uploaded images:</span> photos you upload as inputs to
                       the Service.
                     </li>
                     <li>
-                      <span className="font-medium text-ink">Usage and technical data:</span> actions you take in the
+                      <span className="font-medium text-meta">Usage and technical data:</span> actions you take in the
                       Service, device and browser info, IP address, and basic logs.
                     </li>
                     <li>
-                      <span className="font-medium text-ink">Communications:</span> anything you send us by email or
+                      <span className="font-medium text-meta">Communications:</span> anything you send us by email or
                       in-product.
                     </li>
                   </ul>
@@ -2052,15 +3815,15 @@ export default function ProfilePage() {
                     do not set analytics or marketing cookies during the private beta.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     2. Why we use it and on what basis
                   </h3>
                   <div className="mt-2 overflow-hidden rounded-[4px] border border-line/80">
                     <table className="w-full border-collapse text-left font-ui text-[13px] leading-[1.7] text-meta">
                       <thead className="bg-paper">
                         <tr>
-                          <th className="border-b border-line/80 px-3 py-2 font-medium text-ink">Purpose</th>
-                          <th className="border-b border-line/80 px-3 py-2 font-medium text-ink">Legal basis (GDPR)</th>
+                          <th className="border-b border-line/80 px-3 py-2 font-medium text-meta">Purpose</th>
+                          <th className="border-b border-line/80 px-3 py-2 font-medium text-meta">Legal basis (GDPR)</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2103,7 +3866,7 @@ export default function ProfilePage() {
                     significant effects about you.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">3. Automated processing</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">3. Automated processing</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     Your inputs - including uploaded images and profile signals - are processed by proprietary and
                     third-party models to generate the Service's outputs. Where we use third-party providers, they are
@@ -2111,7 +3874,7 @@ export default function ProfilePage() {
                     us to exclude your data from model-improvement use at any time at hello@cenoir.co.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">4. How long we keep it</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">4. How long we keep it</h3>
                   <ul className="mt-2 list-disc space-y-1 pl-5 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     <li>
                       Account data: for the life of your account, deleted or anonymised within 30 days of account
@@ -2122,7 +3885,7 @@ export default function ProfilePage() {
                     <li>Logs: up to 12 months.</li>
                   </ul>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">5. Who sees it</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">5. Who sees it</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     Only the operator and sub-processors acting on written instructions (hosting, email, error
                     monitoring, inference infrastructure). A current list is available at hello@cenoir.co on request.
@@ -2130,7 +3893,7 @@ export default function ProfilePage() {
                     Contractual Clauses and the Swiss FDPIC addendum.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">6. Your rights</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">6. Your rights</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     You can ask us at any time to: access your data, correct it, delete it, restrict or object to
                     processing, port it, or withdraw consent where processing is based on consent. Email
@@ -2142,14 +3905,14 @@ export default function ProfilePage() {
                       href="https://www.edoeb.admin.ch"
                       target="_blank"
                       rel="noreferrer"
-                      className="underline decoration-line/70 underline-offset-2 hover:text-ink"
+                      className="underline decoration-line/70 underline-offset-2 hover:text-meta"
                     >
                       edoeb.admin.ch
                     </a>
                     ) or, if you are in the EU, to your local supervisory authority.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     7. Security and children
                   </h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2159,7 +3922,7 @@ export default function ProfilePage() {
                     Cenoir is not intended for children under 16. Please do not use it if you are under 16.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">8. Changes</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">8. Changes</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     If we change this policy materially, we will update the date above and notify you by email or
                     in-product before the change takes effect.
@@ -2167,41 +3930,41 @@ export default function ProfilePage() {
                   <p className="mt-4 font-ui text-[13px] font-normal leading-5 text-meta">Last updated: 22 April 2026</p>
                 </article>
 
-                <article className="rounded-[6px] bg-[#F5F5F6] px-6 py-6">
+                <article className={aboutInfoCardClass}>
                   <h2 className="font-ui text-[18px] font-medium leading-6 text-ink">Cenoir - Private Beta Terms</h2>
                   <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
-                    <span className="font-medium text-ink">Effective date:</span> 22 April 2026
+                    <span className="font-medium text-meta">Effective date:</span> 22 April 2026
                     <br />
-                    <span className="font-medium text-ink">Operator:</span> J. A., sole proprietor trading as
+                    <span className="font-medium text-meta">Operator:</span> J. A., sole proprietor trading as
                     "Cenoir" ("we", "us", "the Operator").
                     <br />
-                    <span className="font-medium text-ink">Contact:</span> hello@cenoir.co
+                    <span className="font-medium text-meta">Contact:</span> hello@cenoir.co
                   </p>
                   <p className="mt-4 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     By accepting a Cenoir invitation, creating an account, or using Cenoir, you agree to these Beta
                     Terms and to our Privacy Policy. If you don't agree, don't use the Service.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">1. What Cenoir is</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">1. What Cenoir is</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     Cenoir is a private, invitation-only beta of a fashion-technology service. It is pre-release and
                     experimental. Features, mechanics, and available content may change, break, or be withdrawn at any
                     time.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">2. Eligibility</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">2. Eligibility</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     You may use Cenoir only if you are at least 16 years old, have legal capacity to enter into a
                     contract, and are not barred from using the Service under applicable law.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">3. Access is personal</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">3. Access is personal</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     Your invitation and credentials are personal to you. Don't share them. You are responsible for
                     activity on your account. Tell us at hello@cenoir.co if you suspect unauthorised use.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     4. Visual References, and the licence you give us
                   </h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2225,14 +3988,14 @@ export default function ProfilePage() {
                     applicable law.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">5. Outputs are advisory</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">5. Outputs are advisory</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     Recommendations, scores, and other outputs produced by Cenoir are probabilistic and may contain
                     errors. They are informational only. You are solely responsible for any decision you make based on
                     them.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     6. What you agree not to do
                   </h3>
                   <ul className="mt-2 list-disc space-y-1 pl-5 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2248,7 +4011,7 @@ export default function ProfilePage() {
                     <li>do anything unlawful, infringing, harassing, or abusive.</li>
                   </ul>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     7. Confidentiality of the beta
                   </h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2258,14 +4021,14 @@ export default function ProfilePage() {
                     beta participant.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">8. Feedback</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">8. Feedback</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     If you send us feedback, bug reports, or suggestions, you grant us a perpetual, irrevocable,
                     worldwide, royalty-free, sublicensable licence to use them in any way, without obligation to
                     credit or compensate you.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     9. We may reset or delete beta data
                   </h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2273,7 +4036,7 @@ export default function ProfilePage() {
                     transition to general release. We'll try to give reasonable notice.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     10. Commissions and retailer partnerships
                   </h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2305,7 +4068,7 @@ export default function ProfilePage() {
                     Service and update these Terms accordingly.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">11. No warranties</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">11. No warranties</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     To the fullest extent permitted by law, Cenoir is provided "as is" and "as available", without any
                     warranty, express or implied. We do not warrant uninterrupted availability, accuracy, security, or
@@ -2316,7 +4079,7 @@ export default function ProfilePage() {
                     nor liability for wilful misconduct or gross negligence.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     12. Limitation of liability
                   </h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2326,7 +4089,7 @@ export default function ProfilePage() {
                     negligence, or personal injury is not limited.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     13. Suspension and termination
                   </h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2339,13 +4102,13 @@ export default function ProfilePage() {
                     Liability survive termination.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">14. Changes</h3>
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">14. Changes</h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
                     We may change these Beta Terms. Material changes will be announced by email or in-product with
                     reasonable notice. Continued use after they take effect means you accept them.
                   </p>
 
-                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-ink">
+                  <h3 className="mt-6 font-ui text-[14px] font-medium leading-6 text-meta">
                     15. Governing law and jurisdiction
                   </h3>
                   <p className="mt-2 font-ui text-[14px] font-normal leading-[1.8] text-meta">
@@ -2365,13 +4128,13 @@ export default function ProfilePage() {
             data-compact-overlay-content={isEmbedded ? "feedback" : undefined}
             className={`mx-[calc(50%-50vw)] px-10 ${isEmbedded ? "pb-4" : ""}`}
           >
-            <section className={`${isEmbedded ? "pt-10" : "mt-10"} w-full`}>
+            <section className={`${isEmbedded ? "pt-[66px]" : "mt-10"} w-full`}>
               <div className="w-full space-y-4">
                 <article className={overlayInfoCardClass}>
-                  <h2 className={overlayTitleClass}>Feedback</h2>
+                  <h2 className={overlayTitleClass}>Beta Feedback</h2>
                   <p className="mt-3 w-full font-ui text-[13px] font-normal leading-[1.7] text-meta">
-                    Your notes are anonymous and used only to improve clarity, quality, and trust in the experience.
-                    Thank you for shaping cenoir.
+                    Notes are anonymous. They go into a shared feedback inbox and are not attached to any name or
+                    account. Thank you for shaping new versions, new features, and what comes next.
                   </p>
                   <div className="mt-4 w-full space-y-5">
                     <label className="block w-full">
@@ -2387,14 +4150,16 @@ export default function ProfilePage() {
                             handleFeedbackFieldChange("clarity", event.target.value, event.currentTarget)
                           }
                           onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "clarity")}
-                          className="mt-2 h-[32px] w-full resize-none overflow-hidden rounded-[4px] border border-line/80 bg-paper px-3 py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none"
+                          className={`mt-2 h-9 w-full resize-none overflow-hidden ${
+                            isEmbedded ? "rounded-[4px] border border-transparent bg-[#F5F5F6] px-3" : "rounded-[4px] border border-line/80 bg-paper px-3"
+                          } py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none`}
                         />
                       </div>
                     </label>
 
                     <label className="block w-full">
                       <div className="flex w-full items-center gap-3">
-                        <span className={formFieldTitleClass}>What felt unclear and complete?</span>
+                        <span className={formFieldTitleClass}>What felt unclear and incomplete?</span>
                       </div>
                       <div className="w-full">
                         <textarea
@@ -2405,7 +4170,9 @@ export default function ProfilePage() {
                             handleFeedbackFieldChange("quality", event.target.value, event.currentTarget)
                           }
                           onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "quality")}
-                          className="mt-2 h-[32px] w-full resize-none overflow-hidden rounded-[4px] border border-line/80 bg-paper px-3 py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none"
+                          className={`mt-2 h-9 w-full resize-none overflow-hidden ${
+                            isEmbedded ? "rounded-[4px] border border-transparent bg-[#F5F5F6] px-3" : "rounded-[4px] border border-line/80 bg-paper px-3"
+                          } py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none`}
                         />
                       </div>
                     </label>
@@ -2423,13 +4190,15 @@ export default function ProfilePage() {
                           value={feedbackAnswers.trust}
                           onChange={(event) => handleFeedbackFieldChange("trust", event.target.value, event.currentTarget)}
                           onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "trust")}
-                          className="mt-2 h-[32px] w-full resize-none overflow-hidden rounded-[4px] border border-line/80 bg-paper px-3 py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none"
+                          className={`mt-2 h-9 w-full resize-none overflow-hidden ${
+                            isEmbedded ? "rounded-[4px] border border-transparent bg-[#F5F5F6] px-3" : "rounded-[4px] border border-line/80 bg-paper px-3"
+                          } py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none`}
                         />
                       </div>
                     </label>
                   </div>
                 </article>
-                <div>
+                <div className={isEmbedded ? "px-5" : ""}>
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
@@ -2461,7 +4230,7 @@ export default function ProfilePage() {
                         });
                       }}
                       disabled={!canSendFeedback}
-                      className={`${settingsActionPillClass} ${!canSendFeedback ? "cursor-not-allowed opacity-50 hover:text-[#6F7381]" : ""}`}
+                      className={settingsActionPillClass}
                     >
                       send feedback
                     </button>
@@ -2484,7 +4253,12 @@ export default function ProfilePage() {
                   {isFeedbackHistoryOpen && feedbackHistory.length > 0 ? (
                     <div className="mt-4 space-y-3">
                       {feedbackHistory.map((entry, index) => (
-                        <div key={`${entry.sentAt}-${index}`} className="rounded-[4px] border border-line/80 bg-paper px-3 py-3">
+                        <div
+                          key={`${entry.sentAt}-${index}`}
+                          className={`${
+                            isEmbedded ? "rounded-[4px] bg-[#F5F5F6] px-3" : "rounded-[4px] bg-paper px-3"
+                          } py-3`}
+                        >
                           <p className="font-ui text-[12px] font-normal leading-5 text-meta">{entry.sentAt}</p>
                           {entry.clarity ? (
                             <p className="mt-1 font-ui text-[13px] font-normal leading-[1.6] text-ink">

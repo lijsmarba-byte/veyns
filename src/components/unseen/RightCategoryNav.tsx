@@ -66,7 +66,6 @@ export function RightCategoryNav({
 }: RightCategoryNavProps) {
   const navRootRef = useRef<HTMLElement | null>(null);
   const searchParams = useSearchParams();
-  const [isShellOverlayOpen, setIsShellOverlayOpen] = useState(false);
   const [activeCategory, setActiveCategory] = useState(sectionKeys[0] ?? "");
   const [displayActiveCategory, setDisplayActiveCategory] = useState(sectionKeys[0] ?? "");
   const [isExpanded, setIsExpanded] = useState(false);
@@ -233,21 +232,6 @@ export function RightCategoryNav({
     };
   }, [sections]);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    const syncOverlayVisibility = () => {
-      setIsShellOverlayOpen(root.getAttribute("data-unseen-overlay-open") === "true");
-    };
-
-    syncOverlayVisibility();
-    const overlayAttrObserver = new MutationObserver(syncOverlayVisibility);
-    overlayAttrObserver.observe(root, { attributes: true, attributeFilter: ["data-unseen-overlay-open"] });
-
-    return () => {
-      overlayAttrObserver.disconnect();
-    };
-  }, []);
-
   const getNavCenterY = () => {
     const activeAnchor = navRootRef.current?.querySelector(
       '[data-nav-active-anchor="true"]',
@@ -413,10 +397,7 @@ export function RightCategoryNav({
       ref={navRootRef}
       aria-label="Category navigation"
       aria-expanded={effectiveExpanded}
-      aria-hidden={isShellOverlayOpen}
-      className={`group -m-4 hidden select-none p-4 lg:block ${
-        isShellOverlayOpen ? "invisible pointer-events-none" : ""
-      } ${className}`.trim()}
+      className={`group -m-4 hidden select-none p-4 lg:block ${className}`.trim()}
       onMouseEnter={openExpanded}
       onMouseMove={handlePointerMove}
       onMouseLeave={closeExpanded}

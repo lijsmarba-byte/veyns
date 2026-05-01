@@ -52,22 +52,19 @@ export function ModePill({ selected }: ModePillProps) {
 
   const sliderClass =
     selected === "archive"
-      ? "bg-[linear-gradient(180deg,#3a2580_0%,#312073_100%)] shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.06)]"
-      : "bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)]";
+      ? "bg-[linear-gradient(180deg,#3a2580_0%,#312073_100%)]"
+      : "bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)]";
   const sliderTranslatePx = selected === "archive" ? 98 : 0;
 
   return (
     <div
-      className="content-stretch relative flex items-center justify-center rounded-[18px] border border-[#F0F0F1] border-solid bg-[#F5F5F6] p-[2px]"
+      className="content-stretch relative flex items-center justify-center overflow-hidden rounded-full border border-[#ECEDEF] border-solid bg-[#F5F5F6] p-[2px]"
       data-name="Mode Switch"
       data-mode-pill-root="true"
-      style={{
-        boxShadow: "0 0.5px 1px rgba(0, 0, 0, 0.05)",
-      }}
     >
-      <div className="pointer-events-none absolute inset-[2px] z-[1]">
+      <div className="pointer-events-none absolute inset-[2px] z-[1] overflow-hidden rounded-full">
         <div
-          className={`h-[32px] rounded-[16px] border-[0.5px] border-[#F0F0F1] transition-[transform,background,box-shadow] duration-[540ms] ease-[cubic-bezier(0.22,0.9,0.24,1)] ${sliderClass}`}
+          className={`h-[32px] rounded-full transform-gpu will-change-transform transition-[transform,background] duration-[540ms] ease-[cubic-bezier(0.22,0.9,0.24,1)] ${sliderClass}`}
           style={{ width: "96px", transform: `translateX(${sliderTranslatePx}px)` }}
         />
       </div>
@@ -79,7 +76,7 @@ export function ModePill({ selected }: ModePillProps) {
           onClick={() => navigateTo("gallery")}
           onMouseEnter={() => prefetchRoute(routeFor("gallery"))}
           onFocus={() => prefetchRoute(routeFor("gallery"))}
-          className="group content-stretch relative flex h-[32px] w-full items-center justify-center overflow-hidden rounded-[16px] bg-transparent px-[10px] outline-none"
+          className="group content-stretch relative flex h-[32px] w-full items-center justify-center overflow-hidden rounded-full bg-transparent px-[10px] outline-none"
           data-name="Segment Gallery"
         >
           <p
@@ -100,7 +97,7 @@ export function ModePill({ selected }: ModePillProps) {
           onClick={() => navigateTo("archive")}
           onMouseEnter={() => prefetchRoute(routeFor("archive"))}
           onFocus={() => prefetchRoute(routeFor("archive"))}
-          className="group content-stretch relative flex h-[32px] w-full items-center justify-center overflow-hidden rounded-[16px] bg-transparent px-[10px] outline-none"
+          className="group content-stretch relative flex h-[32px] w-full items-center justify-center overflow-hidden rounded-full bg-transparent px-[10px] outline-none"
           data-name="Segment Archive"
         >
           <p

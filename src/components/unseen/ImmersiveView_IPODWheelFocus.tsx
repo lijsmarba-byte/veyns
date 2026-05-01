@@ -333,11 +333,12 @@ function ImmersiveProductCard({
           alt={`${item.brand} ${item.artsyName}`}
           fill
           draggable={false}
-          className={`object-contain object-center transition-[filter] duration-150 ease-out ${
+          className={`pointer-events-none select-none object-contain object-center transition-[filter] duration-150 ease-out ${
             hasHoverActions ? "group-hover/product:blur-[1.8px] group-focus-within/product:blur-[1.8px]" : ""
           }`}
           sizes="(max-width: 768px) 44vw, (max-width: 1024px) 28vw, 20vw"
           priority={false}
+          onDragStart={(event) => event.preventDefault()}
         />
         {hasHoverActions ? (
           <GalleryHoverActions

@@ -428,13 +428,14 @@ function ImmersiveProductCard({
           src={item.imgSrc}
           alt={`${item.brand} ${item.artsyName}`}
           draggable={false}
-          className={`absolute inset-0 h-full w-full object-contain object-center transition-[filter] duration-150 ease-out ${
+          className={`pointer-events-none select-none absolute inset-0 h-full w-full object-contain object-center transition-[filter] duration-150 ease-out ${
             hasHoverActions && !useFixedTransformSizing
               ? "group-hover/product:blur-[1.8px] group-focus-within/product:blur-[1.8px]"
               : ""
           }`}
           loading={isFocused ? "eager" : "lazy"}
           decoding="async"
+          onDragStart={(event) => event.preventDefault()}
         />
         {hasHoverActions ? (
           <GalleryHoverActions
@@ -2167,7 +2168,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           <div className="mx-auto flex w-full flex-col items-center gap-[3px] text-center text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
             <p
               ref={focusLabelRef}
-              className="inline-flex h-[22px] items-center justify-center font-mono-meta text-meta"
+              className="inline-flex h-[22px] items-center justify-center font-ui text-meta"
             >
               <span aria-hidden="true">|</span>
               <span className="px-[2px]">{focusedIdLabel}</span>
@@ -2178,7 +2179,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
             >
               {focusedItem.brand}
             </p>
-            <p className="inline-flex h-[22px] items-center justify-center font-mono-meta text-meta">
+            <p className="inline-flex h-[22px] items-center justify-center font-ui text-meta">
               {focusedItem.price}
             </p>
           </div>
@@ -2188,7 +2189,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       {showGalleryCategoryNav ? (
         <div
           data-gallery-immersive-left-nav="true"
-          className="pointer-events-none fixed left-5 z-[95] hidden -translate-y-1/2 lg:block"
+          className="pointer-events-none fixed left-5 z-40 hidden -translate-y-1/2 lg:block"
           style={{
             top: "var(--gallery-category-nav-top)",
           }}

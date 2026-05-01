@@ -53,12 +53,12 @@ function isValidEmail(value: string): boolean {
 
 function UnseenBetaMark() {
   return (
-    <div className="fixed right-10 top-[23px] z-30 h-[26px] w-[161px]">
-      <p className="absolute left-0 top-0 w-[94px] text-right text-ink leading-none">
-        <span className="font-ui text-[18px] font-semibold leading-[26px] tracking-[-0.04em]">cenoir</span>
+    <div className="fixed right-10 top-[23px] z-30 flex h-[26px] items-center gap-[8px]">
+      <p className="inline-flex h-[26px] items-center text-right text-ink leading-none">
+        <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]">cenoir</span>
       </p>
-      <div className="absolute left-[100px] top-[7px] flex h-3 items-center justify-center rounded-[2px] bg-ink px-1 py-[3px]">
-        <span className="font-ui text-[7px] font-bold leading-[7px] tracking-[-0.14px] text-paper">BETA</span>
+      <div className="inline-flex h-[12px] min-w-[28px] items-center justify-center rounded-[2px] bg-ink px-[5px]">
+        <span className="font-ui text-[6.5px] font-bold leading-[6.5px] tracking-[-0.08px] text-paper">BETA</span>
       </div>
     </div>
   );
@@ -67,19 +67,20 @@ function UnseenBetaMark() {
 function ActionPill({
   label,
   onClick,
+  tone = "dark",
 }: {
   label: string;
   onClick?: () => void;
+  tone?: "dark" | "light";
 }) {
+  const className =
+    tone === "light"
+      ? "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-meta shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none"
+      : "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#0f0f10] bg-ink px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.14)] transition-[filter] duration-150 hover:brightness-[1.05] focus-visible:outline-none";
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group inline-flex items-center justify-center rounded-[18px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] p-[2px] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none"
-    >
-      <span className="inline-flex h-[32px] min-w-[96px] items-center justify-center whitespace-nowrap rounded-[16px] bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#fefefd] shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)] transition-[filter] duration-150 group-hover:brightness-[1.05]">
-        {label}
-      </span>
+    <button type="button" onClick={onClick} className={className}>
+      {label}
     </button>
   );
 }
@@ -266,6 +267,13 @@ export function OnboardingFlow() {
       window.removeEventListener("resize", update);
     };
   }, [currentStep, showAllReferences, references.length]);
+
+  useEffect(() => {
+    if (currentStep !== "references") return;
+    if (references.length > 0 && references.length < MIN_REFERENCE_IMAGES && !showAllReferences) {
+      setShowAllReferences(true);
+    }
+  }, [currentStep, references.length, showAllReferences]);
 
   const appendReferences = (incomingFiles: File[]) => {
     const imageFiles = incomingFiles.filter((file) => file.type.startsWith("image/"));
@@ -495,7 +503,7 @@ export function OnboardingFlow() {
 
                     {canProceed ? (
                       <div className="mt-12 flex justify-center">
-                        <ActionPill label="proceed" onClick={moveToReferences} />
+                        <ActionPill label="proceed" tone="light" onClick={moveToReferences} />
                       </div>
                     ) : null}
                   </motion.div>
@@ -564,14 +572,15 @@ export function OnboardingFlow() {
                             </div>
                             <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
                             {visibleReferences.map((entry) => (
-                              <div key={entry.id} className="group relative aspect-square w-full overflow-hidden rounded-[4px] bg-mist">
+                              <div key={entry.id} className="group relative aspect-square w-full overflow-hidden rounded-[3px] bg-mist">
                                 <Image
                                   src={entry.previewUrl}
                                   alt={entry.file.name}
                                   fill
                                   unoptimized
                                   sizes="120px"
-                                  className="object-cover"
+                                  className="pointer-events-none select-none object-cover"
+                                  onDragStart={(event) => event.preventDefault()}
                                   draggable={false}
                                 />
                                 <button
@@ -615,7 +624,7 @@ export function OnboardingFlow() {
                             {visibleReferences.map((entry) => (
                               <div
                                 key={entry.id}
-                                className="group relative h-[120px] w-[120px] shrink-0 overflow-hidden rounded-[4px] bg-mist"
+                                className="group relative h-[120px] w-[120px] shrink-0 overflow-hidden rounded-[3px] bg-mist"
                               >
                                 <Image
                                   src={entry.previewUrl}
@@ -623,7 +632,8 @@ export function OnboardingFlow() {
                                   fill
                                   unoptimized
                                   sizes="120px"
-                                  className="object-cover"
+                                  className="pointer-events-none select-none object-cover"
+                                  onDragStart={(event) => event.preventDefault()}
                                   draggable={false}
                                 />
                                 <button
@@ -673,9 +683,9 @@ export function OnboardingFlow() {
                       </div>
                     ) : null}
 
-                    {canCalibrate ? (
+                    {references.length > 0 ? (
                       <div className="mt-12 flex justify-center">
-                        <ActionPill label="calibrate" onClick={moveToCalibration} />
+                        <ActionPill label="calibrate" tone="light" onClick={moveToCalibration} />
                       </div>
                     ) : null}
 

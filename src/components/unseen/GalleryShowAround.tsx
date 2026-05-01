@@ -12,6 +12,8 @@ type WelcomeProfile = {
 
 const actionPillClass =
   "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-meta shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none";
+const GALLERY_ARRIVAL_ACTIVE_KEY = "unseen:gallery-arrival-active";
+const ARRIVAL_COMPLETE_EVENT = "unseen:gallery-arrival-complete";
 
 function readWelcomeName(): string {
   const takeFirstName = (value: string): string => {
@@ -55,24 +57,51 @@ export function GalleryShowAround() {
       if (isSignupEntry) {
         router.replace("/gallery", { scroll: false });
       }
-    }, 220);
+    }, 300);
   }, [isSignupEntry, router]);
 
   useEffect(() => {
+    let openRaf = 0;
+    let isCancelled = false;
+    let arrivalListener: (() => void) | null = null;
+
     const openWelcome = () => {
+      if (isCancelled) return;
       setWelcomeName(readWelcomeName());
       setIsMounted(true);
-      setIsVisible(true);
+      openRaf = window.requestAnimationFrame(() => {
+        if (isCancelled) return;
+        setIsVisible(true);
+      });
     };
 
     try {
       if (!isSignupEntry) return;
-      openWelcome();
+      const isArrivalActive = window.sessionStorage.getItem(GALLERY_ARRIVAL_ACTIVE_KEY) === "1";
+      if (isArrivalActive) {
+        arrivalListener = () => {
+          if (arrivalListener) {
+            window.removeEventListener(ARRIVAL_COMPLETE_EVENT, arrivalListener);
+            arrivalListener = null;
+          }
+          openWelcome();
+        };
+        window.addEventListener(ARRIVAL_COMPLETE_EVENT, arrivalListener, { once: true });
+      } else {
+        openWelcome();
+      }
     } catch {
       // Ignore storage failures.
     }
 
-    return () => undefined;
+    return () => {
+      isCancelled = true;
+      if (arrivalListener) {
+        window.removeEventListener(ARRIVAL_COMPLETE_EVENT, arrivalListener);
+        arrivalListener = null;
+      }
+      if (openRaf) window.cancelAnimationFrame(openRaf);
+    };
   }, [isSignupEntry]);
 
   if (!isMounted) return null;
@@ -80,11 +109,11 @@ export function GalleryShowAround() {
   return (
     <div className="fixed inset-0 z-[150] select-none" aria-live="polite">
       <div
-        className="absolute inset-0"
+        className="absolute inset-0 bg-black/12 backdrop-blur-[7px]"
         style={{
-          backgroundColor: "rgba(254, 254, 253, 0.85)",
+          WebkitBackdropFilter: "blur(7px)",
           opacity: isVisible ? 1 : 0,
-          transition: isVisible ? "none" : "opacity 220ms ease-out",
+          transition: "opacity 280ms ease-out",
         }}
       />
 
@@ -93,7 +122,8 @@ export function GalleryShowAround() {
           className="w-full max-w-[900px] rounded-[6px] bg-paper px-8 py-10 text-left shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-14 md:py-14"
           style={{
             opacity: isVisible ? 1 : 0,
-            transition: isVisible ? "none" : "opacity 220ms ease-out",
+            transform: isVisible ? "translate3d(0,0,0) scale(1)" : "translate3d(0,8px,0) scale(0.995)",
+            transition: "opacity 280ms ease-out, transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1)",
           }}
         >
           <p className="inline-flex items-baseline text-ink">
@@ -117,9 +147,9 @@ export function GalleryShowAround() {
 
           <p className="mt-5 font-ui text-[14px] font-normal leading-6 tracking-[0.01em] text-ink">
             <span className="inline-flex items-center gap-2 align-middle">
-              <span className="font-ui text-[15px] font-semibold leading-none tracking-[-0.03em] text-ink">cenoir</span>
-              <span className="inline-flex h-4 items-center justify-center rounded-[2px] bg-ink px-1">
-                <span className="font-ui text-[8px] font-bold leading-none tracking-[-0.02em] text-paper">BETA</span>
+              <span className="font-ui text-[15px] font-bold leading-none tracking-[-0.03em] text-ink">cenoir</span>
+              <span className="inline-flex h-[12px] min-w-[28px] items-center justify-center rounded-[2px] bg-ink px-[5px]">
+                <span className="font-ui text-[6.5px] font-bold leading-[6.5px] tracking-[-0.08px] text-paper">BETA</span>
               </span>
             </span>
             <span className="px-1">:</span>

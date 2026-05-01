@@ -287,12 +287,14 @@ export function ProductTile({
           src={item.imgSrc}
           alt={`${item.brand} ${item.artsyName}`}
           fill
-          className={`object-contain object-center transition-[filter] duration-150 ease-out ${
+          className={`pointer-events-none select-none object-contain object-center transition-[filter] duration-150 ease-out ${
             hasHoverActions ? "group-hover/product:blur-[1.8px] group-focus-within/product:blur-[1.8px]" : ""
           }`}
           sizes="(max-width: 768px) 70vw, (max-width: 1024px) 42vw, 19vw"
           loading={imagePriority ? "eager" : "lazy"}
           fetchPriority={imagePriority ? "high" : "auto"}
+          draggable={false}
+          onDragStart={(event) => event.preventDefault()}
         />
         {hasHoverActions ? <GalleryHoverActions itemId={item.id} mode={mode} hoverResetKey={hoverResetKey} /> : null}
       </div>
@@ -305,7 +307,7 @@ export function ProductTile({
       >
         <p
           ref={topLabelRef}
-          className="inline-flex h-[22px] items-center justify-center font-mono-meta text-meta"
+          className="inline-flex h-[22px] items-center justify-center font-ui text-meta"
         >
           <span aria-hidden="true">|</span>
           <span className="px-[2px]">{topLabel}</span>
@@ -314,7 +316,7 @@ export function ProductTile({
         <p className={`inline-flex h-[22px] items-center justify-center text-center font-ui ${brandTextClass}`}>
           {item.brand}
         </p>
-        <p className="inline-flex h-[22px] items-center justify-center font-mono-meta text-meta">
+        <p className="inline-flex h-[22px] items-center justify-center font-ui text-meta">
           {item.price}
         </p>
       </div>

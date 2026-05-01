@@ -5,12 +5,12 @@ export default function Home() {
     <main className="min-h-screen bg-paper" style={{ minHeight: "var(--viewport-h)" }}>
       <section className="relative font-ui min-h-screen bg-paper text-ink">
         <div className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
-        <div className="fixed right-10 top-[23px] z-30 h-[26px] w-[161px]">
-          <p className="absolute left-0 top-0 w-[94px] text-right text-ink leading-none">
-            <span className="font-ui text-[18px] font-semibold leading-[26px] tracking-[-0.04em]">cenoir</span>
+        <div className="fixed right-10 top-[23px] z-30 flex h-[26px] items-center gap-[8px]">
+          <p className="inline-flex h-[26px] items-center text-right text-ink leading-none">
+            <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]">cenoir</span>
           </p>
-          <div className="absolute left-[100px] top-[7px] flex h-3 items-center justify-center rounded-[2px] bg-ink px-1 py-[3px]">
-            <span className="font-ui text-[7px] font-bold leading-[7px] tracking-[-0.14px] text-paper">BETA</span>
+          <div className="inline-flex h-[12px] min-w-[28px] items-center justify-center rounded-[2px] bg-ink px-[5px]">
+            <span className="font-ui text-[6.5px] font-bold leading-[6.5px] tracking-[-0.08px] text-paper">BETA</span>
           </div>
         </div>
 

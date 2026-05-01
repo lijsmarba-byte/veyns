@@ -47,6 +47,40 @@ type ExportArtifactContent = {
   signatureTitle?: string;
   narrative?: string;
 };
+type SignatureExportEvent =
+  | { status: "exporting"; mode: SignatureExportMode }
+  | { status: "done"; mode: SignatureExportMode; channel: "share-file" | "share-link" | "download" }
+  | { status: "failed"; mode: SignatureExportMode; message: string };
+type ArtifactContourLayer = {
+  coordinates: number[][][][];
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+};
+type ArtifactHeatmapLabel = {
+  text: string;
+  x: number;
+  y: number;
+  fontSize: number;
+  fontWeight: number;
+  fill: string;
+  letterSpacingPx: number;
+};
+type SignatureArtifactSnapshot = {
+  version: "signature-artifact-v1";
+  heatmap: {
+    width: number;
+    height: number;
+    backgroundColor: string;
+    contours: ArtifactContourLayer[];
+    labels: ArtifactHeatmapLabel[];
+  };
+  text: {
+    displayName: string;
+    signatureTitle: string;
+    narrative: string;
+  };
+};
 
 const WIDTH = 680;
 const HEIGHT = 520;
@@ -59,18 +93,31 @@ const WORD_PADDING_X = 42;
 const WORD_PADDING_Y = 40;
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const OVERLAY_CARD_WIDTH_BASE = 500;
-const OVERLAY_CARD_HEIGHT_BASE = 190;
+const OVERLAY_CARD_HEIGHT_BASE = 176;
 const OVERLAY_CARD_WIDTH_EXPANDED = 560;
-const OVERLAY_CARD_HEIGHT_EXPANDED = 260;
+const OVERLAY_CARD_HEIGHT_EXPANDED = 240;
 const OVERLAY_CARD_PADDING = 10;
 const OVERLAY_TITLE_ANCHOR_Y = 36;
 const OVERLAY_HALO_BLEED = 8;
+const OVERLAY_HEATMAP_SCALE = 0.94;
 const HOVER_EXPAND_DELAY_MS = 500;
 const OVERLAY_SOFT_BACKGROUND = "#FEFEFD";
-const OVERLAY_SOFT_SHADOW = "0 8px 24px rgba(17,17,17,0.05), 0 1px 6px rgba(17,17,17,0.025)";
-const OVERLAY_CORNER_RADIUS_PX = 4;
+const OVERLAY_SOFT_SHADOW = "0 5px 12px rgba(17,17,17,0.035), 0 1px 3px rgba(17,17,17,0.013)";
+const OVERLAY_CORNER_RADIUS_PX = 32;
 const EXPORT_IMAGE_WIDTH = 1800;
 const EXPORT_IMAGE_HEIGHT = 1200;
+
+function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("PNG encoding failed."));
+        return;
+      }
+      resolve(blob);
+    }, "image/png");
+  });
+}
 
 function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -79,6 +126,15 @@ function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
     image.onerror = () => reject(new Error("Image failed to load."));
     image.src = url;
   });
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function wrapTextLines(
@@ -353,9 +409,77 @@ function overviewContourColor(index: number, total: number): string {
 
 function overviewContourFill(index: number, total: number): string {
   const t = total <= 1 ? 0 : index / (total - 1);
-  const tone = Math.round(130 - t * 20);
-  const a = 0.016 + t * 0.026;
+  const tone = Math.round(124 - t * 18);
+  const a = 0.028 + t * 0.03;
   return `rgba(${tone}, ${tone}, ${tone}, ${a.toFixed(3)})`;
+}
+
+function createArtifactSnapshot({
+  backgroundColor,
+  contours,
+  clusters,
+  displayName,
+  signatureTitle,
+  narrative,
+}: {
+  backgroundColor: string;
+  contours: number[][][][][];
+  clusters: ClusterNode[];
+  displayName: string;
+  signatureTitle: string;
+  narrative: string;
+}): SignatureArtifactSnapshot {
+  return {
+    version: "signature-artifact-v1",
+    heatmap: {
+      width: WIDTH,
+      height: HEIGHT,
+      backgroundColor,
+      contours: contours.map((coordinates, index, all) => ({
+        coordinates,
+        fill: overviewContourFill(index, all.length),
+        stroke: overviewContourColor(index, all.length),
+        strokeWidth: 0.72,
+      })),
+      labels: clusters.map((cluster) => ({
+        text: cluster.name,
+        x: cluster.cx,
+        y: cluster.cy,
+        fontSize: 17,
+        fontWeight: 500,
+        fill: "rgba(17,17,17,0.72)",
+        letterSpacingPx: 0.25,
+      })),
+    },
+    text: {
+      displayName,
+      signatureTitle,
+      narrative,
+    },
+  };
+}
+
+function buildArtifactHeatmapSvgMarkup(snapshot: SignatureArtifactSnapshot, uiFontFamily: string): string {
+  const contoursMarkup = snapshot.heatmap.contours
+    .map(
+      (layer) =>
+        `<path d="${contoursPath(layer.coordinates)}" fill="${layer.fill}" stroke="${layer.stroke}" stroke-width="${layer.strokeWidth}" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />`,
+    )
+    .join("");
+  const labelsMarkup = snapshot.heatmap.labels
+    .map(
+      (label) =>
+        `<text x="${label.x}" y="${label.y}" text-anchor="middle" font-family="${escapeXml(uiFontFamily)}, sans-serif" font-size="${label.fontSize}" font-weight="${label.fontWeight}" fill="${label.fill}" letter-spacing="${label.letterSpacingPx}px">${escapeXml(label.text)}</text>`,
+    )
+    .join("");
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${snapshot.heatmap.width}" height="${snapshot.heatmap.height}" viewBox="0 0 ${snapshot.heatmap.width} ${snapshot.heatmap.height}">`,
+    `<rect x="0" y="0" width="${snapshot.heatmap.width}" height="${snapshot.heatmap.height}" fill="${snapshot.heatmap.backgroundColor}" />`,
+    contoursMarkup,
+    labelsMarkup,
+    "</svg>",
+  ].join("");
 }
 
 function buildFocusAttributeLayout(cluster: ClusterNode | null): FocusAttributeText[] {
@@ -372,10 +496,12 @@ export function ProfileSignatureContourInline({
   user,
   backgroundColor = "var(--paper)",
   exportArtifactContent,
+  onExportEvent,
 }: {
   user: MockUserProfile;
   backgroundColor?: string;
   exportArtifactContent?: ExportArtifactContent;
+  onExportEvent?: (event: SignatureExportEvent) => void;
 }) {
   const [activeClusterId, setActiveClusterId] = useState<string | null>(null);
   const [hoveredClusterId, setHoveredClusterId] = useState<string | null>(null);
@@ -514,6 +640,25 @@ export function ProfileSignatureContourInline({
   const exportSignatureTitle =
     exportArtifactContent?.signatureTitle?.trim() || user.tasteDescription.signatureTitle.trim() || "Signature";
   const exportNarrative = exportArtifactContent?.narrative?.trim() || user.tasteDescription.tasteThesis.trim();
+  const exportSnapshot = useMemo(
+    () =>
+      createArtifactSnapshot({
+        backgroundColor: backgroundColor.trim() || "#F8F8F6",
+        contours: allContours.map((contour) => contour.coordinates as number[][][][]),
+        clusters: data.clusters,
+        displayName: exportDisplayName,
+        signatureTitle: exportSignatureTitle,
+        narrative: exportNarrative,
+      }),
+    [
+      allContours,
+      backgroundColor,
+      data.clusters,
+      exportDisplayName,
+      exportNarrative,
+      exportSignatureTitle,
+    ],
+  );
   const activeCardPlacement = useMemo(() => {
     if (!activeCluster) return null;
     const measuredWidth =
@@ -541,9 +686,10 @@ export function ProfileSignatureContourInline({
   ]);
 
   const exportSignatureArtifactImage = async (mode: SignatureExportMode) => {
-    if (!heatmapSvgRef.current || isExportingCard) return;
+    if (isExportingCard) return;
 
     setIsExportingCard(true);
+    onExportEvent?.({ status: "exporting", mode });
     let svgUrl: string | null = null;
     let imageUrl: string | null = null;
 
@@ -579,25 +725,29 @@ export function ProfileSignatureContourInline({
       probe.remove();
 
       const rootStyles = getComputedStyle(document.documentElement);
-
-      const svgClone = heatmapSvgRef.current.cloneNode(true) as SVGSVGElement;
-      svgClone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      svgClone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-      svgClone.setAttribute("width", `${WIDTH}`);
-      svgClone.setAttribute("height", `${HEIGHT}`);
-      svgClone.setAttribute("viewBox", `0 0 ${WIDTH} ${HEIGHT}`);
-
-      const serializedSvg = new XMLSerializer().serializeToString(svgClone);
-      svgUrl = URL.createObjectURL(
-        new Blob([serializedSvg], { type: "image/svg+xml;charset=utf-8" }),
-      );
-      const heatmapImage = await loadImageFromUrl(svgUrl);
-
       const paperColor = rootStyles.getPropertyValue("--paper").trim() || "#FEFEFD";
       const mistColor = rootStyles.getPropertyValue("--mist").trim() || "#F8F8F6";
       const inkColor = rootStyles.getPropertyValue("--ink").trim() || "#111111";
       const metaColor = rootStyles.getPropertyValue("--meta").trim() || "#888894";
-      const summaryColor = "rgba(254,254,253,0.9)";
+      const summaryColor = "rgba(254,254,253,0.88)";
+      const rawHeatmapBackgroundColor = heatmapSvgRef.current
+        ? getComputedStyle(heatmapSvgRef.current).backgroundColor
+        : exportSnapshot.heatmap.backgroundColor;
+      const heatmapBackgroundColor =
+        rawHeatmapBackgroundColor && !rawHeatmapBackgroundColor.includes("var(")
+          ? rawHeatmapBackgroundColor
+          : mistColor;
+
+      const snapshot: SignatureArtifactSnapshot = {
+        ...exportSnapshot,
+        heatmap: {
+          ...exportSnapshot.heatmap,
+          backgroundColor: heatmapBackgroundColor,
+        },
+      };
+      if (snapshot.heatmap.contours.length === 0) {
+        throw new Error("Artifact snapshot has no contours.");
+      }
 
       ctx.fillStyle = mistColor;
       ctx.fillRect(0, 0, EXPORT_IMAGE_WIDTH, EXPORT_IMAGE_HEIGHT);
@@ -616,9 +766,10 @@ export function ProfileSignatureContourInline({
       ctx.stroke();
 
       const cardX = frameX + 64;
-      const cardY = frameY + 118;
+      const cardY = frameY + 126;
       const cardW = frameW - 128;
-      const cardH = frameH - 220;
+      const cardH = frameH - 236;
+      const blackCardInset = 10;
 
       roundedRectPath(ctx, cardX, cardY, cardW, cardH, 12);
       ctx.fillStyle = mistColor;
@@ -626,11 +777,11 @@ export function ProfileSignatureContourInline({
       ctx.strokeStyle = "rgba(17,17,17,0.06)";
       ctx.stroke();
 
-      const leftPaneW = Math.round(cardW * 0.44);
-      const blackCardX = cardX + 18;
-      const blackCardY = cardY + 18;
-      const blackCardW = leftPaneW - 36;
-      const blackCardH = cardH - 36;
+      const leftPaneW = Math.round(cardW * 0.42);
+      const blackCardX = cardX + blackCardInset;
+      const blackCardY = cardY + 10;
+      const blackCardW = leftPaneW - blackCardInset * 2;
+      const blackCardH = cardH - 20;
       roundedRectPath(ctx, blackCardX, blackCardY, blackCardW, blackCardH, 14);
       ctx.fillStyle = inkColor;
       ctx.fill();
@@ -638,7 +789,7 @@ export function ProfileSignatureContourInline({
       const blackInnerY = blackCardY + 52;
       const blackInnerW = blackCardW - 84;
       const blackInnerH = blackCardH - 98;
-      const exportHeadingPrefix = `${exportDisplayName}-`;
+      const exportHeadingPrefix = `${snapshot.text.displayName}-`;
       let headingSize = 46;
       let headingPrefixWidth = 0;
 
@@ -646,7 +797,7 @@ export function ProfileSignatureContourInline({
         ctx.font = `400 ${headingSize}px ${uiFontFamily}, sans-serif`;
         headingPrefixWidth = ctx.measureText(exportHeadingPrefix).width;
         ctx.font = `italic 400 ${headingSize}px ${headlineFontFamily}, serif`;
-        const headingTitleWidth = ctx.measureText(exportSignatureTitle).width;
+        const headingTitleWidth = ctx.measureText(snapshot.text.signatureTitle).width;
         if (headingPrefixWidth + headingTitleWidth <= blackInnerW) break;
         headingSize -= 2;
       }
@@ -657,7 +808,7 @@ export function ProfileSignatureContourInline({
       ctx.font = `400 ${headingSize}px ${uiFontFamily}, sans-serif`;
       ctx.fillText(exportHeadingPrefix, blackInnerX, cursorY);
       ctx.font = `italic 400 ${headingSize}px ${headlineFontFamily}, serif`;
-      ctx.fillText(exportSignatureTitle, blackInnerX + headingPrefixWidth + 2, cursorY);
+      ctx.fillText(snapshot.text.signatureTitle, blackInnerX + headingPrefixWidth + 2, cursorY);
 
       cursorY += 54;
       let bodyFontSize = 24;
@@ -668,7 +819,7 @@ export function ProfileSignatureContourInline({
 
       while (bodyFontSize >= 16) {
         ctx.font = `400 ${bodyFontSize}px ${uiFontFamily}, sans-serif`;
-        narrativeLines = wrapTextLines(ctx, exportNarrative, blackInnerW);
+        narrativeLines = wrapTextLines(ctx, snapshot.text.narrative, blackInnerW);
         lineHeight = Math.round(bodyFontSize * 1.56);
         maxLines = Math.max(1, Math.floor(narrativeMaxHeight / lineHeight));
         if (narrativeLines.length <= maxLines) break;
@@ -687,18 +838,25 @@ export function ProfileSignatureContourInline({
       const screenshotPanelY = cardY;
       const screenshotPanelW = cardW - leftPaneW;
       const screenshotPanelH = cardH;
-      const screenshotInsetX = Math.round(screenshotPanelW * 0.09);
-      const screenshotInsetY = Math.round(screenshotPanelH * 0.12);
+      const screenshotInsetX = Math.round(screenshotPanelW * 0.035);
+      const screenshotInsetY = Math.round(screenshotPanelH * 0.055);
       const screenshotX = screenshotPanelX + screenshotInsetX;
       const screenshotY = screenshotPanelY + screenshotInsetY;
       const screenshotW = screenshotPanelW - screenshotInsetX * 2;
       const screenshotH = screenshotPanelH - screenshotInsetY * 2;
-      const screenshotScale = Math.min(screenshotW / WIDTH, screenshotH / HEIGHT);
-      const drawnScreenshotW = WIDTH * screenshotScale;
-      const drawnScreenshotH = HEIGHT * screenshotScale;
+      const screenshotScale = Math.min(
+        screenshotW / snapshot.heatmap.width,
+        screenshotH / snapshot.heatmap.height,
+      );
+      const drawnScreenshotW = snapshot.heatmap.width * screenshotScale;
+      const drawnScreenshotH = snapshot.heatmap.height * screenshotScale;
       const drawnScreenshotX = screenshotX + (screenshotW - drawnScreenshotW) * 0.5;
       const drawnScreenshotY = screenshotY + (screenshotH - drawnScreenshotH) * 0.5;
 
+      const heatmapSvgMarkup = buildArtifactHeatmapSvgMarkup(snapshot, uiFontFamily);
+      const serializedSvg = `<?xml version="1.0" encoding="UTF-8"?>${heatmapSvgMarkup}`;
+      svgUrl = URL.createObjectURL(new Blob([serializedSvg], { type: "image/svg+xml;charset=utf-8" }));
+      const heatmapImage = await loadImageFromUrl(svgUrl);
       ctx.drawImage(
         heatmapImage,
         drawnScreenshotX,
@@ -714,13 +872,11 @@ export function ProfileSignatureContourInline({
       const footerTextWidth = ctx.measureText(footerText).width;
       ctx.fillText(footerText, cardX + cardW - footerTextWidth, footerY);
 
-      const imageBlob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, "image/png"),
-      );
-      if (!imageBlob) throw new Error("Image export failed.");
-
-      const fileName = `cenoir-signature-${exportDisplayName.toLowerCase().replace(/\s+/g, "-")}.png`;
+      const imageBlob = await canvasToPngBlob(canvas);
+      const fileName = `cenoir-signature-${snapshot.text.displayName.toLowerCase().replace(/\s+/g, "-")}.png`;
       const imageFile = new File([imageBlob], fileName, { type: "image/png" });
+      const shareTitle = `Signature Artifact · ${snapshot.text.displayName}`;
+      const shareText = "Cenoir signature artifact";
 
       if (
         mode === "share" &&
@@ -731,10 +887,26 @@ export function ProfileSignatureContourInline({
       ) {
         await navigator.share({
           files: [imageFile],
-          title: `Signature Artifact · ${exportDisplayName}`,
-          text: "Cenoir signature artifact",
+          title: shareTitle,
+          text: shareText,
         });
+        onExportEvent?.({ status: "done", mode, channel: "share-file" });
         return;
+      }
+
+      if (mode === "share" && typeof navigator !== "undefined" && "share" in navigator) {
+        try {
+          const url = typeof window !== "undefined" ? window.location.href : undefined;
+          await navigator.share({
+            title: shareTitle,
+            text: shareText,
+            url,
+          });
+          onExportEvent?.({ status: "done", mode, channel: "share-link" });
+          return;
+        } catch {
+          // Fall through to deterministic download fallback.
+        }
       }
 
       imageUrl = URL.createObjectURL(imageBlob);
@@ -744,7 +916,10 @@ export function ProfileSignatureContourInline({
       document.body.appendChild(link);
       link.click();
       link.remove();
+      onExportEvent?.({ status: "done", mode, channel: "download" });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown export failure.";
+      onExportEvent?.({ status: "failed", mode, message });
       console.error("Signature artifact export failed.", error);
     } finally {
       if (svgUrl) URL.revokeObjectURL(svgUrl);
@@ -769,7 +944,11 @@ export function ProfileSignatureContourInline({
 
   return (
     <div className="w-full overflow-visible">
-      <div ref={heatmapContainerRef} className="relative w-full overflow-visible">
+      <div
+        ref={heatmapContainerRef}
+        className="relative mx-auto overflow-visible"
+        style={{ width: `${OVERLAY_HEATMAP_SCALE * 100}%` }}
+      >
         <svg
           ref={heatmapSvgRef}
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
@@ -780,7 +959,7 @@ export function ProfileSignatureContourInline({
           }}
           style={{
             backgroundColor,
-            overflow: "hidden",
+            overflow: "visible",
           }}
         >
           {allContours.map((contour, index) => (
@@ -832,9 +1011,9 @@ export function ProfileSignatureContourInline({
                   setActiveClusterId(isSameCluster ? null : cluster.id);
                 }}
                 style={{
-                  fontSize: isHovered ? "17px" : "15px",
+                  fontSize: isHovered ? "19px" : "17px",
                   fontWeight: isActive || isHovered ? 540 : 500,
-                  fill: isActive || isHovered ? "var(--ink)" : "rgba(17,17,17,0.62)",
+                  fill: isActive || isHovered ? "var(--ink)" : "rgba(17,17,17,0.72)",
                   letterSpacing: "0.015em",
                   cursor: "pointer",
                   transition: "fill 160ms ease, font-size 180ms ease",
@@ -869,7 +1048,10 @@ export function ProfileSignatureContourInline({
                 setIsOverlayExpanded(false);
               }}
             >
-              <div className="relative w-full rounded-[4px] px-5 py-5">
+              <div
+                className="relative w-full px-5 py-4"
+                style={{ borderRadius: `${OVERLAY_CORNER_RADIUS_PX}px` }}
+              >
                 <div
                   aria-hidden
                   className="pointer-events-none absolute"
@@ -893,11 +1075,11 @@ export function ProfileSignatureContourInline({
                     </span>
                   </h3>
 
-                  <p className="mt-3 text-justify font-ui text-[13px] font-normal leading-[1.65] text-meta">
+                  <p className="mt-2.5 text-justify font-ui text-[13px] font-normal leading-[1.65] text-meta">
                     {thesisText}
                   </p>
 
-                  <div className="mx-auto mt-4 flex max-w-[440px] flex-wrap justify-center gap-x-[9px] gap-y-[7px]">
+                  <div className="mx-auto mt-3 flex max-w-[440px] flex-wrap justify-center gap-x-[9px] gap-y-[7px]">
                     {focusAttributes.map((word) => (
                       <span
                         key={`detail-tag-${word.id}`}

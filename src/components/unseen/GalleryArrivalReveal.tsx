@@ -97,7 +97,7 @@ export function GalleryArrivalReveal() {
 
   if (!isActive) return null;
 
-  const blurPx = (1 - progress) * 8;
+  const blurPx = (1 - progress) * 7;
   const veilOpacity = (1 - progress) * 0.26;
   const tintOpacity = (1 - progress) * 0.2;
 

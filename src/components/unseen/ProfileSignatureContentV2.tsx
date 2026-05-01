@@ -508,13 +508,20 @@ export function ProfileSignatureContentV2({ user }: { user: MockUserProfile }) {
                     <button
                       type="button"
                       aria-label="Close detail card"
-                      className="absolute right-8 top-8 font-ui text-[14px] font-normal leading-none text-meta"
+                      className="absolute right-8 top-8 inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none"
                       onClick={() => {
                         setActiveClusterId(null);
                         setHoveredClusterId(null);
                       }}
                     >
-                      ×
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-1/2 top-1/2 block h-[1.5px] w-[18px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full bg-current"
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-1/2 top-1/2 block h-[1.5px] w-[18px] -translate-x-1/2 -translate-y-1/2 -rotate-45 rounded-full bg-current"
+                      />
                     </button>
 
                     <h2 className="inline-flex w-full items-center justify-start text-left leading-none text-ink">

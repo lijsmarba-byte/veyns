@@ -39,6 +39,7 @@ export type MockTasteAttributes = {
 export type MockUserProfile = {
   userId: number;
   name: string;
+  profileGender: "woman" | "man" | "none";
   lastCalibrationDate: string;
   email: string;
   // Mock only. Real backend must store a password hash, never plain text.
@@ -95,7 +96,8 @@ const junaReferenceSet: MockReferenceVisual[] = junaReferenceFileNames.map(
 export const mockUsers: MockUserProfile[] = [
   {
     userId: 1,
-    name: "Emma",
+    name: "Jil",
+    profileGender: "woman",
     lastCalibrationDate: "2026-03-05",
     email: "lij.smarba@gmail.com",
     password: "juna1997",

@@ -1121,6 +1121,7 @@ export function ProductImageRail({
           <div
             ref={index === 0 ? firstImageRef : undefined}
             data-pv-main-image-root={index === 0 ? "true" : undefined}
+            data-pv-image-hit="true"
             className="relative w-full lg:mx-auto"
             style={{ maxWidth: `${index === 0 ? primaryImageMaxWidthPx : nonPrimaryImageMaxWidthPx}px` }}
           >
@@ -1133,11 +1134,13 @@ export function ProductImageRail({
               priority={index === 0}
               fetchPriority={index === 0 ? "high" : "auto"}
               sizes={index === 0 ? "(max-width: 1024px) 86vw, 560px" : "(max-width: 1024px) 82vw, 562px"}
-              className={`h-auto w-full ${
+              className={`pointer-events-none select-none h-auto w-full ${
                 index === 0
                   ? "max-h-[68vh] object-contain"
                   : "object-cover"
               }`}
+              draggable={false}
+              onDragStart={(event) => event.preventDefault()}
             />
 
             {index === 0 && resolvedCues.length > 0 ? (

@@ -314,6 +314,10 @@ export function ProductViewCloseButton({
   const CLOSE_TEXT_EXIT_DELAY_MS = 120;
   const CLOSE_SHELL_FADE_DURATION_MS = 460;
   const CLOSE_SHELL_FADE_DELAY_MS = 70;
+  const CLOSE_ICON_LINE_WIDTH_PX = 18;
+  const CLOSE_ICON_STROKE_PX = 1.5;
+  const CLOSE_ICON_BOX_HEIGHT_PX = 14;
+  const closeIconCenterPx = CLOSE_ICON_BOX_HEIGHT_PX / 2 - CLOSE_ICON_STROKE_PX / 2;
   const isImmersiveReturn = backHref.includes("/immersive");
   const closeEndHoldMs = isImmersiveReturn ? 80 : CLOSE_END_HOLD_MS;
 
@@ -854,11 +858,25 @@ export function ProductViewCloseButton({
     >
       <span
         aria-hidden="true"
-        className="absolute block h-[1.5px] w-[15px] rounded-full bg-current rotate-45"
+        className="absolute left-1/2 block -translate-x-1/2 rounded-full bg-current rotate-45"
+        style={{
+          width: `${CLOSE_ICON_LINE_WIDTH_PX}px`,
+          height: `${CLOSE_ICON_STROKE_PX}px`,
+          top: `${closeIconCenterPx}px`,
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
+        }}
       />
       <span
         aria-hidden="true"
-        className="absolute block h-[1.5px] w-[15px] rounded-full bg-current -rotate-45"
+        className="absolute left-1/2 block -translate-x-1/2 rounded-full bg-current -rotate-45"
+        style={{
+          width: `${CLOSE_ICON_LINE_WIDTH_PX}px`,
+          height: `${CLOSE_ICON_STROKE_PX}px`,
+          top: `${closeIconCenterPx}px`,
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
+        }}
       />
     </button>
   );

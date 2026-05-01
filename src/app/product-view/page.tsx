@@ -91,12 +91,16 @@ export default async function ProductViewPage({
   return (
     <main className="font-ui min-h-screen bg-paper text-ink" style={{ minHeight: "var(--viewport-h)" }}>
       <section data-pv-shell="true" className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
-        <ProductViewCloseButton
-          backHref={backHref}
-          productId={current.item.id}
-          enableBackdropClose
-          className="fixed right-10 top-[30px] z-50 inline-flex h-[11px] w-[15px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none"
-        />
+        <div className="fixed right-4 top-[23px] z-50 md:right-10">
+          <div className="flex h-[26px] items-center">
+            <ProductViewCloseButton
+              backHref={backHref}
+              productId={current.item.id}
+              enableBackdropClose
+              className="relative inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none"
+            />
+          </div>
+        </div>
 
         <div
           className="grid grid-cols-1 gap-16 lg:grid-cols-[1.03fr_0.97fr] lg:items-start lg:gap-24"
@@ -123,7 +127,10 @@ export default async function ProductViewPage({
                   <div className="flex items-center gap-[7px]">
                     <p>{current.item.brand}</p>
                     {isPreOwned ? (
-                      <span className="inline-flex h-[26px] items-center gap-[8px] bg-transparent font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-ink">
+                      <span
+                        className="inline-flex h-[26px] items-center gap-[8px] bg-transparent text-[11px] font-medium uppercase tracking-[0.12em] text-ink"
+                        style={{ fontFamily: "var(--font-meta-mono), monospace" }}
+                      >
                         <span
                           aria-hidden="true"
                           className="h-[7px] w-[7px] rounded-full bg-ink"

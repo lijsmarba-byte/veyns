@@ -438,7 +438,7 @@ const World2ItemButton = memo(function World2ItemButton({
           ref={imageRef}
           src={entry.item.imgSrc}
           alt=""
-          className={`h-full w-full max-w-none object-contain ${
+          className={`h-full w-full max-w-none pointer-events-none select-none object-contain ${
             animateReveal ? "transition-opacity duration-100 ease-out" : ""
           }`}
           style={{
@@ -448,6 +448,7 @@ const World2ItemButton = memo(function World2ItemButton({
             WebkitBackfaceVisibility: "hidden",
           }}
           draggable={false}
+          onDragStart={(event) => event.preventDefault()}
           loading={isSafari || index < WORLD2_EAGER_IMAGE_COUNT ? "eager" : "lazy"}
           decoding="async"
           onLoad={(event) => revealImage(event.currentTarget)}

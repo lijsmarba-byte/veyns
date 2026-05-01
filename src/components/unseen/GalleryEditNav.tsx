@@ -58,15 +58,22 @@ export function GalleryEditNav({ tabs = defaultTabs, tone = "gallery", queryKey 
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`font-ui relative inline-flex h-10 items-center whitespace-nowrap px-0 text-[14px] leading-5 tracking-[0.28px] transition-colors ${
-              resolvedActiveTab === tab.id
-                ? tone === "archive"
-                  ? "font-semibold text-accent after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-accent after:content-['']"
-                  : "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
-                : "font-medium text-inactive hover:text-meta"
-            }`}
+            className="group font-ui relative inline-flex h-10 items-center whitespace-nowrap px-0 text-[14px] leading-5 tracking-[0.28px] transition-colors"
           >
-            {toTitleCase(tab.label)}
+            <span aria-hidden="true" className="invisible font-semibold">
+              {toTitleCase(tab.label)}
+            </span>
+            <span
+              className={`absolute inset-0 inline-flex items-center ${
+                resolvedActiveTab === tab.id
+                  ? tone === "archive"
+                    ? "font-semibold text-accent after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-accent after:content-['']"
+                    : "font-semibold text-ink after:absolute after:bottom-[-3px] after:left-0 after:h-[1.5px] after:w-full after:bg-black after:content-['']"
+                  : "font-medium text-inactive transition-colors group-hover:text-meta"
+              }`}
+            >
+              {toTitleCase(tab.label)}
+            </span>
           </button>
         ))}
     </div>

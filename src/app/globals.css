@@ -41,7 +41,7 @@
 
   --font-ui: var(--font-ui-sans);
   --font-headline: var(--font-headline-serif);
-  --font-mono-meta: var(--font-meta-mono);
+  --font-mono-meta: var(--font-ui-sans);
   --font-belmonte: var(--font-belmonte-ballpoint);
 }
 
@@ -222,13 +222,4 @@ a {
     animation-duration: 620ms;
     animation-timing-function: cubic-bezier(0.2, 0.88, 0.28, 1);
   }
-}
-
-/* Force-hide floating category nav only while a shell overlay is open. */
-html[data-unseen-overlay-open="true"] [aria-label="Category navigation"],
-html[data-unseen-overlay-open="true"] [aria-label="Immersive category navigation"],
-html[data-unseen-overlay-open="true"] [data-gallery-immersive-left-nav="true"] {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
 }
