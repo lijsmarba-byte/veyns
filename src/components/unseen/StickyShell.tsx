@@ -64,6 +64,7 @@ const COMPACT_MENU_RAIL_WIDTH_CSS = "min(202px, 42vw)";
 const COMPACT_MENU_CONTENT_WIDTH_CSS = "min(680px, calc(100vw - min(202px, 42vw) - 28px))";
 const COMPACT_MENU_SHEET_WIDTH_CSS = `calc(${COMPACT_MENU_CONTENT_WIDTH_CSS} + ${COMPACT_MENU_RAIL_WIDTH_CSS})`;
 const PROFILE_MENU_CONTENT_WIDTH_CSS = "calc(100vw - 82px)";
+const PROFILE_MENU_FULL_EXTEND_BREAKPOINT_PX = 1320;
 const MENU_RAIL_CONTENT_LEFT_CLASS = "pl-9 md:pl-[52px]";
 const MENU_RAIL_CONTENT_RIGHT_CLASS = "pr-4 md:pr-10";
 const MENU_TRANSITION_MS = 650;
@@ -114,6 +115,9 @@ export function StickyShell({
   const [activeProfileOverlayTab, setActiveProfileOverlayTab] = useState<ProfileOverlayTab>("signature");
   const [profileOverlayEditFlow, setProfileOverlayEditFlow] = useState<"create" | null>(null);
   const [isEditActionMenuOpen, setIsEditActionMenuOpen] = useState(false);
+  const [viewportWidthPx, setViewportWidthPx] = useState<number>(
+    typeof window !== "undefined" ? window.innerWidth : 1440,
+  );
   const activeProfileUser = mockUsers[0] ?? null;
   const fallbackIssueNumber = Number(issueNumber);
   const resolvedIssueNumber =
@@ -147,12 +151,17 @@ export function StickyShell({
     activeOverlaySurface === "feedback" ||
     activeOverlaySurface === "about";
   const isCompactProfileOverlay = activeOverlaySurface === "profile";
-  const shouldHideCompactMenuLinks = isCompactProfileOverlay && compactOverlayPhase === "open";
+  const shouldHideCompactMenuLinks =
+    isCompactProfileOverlay &&
+    (compactOverlayPhase === "opening" || compactOverlayPhase === "open" || compactOverlayPhase === "closing");
   const isSettingsOrFeedbackOverlay = activeOverlaySurface === "settings" || activeOverlaySurface === "feedback";
   const isAnyOverlayOpen = isProfileOverlayOpen || isCompactOverlayOpen;
   const isQuickMenuVisible = quickMenuPhase !== "closed";
   const isQuickMenuEntering = quickMenuPhase === "open";
-  const compactOverlayTargetWidth = isCompactProfileOverlay ? PROFILE_MENU_CONTENT_WIDTH_CSS : COMPACT_MENU_SHEET_WIDTH_CSS;
+  const shouldUseFullWidthProfileOverlay =
+    isCompactProfileOverlay && viewportWidthPx <= PROFILE_MENU_FULL_EXTEND_BREAKPOINT_PX;
+  const profileOverlayTargetWidth = shouldUseFullWidthProfileOverlay ? "100vw" : PROFILE_MENU_CONTENT_WIDTH_CSS;
+  const compactOverlayTargetWidth = isCompactProfileOverlay ? profileOverlayTargetWidth : COMPACT_MENU_SHEET_WIDTH_CSS;
   const compactOverlayShouldExtendFromMenu = compactOverlayOrigin === "menu";
   const compactOverlayCurrentWidth =
     compactOverlayShouldExtendFromMenu && compactOverlayPhase !== "open"
@@ -188,6 +197,8 @@ export function StickyShell({
   const isChromiumBased = /(Chrome|CriOS|Chromium|Edg|OPR|OPiOS|FxiOS)/i.test(safariUa);
   const isSafariBrowser = /Safari/i.test(safariUa) && /Apple Computer/i.test(safariVendor) && !isChromiumBased;
   const menuIconStrokePx = isSafariBrowser ? MENU_ICON_STROKE_SAFARI_PX : MENU_ICON_STROKE_PX;
+  const safariGalleryLogoStyle: CSSProperties | undefined =
+    isSafariBrowser && isGallery ? { fontWeight: 700, letterSpacing: "-0.04em" } : undefined;
   const menuIconClosedTopPx = MENU_ICON_CENTER_Y_PX - MENU_ICON_HALF_GAP_PX - menuIconStrokePx / 2;
   const menuIconClosedBottomPx = MENU_ICON_CENTER_Y_PX + MENU_ICON_HALF_GAP_PX - menuIconStrokePx / 2;
   const menuIconCenterPx = MENU_ICON_CENTER_Y_PX - menuIconStrokePx / 2;
@@ -497,6 +508,15 @@ export function StickyShell({
   }, [isEditActionMenuOpen]);
 
   useEffect(() => {
+    const syncViewportWidth = () => {
+      setViewportWidthPx(window.innerWidth);
+    };
+    syncViewportWidth();
+    window.addEventListener("resize", syncViewportWidth);
+    return () => window.removeEventListener("resize", syncViewportWidth);
+  }, []);
+
+  useEffect(() => {
     if (!isQuickMenuVisible) return;
 
     const syncInset = () => {
@@ -734,10 +754,10 @@ export function StickyShell({
             <ModePill selected={isGallery ? "gallery" : "archive"} />
           </div>
 
-          <div className="absolute right-4 top-[23px] md:right-10" data-sticky-brand-row="true">
+          <div className="absolute right-10 top-[23px]" data-sticky-brand-row="true">
             <div className="flex h-[26px] items-center gap-[8px]">
               <p className="hidden h-[26px] items-center text-right text-ink leading-none min-[700px]:inline-flex" data-sticky-logo-wrap="true">
-                <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]">cenoir</span>
+                <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]" style={safariGalleryLogoStyle}>cenoir</span>
               </p>
               <div
                 data-sticky-beta="true"
@@ -949,9 +969,13 @@ export function StickyShell({
           }}
         >
           <div className="absolute inset-x-0 top-[23px] h-[26px]">
-            <div className="absolute right-4 top-0 flex h-[26px] items-center gap-[8px] md:right-10">
+            <div className="absolute right-10 top-0 flex h-[26px] items-center gap-[8px]">
               <p className="inline-flex h-[26px] items-center text-right text-ink leading-none">
-                <span ref={quickMenuBrandLabelRef} className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]">
+                <span
+                  ref={quickMenuBrandLabelRef}
+                  className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]"
+                  style={safariGalleryLogoStyle}
+                >
                   cenoir
                 </span>
               </p>
@@ -1052,7 +1076,7 @@ export function StickyShell({
           type="button"
           aria-label="Close profile overlay"
           onClick={closeOverlaySurface}
-          className="group fixed right-4 top-[23px] z-[140] inline-flex h-[26px] w-[20px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none md:right-10"
+          className="group fixed right-10 top-[23px] z-[140] inline-flex h-[26px] w-[20px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none"
         >
           <span
             className={`absolute left-1/2 block -translate-x-1/2 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
@@ -1285,10 +1309,10 @@ export function StickyShell({
             >
             <div className="absolute inset-x-0 top-[23px] h-[26px]">
               <div
-                className="absolute right-4 top-0 flex h-[26px] items-center gap-[8px] transition-opacity duration-300 ease-out opacity-100 md:right-10"
+                className="absolute right-10 top-0 flex h-[26px] items-center gap-[8px] transition-opacity duration-300 ease-out opacity-100"
               >
                 <p className="inline-flex h-[26px] items-center text-right text-ink leading-none">
-                  <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]">cenoir</span>
+                  <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]" style={safariGalleryLogoStyle}>cenoir</span>
                 </p>
                 <div className="inline-flex h-[12px] min-w-[28px] items-center justify-center rounded-[2px] bg-ink px-[5px]">
                   <span className="font-ui text-[6.5px] font-bold leading-[6.5px] tracking-[-0.08px] text-paper">

@@ -102,10 +102,7 @@ export default async function ProductViewPage({
           </div>
         </div>
 
-        <div
-          className="grid grid-cols-1 gap-16 lg:grid-cols-[1.03fr_0.97fr] lg:items-start lg:gap-24"
-          style={{ minHeight: "calc(var(--viewport-h) - 120px)" }}
-        >
+        <div className="grid grid-cols-1 gap-10 sm:gap-12 lg:min-h-[calc(var(--viewport-h)-120px)] lg:grid-cols-[1.03fr_0.97fr] lg:items-start lg:gap-24">
           <ProductInfoTransition
             productId={current.item.id}
             className="pt-8 sm:pt-12 md:pt-16 lg:sticky lg:self-start lg:pt-0"
@@ -154,11 +151,7 @@ export default async function ProductViewPage({
           </ProductInfoTransition>
 
           <div
-            className="relative flex pt-0 lg:items-start lg:justify-center"
-            style={{
-              minHeight: "calc(var(--viewport-h) - 120px)",
-              paddingTop: "calc(var(--sticky-h) + (var(--viewport-h) - var(--sticky-h)) / 2 - 220px)",
-            }}
+            className="relative flex pt-0 lg:min-h-[calc(var(--viewport-h)-120px)] lg:items-start lg:justify-center lg:pt-[calc(var(--sticky-h)+((var(--viewport-h)-var(--sticky-h))/2)-220px)]"
           >
             <ProductImageRail
               images={imageRail}

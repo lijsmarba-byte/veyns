@@ -150,6 +150,12 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function interpolateClamped(value: number, start: number, end: number, startValue: number, endValue: number) {
+  if (end <= start) return endValue;
+  const progress = clampNumber((value - start) / (end - start), 0, 1);
+  return startValue + (endValue - startValue) * progress;
+}
+
 function readProductViewBackHref() {
   if (typeof window === "undefined") return "";
   try {
@@ -211,9 +217,16 @@ export function ProductImageRail({
   const isDesktopSplitLayout = viewportSize.width >= 1024;
   const baseMainImageTopLiftPx = useMemo(() => {
     if (!isDesktopSplitLayout || disableMainImageTopLift) return 0;
-    if (viewportSize.height < 700) return 40;
-    if (viewportSize.height < 800) return 64;
-    if (viewportSize.height < 920) return 110;
+    if (viewportSize.height <= 700) return 40;
+    if (viewportSize.height <= 800) {
+      return interpolateClamped(viewportSize.height, 700, 800, 40, 64);
+    }
+    if (viewportSize.height <= 920) {
+      return interpolateClamped(viewportSize.height, 800, 920, 64, 110);
+    }
+    if (viewportSize.height <= 1100) {
+      return interpolateClamped(viewportSize.height, 920, 1100, 110, 180);
+    }
     return 180;
   }, [disableMainImageTopLift, isDesktopSplitLayout, viewportSize.height]);
   const [mainImageTopLiftPx, setMainImageTopLiftPx] = useState(baseMainImageTopLiftPx);
@@ -222,17 +235,30 @@ export function ProductImageRail({
     if (!isDesktopSplitLayout) {
       return STACKED_TEXT_COLUMN_WIDTH / PRIMARY_IMAGE_BASE_WIDTH;
     }
-    if (viewportSize.width < 1180) return 0.82;
-    if (viewportSize.width < 1280) return 0.9;
-    if (viewportSize.width < 1380) return 0.96;
+    if (viewportSize.width <= 1180) {
+      return interpolateClamped(viewportSize.width, 1024, 1180, 0.82, 0.9);
+    }
+    if (viewportSize.width <= 1280) {
+      return interpolateClamped(viewportSize.width, 1180, 1280, 0.9, 0.96);
+    }
+    if (viewportSize.width <= 1380) {
+      return interpolateClamped(viewportSize.width, 1280, 1380, 0.96, 1);
+    }
     return 1;
   }, [isDesktopSplitLayout, viewportSize.width]);
   const primaryImageMaxWidthPx = Math.round(PRIMARY_IMAGE_BASE_WIDTH * widthConstrainedScale);
   const nonPrimaryImageScale = useMemo(() => {
     if (!isDesktopSplitLayout) return 1;
-    if (viewportSize.height < 700) return 0.88;
-    if (viewportSize.height < 800) return 0.92;
-    if (viewportSize.height < 920) return 0.96;
+    if (viewportSize.height <= 700) return 0.88;
+    if (viewportSize.height <= 800) {
+      return interpolateClamped(viewportSize.height, 700, 800, 0.88, 0.92);
+    }
+    if (viewportSize.height <= 920) {
+      return interpolateClamped(viewportSize.height, 800, 920, 0.92, 0.96);
+    }
+    if (viewportSize.height <= 1100) {
+      return interpolateClamped(viewportSize.height, 920, 1100, 0.96, 1);
+    }
     return 1;
   }, [isDesktopSplitLayout, viewportSize.height]);
   const nonPrimaryImageMaxWidthPx = Math.round(

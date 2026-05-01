@@ -339,6 +339,18 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function interpolateClamped(
+  value: number,
+  start: number,
+  end: number,
+  startValue: number,
+  endValue: number,
+): number {
+  if (end <= start) return endValue;
+  const progress = clampNumber((value - start) / (end - start), 0, 1);
+  return startValue + (endValue - startValue) * progress;
+}
+
 function snapToStep(value: number, min: number, step: number): number {
   if (step <= 0) return value;
   const relative = value - min;
@@ -684,6 +696,15 @@ export default function ProfilePage() {
   const constraintsStorageKeyRef = useRef<string>(`${QUIET_CONSTRAINT_STORAGE_KEY}:${activeUser?.userId ?? "default"}`);
   const [draggingPrice, setDraggingPrice] = useState<PriceDragState>(null);
   const isCompactHeaderLayout = viewportWidth < 980;
+  const constraintsContentTranslateXPx = isEmbedded
+    ? Math.round(interpolateClamped(viewportWidth, 900, 1620, 0, 14))
+    : viewportWidth >= 768
+      ? 128
+      : 0;
+  const constraintsContentMaxWidthPx = isEmbedded
+    ? Math.round(interpolateClamped(viewportWidth, 980, 1620, 860, 920))
+    : 960;
+  const embeddedSignaturePanelMaxWidthPx = 900;
 
   const mainEditImages = useMemo(
     () => referenceSets.find((set) => set.id === MAIN_EDIT_SET_ID)?.images ?? [],
@@ -2256,14 +2277,15 @@ export default function ProfilePage() {
           <section className="mt-10">
             <div className="mx-auto w-full px-10">
               <div
-                className={`mx-auto w-full ${isEmbedded ? "max-w-[900px]" : "max-w-[1080px]"} overflow-hidden`}
+                className="mx-auto w-full overflow-hidden"
                 style={{
+                  maxWidth: isEmbedded ? `${embeddedSignaturePanelMaxWidthPx}px` : "1080px",
                   backgroundColor: "#F5F5F6",
                   borderRadius: "36px",
                   boxShadow: "0 2px 8px rgba(17,17,17,0.06)",
                 }}
               >
-                <div className={`grid w-full gap-0 ${isEmbedded ? "md:grid-cols-[0.42fr_0.58fr]" : "lg:grid-cols-[0.43fr_0.57fr]"}`}>
+                <div className={`grid w-full gap-0 ${isEmbedded ? "grid-cols-[0.42fr_0.58fr]" : "lg:grid-cols-[0.43fr_0.57fr]"}`}>
                   <div
                     className={`min-w-0 ${
                       isEmbedded
@@ -2301,7 +2323,7 @@ export default function ProfilePage() {
                     }`}
                     style={{ backgroundColor: "#F5F5F6" }}
                   >
-                    <div className={`${isEmbedded ? "mx-auto w-full max-w-[560px] md:w-[136%] md:max-w-none" : "mx-auto w-[96%]"} overflow-visible rounded-[32px]`}>
+                    <div className={`${isEmbedded ? "mx-auto w-[136%] max-w-none" : "mx-auto w-[96%]"} overflow-visible rounded-[32px]`}>
                       <ProfileSignatureContourInline
                         user={activeUser}
                         backgroundColor="#F5F5F6"
@@ -2316,7 +2338,10 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              <div className={`mx-auto mt-4 flex w-full ${isEmbedded ? "max-w-[900px]" : "max-w-[1080px]"} items-center justify-end gap-[10px]`}>
+              <div
+                className="mx-auto mt-4 flex w-full items-center justify-end gap-[10px]"
+                style={{ maxWidth: isEmbedded ? `${embeddedSignaturePanelMaxWidthPx}px` : "1080px" }}
+              >
                 <button
                   type="button"
                   onClick={() =>
@@ -3028,8 +3053,14 @@ export default function ProfilePage() {
         {showConstraintsSection ? (
           <div className="mx-[calc(50%-50vw)] px-10">
             <section className="mt-12 w-full">
-              <div className="mx-auto w-full max-w-[960px] px-4 md:translate-x-[128px] md:px-8">
-                <div className="grid gap-4 md:grid-cols-2 md:gap-5">
+              <div
+                className="mx-auto w-full px-4 md:px-8"
+                style={{
+                  maxWidth: `${constraintsContentMaxWidthPx}px`,
+                  transform: constraintsContentTranslateXPx > 0 ? `translateX(${constraintsContentTranslateXPx}px)` : undefined,
+                }}
+              >
+                <div className="grid gap-4 md:grid-cols-2 md:gap-3">
                   <article className={`${overlayInfoCardClass} h-full`}>
                     <div className="flex flex-wrap items-center gap-3">
                       <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">
