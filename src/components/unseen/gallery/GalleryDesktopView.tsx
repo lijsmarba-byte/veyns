@@ -1,6 +1,5 @@
 import { ProductTile } from "@/components/unseen/ProductTile";
 import { RightCategoryNav } from "@/components/unseen/RightCategoryNav";
-import { GalleryMobileCategoryPillNav } from "@/components/unseen/gallery/GalleryMobileCategoryPillNav";
 import type { MockCatalogSection } from "@/data/mockCatalog";
 
 type GalleryDesktopViewProps = {
@@ -56,8 +55,6 @@ export function GalleryDesktopView({
           ))}
         </div>
       </div>
-
-      <GalleryMobileCategoryPillNav sections={sections} />
     </section>
   );
 }

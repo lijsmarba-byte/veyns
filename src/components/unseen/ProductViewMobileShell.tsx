@@ -7,6 +7,9 @@ type ProductViewMobileShellProps = {
   backHref: string;
   brand: string;
   cues: string[];
+  disableEnterAnimation?: boolean;
+  disableGridReturnPrep?: boolean;
+  forceReplaceOnClose?: boolean;
   description: string;
   editId?: string | null;
   images: Array<{ id: string; src: string; alt: string }>;

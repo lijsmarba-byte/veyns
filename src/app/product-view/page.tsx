@@ -4,6 +4,7 @@ import { ProductImageRail } from "@/components/unseen/ProductImageRail";
 import { ProductInfoTransition } from "@/components/unseen/ProductInfoTransition";
 import { ProductViewCloseButton } from "@/components/unseen/ProductViewCloseButton";
 import { ProductViewDesktopShell } from "@/components/unseen/ProductViewDesktopShell";
+import { ProductViewMobileGridRedirect } from "@/components/unseen/ProductViewMobileGridRedirect";
 import { ProductViewMobileShell } from "@/components/unseen/ProductViewMobileShell";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -92,6 +93,7 @@ export default async function ProductViewPage({
 
   return (
     <>
+      <ProductViewMobileGridRedirect />
       <ProductViewMobileShell
         backHref={backHref}
         brand={current.item.brand}

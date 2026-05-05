@@ -21,6 +21,13 @@ type MobileCategoryScrollLock = {
   releaseTimer: number | null;
 };
 
+type ReturnScrollPayload = {
+  at: number;
+  backHref: string;
+  scrollY: number;
+  stickyPhase?: number;
+};
+
 type StickyShellProps = {
   mode: StickyMode;
   view: "grid" | "focus" | "immersive";
@@ -121,11 +128,65 @@ const MOBILE_EDIT_UNDERLINE_TOP_PX = 39;
 const MOBILE_TITLE_BLOCK_HEIGHT_PX = 43;
 const MOBILE_TITLE_TEXT_SIZE_PX = 26;
 const MOBILE_STICKY_LOGO_HEIGHT_PX = 20;
+const RETURN_SCROLL_KEY = "unseen:return-scroll";
+const RETURN_SCROLL_FRESH_MS = 30 * 60 * 1000;
 
 function clamp01(value: number) {
   if (value <= 0) return 0;
   if (value >= 1) return 1;
   return value;
+}
+
+function getHrefPathname(href: string): string {
+  if (!href) return "";
+  try {
+    if (href.startsWith("/")) {
+      const url = new URL(href, "https://unseen.local");
+      return url.pathname;
+    }
+    const url = new URL(href);
+    return url.pathname;
+  } catch {
+    return href.split("?")[0] ?? href;
+  }
+}
+
+function toStickyGridPhase(value: unknown): StickyGridPhase | null {
+  if (value === 0 || value === 1 || value === 2) return value;
+  return null;
+}
+
+function readReturnScrollTargetY(currentHref: string): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(RETURN_SCROLL_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ReturnScrollPayload;
+    if (!Number.isFinite(parsed.scrollY)) return null;
+    const sameHref = parsed.backHref === currentHref;
+    const samePath = getHrefPathname(parsed.backHref) === getHrefPathname(currentHref);
+    if (!sameHref && !samePath) return null;
+    if (Date.now() - parsed.at >= RETURN_SCROLL_FRESH_MS) return null;
+    return Math.max(0, parsed.scrollY);
+  } catch {
+    return null;
+  }
+}
+
+function readReturnStickyPhase(currentHref: string): StickyGridPhase | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(RETURN_SCROLL_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ReturnScrollPayload;
+    const sameHref = parsed.backHref === currentHref;
+    const samePath = getHrefPathname(parsed.backHref) === getHrefPathname(currentHref);
+    if (!sameHref && !samePath) return null;
+    if (Date.now() - parsed.at >= RETURN_SCROLL_FRESH_MS) return null;
+    return toStickyGridPhase(parsed.stickyPhase);
+  } catch {
+    return null;
+  }
 }
 
 function formatCalibrationMonth(value: string | undefined): string {
@@ -144,6 +205,8 @@ export function StickyShell({
   const { isMobileExperience } = useViewportMode();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const currentQuery = searchParams.toString();
+  const currentPathWithQuery = currentQuery ? `${pathname}?${currentQuery}` : pathname;
   const [isQuickMenuOpen, setIsQuickMenuOpen] = useState(false);
   const [quickMenuPhase, setQuickMenuPhase] = useState<"closed" | "opening" | "open" | "closing">("closed");
   const [compactOverlayPhase, setCompactOverlayPhase] = useState<"closed" | "opening" | "open" | "closing">("closed");
@@ -759,7 +822,9 @@ export function StickyShell({
     }
 
     let rafId: number | null = null;
-    let lastScrollY = Math.max(window.scrollY, 0);
+    const initialReturnTargetY = readReturnScrollTargetY(currentPathWithQuery);
+    const initialReturnPhase = readReturnStickyPhase(currentPathWithQuery);
+    let lastScrollY = Math.max(initialReturnTargetY ?? window.scrollY, 0);
     let currentPhase: StickyGridPhase = 0; // 0=full, 1=mid, 2=compact
     let upIntentPx = 0;
     let downIntentPx = 0;
@@ -884,8 +949,16 @@ export function StickyShell({
       lastScrollY = scrollY;
     };
 
-    currentPhase = resolvePhaseFromScrollY(lastScrollY);
+    currentPhase = initialReturnPhase ?? resolvePhaseFromScrollY(lastScrollY);
     setStickyCollapseProgress(phaseToProgress(currentPhase));
+
+    if (initialReturnTargetY !== null && Math.abs(window.scrollY - initialReturnTargetY) > 2) {
+      mobileCategoryScrollLockRef.current = {
+        phase: currentPhase,
+        targetY: initialReturnTargetY,
+        releaseTimer: null,
+      };
+    }
 
     const scheduleSync = () => {
       if (rafId !== null) return;
@@ -915,7 +988,24 @@ export function StickyShell({
       window.removeEventListener("unseen:mobile-category-scroll-anchor", handleMobileCategoryScrollAnchor);
       window.visualViewport?.removeEventListener("resize", scheduleSync);
     };
-  }, [isMobileExperience, view]);
+  }, [currentPathWithQuery, isMobileExperience, view]);
+
+  useEffect(() => {
+    if (!isMobileExperience || view !== "grid") {
+      document.documentElement.removeAttribute("data-unseen-mobile-sticky-phase");
+      return;
+    }
+    const phaseAttr =
+      stickyCollapseProgress >= STICKY_PROGRESS_COMPACT - 0.05
+        ? "compact"
+        : stickyCollapseProgress >= STICKY_PROGRESS_MID - 0.05
+          ? "mid"
+          : "full";
+    document.documentElement.setAttribute("data-unseen-mobile-sticky-phase", phaseAttr);
+    return () => {
+      document.documentElement.removeAttribute("data-unseen-mobile-sticky-phase");
+    };
+  }, [isMobileExperience, stickyCollapseProgress, view]);
 
   useEffect(() => {
     if (!isMobileExperience) return;
@@ -1117,8 +1207,6 @@ export function StickyShell({
     openOverlaySurface("profile", { profileTab: "reference-sets", editFlow: null, origin: "menu" });
   };
 
-  const currentQuery = searchParams.toString();
-  const currentPathWithQuery = currentQuery ? `${pathname}?${currentQuery}` : pathname;
   const profileOverlayParams = new URLSearchParams({
     embed: "1",
     overlaySection: "profile",
@@ -1728,7 +1816,7 @@ export function StickyShell({
         </button>
 
 	                    <div className="relative h-full w-full translate-y-0 scale-100 bg-paper transition-transform duration-300 ease-out">
-		                    <div className={`absolute inset-x-0 top-0 z-10 ${isMobileExperience ? "px-4 pt-[14px]" : "px-10 pt-[24px]"}`}>
+		                    <div className={`absolute inset-x-0 top-0 z-10 ${isMobileExperience ? "px-4 pt-[22px]" : "px-10 pt-[24px]"}`}>
 	                      <div className="mx-auto w-full max-w-[1200px]">
               <p
                 className="text-center font-ui font-medium tracking-[0.02em] text-meta"
@@ -1773,7 +1861,7 @@ export function StickyShell({
             </div>
           </div>
 
-	                    <div className={`absolute inset-x-0 bottom-0 ${isMobileExperience ? "top-[106px]" : "top-[136px]"} overflow-hidden`}>
+	                    <div className={`absolute inset-x-0 bottom-0 ${isMobileExperience ? "top-[114px]" : "top-[136px]"} overflow-hidden`}>
             <iframe
               key={`profile-${activeProfileOverlayTab}`}
               src={profileOverlayHref}
@@ -1853,7 +1941,7 @@ export function StickyShell({
               >
                 {isCompactProfileOverlay ? (
 	                  <div className="relative h-full w-full translate-y-0 scale-100 bg-paper transition-transform duration-300 ease-out">
-	                    <div className={`absolute inset-x-0 top-0 z-10 ${isMobileExperience ? "px-4 pt-[14px]" : "px-10 pt-[24px]"}`}>
+	                    <div className={`absolute inset-x-0 top-0 z-10 ${isMobileExperience ? "px-4 pt-[22px]" : "px-10 pt-[24px]"}`}>
                       <div className="mx-auto w-full max-w-[1200px]">
                         <p
                           className="text-center font-ui font-medium tracking-[0.02em] text-meta"
@@ -1898,7 +1986,7 @@ export function StickyShell({
                       </div>
                     </div>
 
-                    <div className={`absolute inset-x-0 bottom-0 ${isMobileExperience ? "top-[104px]" : "top-[136px]"} overflow-hidden`}>
+                    <div className={`absolute inset-x-0 bottom-0 ${isMobileExperience ? "top-[112px]" : "top-[136px]"} overflow-hidden`}>
                       <iframe
                         key={`profile-${activeProfileOverlayTab}`}
                         src={profileOverlayHref}

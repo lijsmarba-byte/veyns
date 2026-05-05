@@ -4,6 +4,7 @@ import { GalleryRouteController } from "@/components/unseen/gallery/GalleryRoute
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
 import { GalleryShowAround } from "@/components/unseen/GalleryShowAround";
 import { GalleryArrivalReveal } from "@/components/unseen/GalleryArrivalReveal";
+import { MobileGridProductOverlayHost } from "@/components/unseen/MobileGridProductOverlayHost";
 import { RouteShellFallback } from "@/components/unseen/RouteShellFallback";
 import { sections } from "@/data/mockCatalog";
 
@@ -24,6 +25,7 @@ export default function GalleryPage() {
         <GalleryArrivalReveal />
         <GalleryShowAround />
         <GalleryRouteController sections={sections} />
+        <MobileGridProductOverlayHost mode="gallery" />
       </Suspense>
     </main>
   );

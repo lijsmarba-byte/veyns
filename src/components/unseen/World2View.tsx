@@ -15,7 +15,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { MockCatalogItem } from "@/data/mockCatalog";
 import { World2CategoryNav } from "@/components/unseen/World2CategoryNav";
 import { MobileFloatingCategoryPill } from "@/components/unseen/MobileFloatingCategoryPill";
-import { showProductTransitionHold, warmProductImage } from "@/components/unseen/productImagePreload";
+import { warmProductImage } from "@/components/unseen/productImagePreload";
 import { useViewportMode } from "@/lib/ui/viewportMode";
 
 export type World2CategoryKey = "OUTER" | "UPPER" | "LOWER" | "SILHOUETTE" | "GROUND" | "ARTIFACTS";
@@ -196,33 +196,6 @@ function detectSafariBrowser() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
   return /Safari\//.test(ua) && !/Chrome\/|CriOS\/|Chromium\/|Edg\//.test(ua);
-}
-
-function getContainRect(containerRect: DOMRect, aspectRatio: number) {
-  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
-    return containerRect;
-  }
-
-  const containerRatio = containerRect.width / Math.max(containerRect.height, 1);
-  if (aspectRatio > containerRatio) {
-    const fittedHeight = containerRect.width / aspectRatio;
-    const insetY = (containerRect.height - fittedHeight) / 2;
-    return {
-      left: containerRect.left,
-      top: containerRect.top + insetY,
-      width: containerRect.width,
-      height: fittedHeight,
-    };
-  }
-
-  const fittedWidth = containerRect.height * aspectRatio;
-  const insetX = (containerRect.width - fittedWidth) / 2;
-  return {
-    left: containerRect.left + insetX,
-    top: containerRect.top,
-    width: fittedWidth,
-    height: containerRect.height,
-  };
 }
 
 function readStickyHeight() {
@@ -867,9 +840,7 @@ export function World2View({
 
   useEffect(() => {
     const syncMobileViewport = () => {
-      const vvWidth = window.visualViewport?.width ?? 0;
-      const width = Math.max(window.innerWidth, document.documentElement.clientWidth, vvWidth);
-      setIsMobileViewport(width <= 760 || isIPadExperience);
+      setIsMobileViewport(isMobileExperience);
     };
 
     syncMobileViewport();
@@ -879,7 +850,7 @@ export function World2View({
       window.removeEventListener("resize", syncMobileViewport);
       window.visualViewport?.removeEventListener("resize", syncMobileViewport);
     };
-  }, [isIPadExperience]);
+  }, [isMobileExperience]);
 
   useEffect(() => {
     layoutRadiusRef.current = layout.radius;
@@ -1735,62 +1706,13 @@ export function World2View({
     const productViewHref = buildProductViewHref(entry);
     router.prefetch(productViewHref);
 
-    const imgEl = imageNode?.querySelector("img") as HTMLImageElement | null;
-    const containerRect = imageNode?.getBoundingClientRect() ?? null;
-    const imgRect = imgEl?.getBoundingClientRect() ?? null;
-    const aspectRatio =
-      imgEl && imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0
-        ? imgEl.naturalWidth / imgEl.naturalHeight
-        : undefined;
-    const containRect =
-      containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
-    const sourceRect = containRect ?? imgRect ?? containerRect;
-    if (!isMobileExperience) {
-      showProductTransitionHold(imageNode, entry.item.imgSrc, aspectRatio, entry.item.id);
-      if (sourceRect) {
-        try {
-          window.sessionStorage.setItem(
-            "unseen:product-view-transition",
-            JSON.stringify({
-              itemId: entry.item.id,
-              src: entry.item.imgSrc,
-              left: sourceRect.left,
-              top: sourceRect.top,
-              width: sourceRect.width,
-              height: sourceRect.height,
-              aspectRatio,
-              at: Date.now(),
-            }),
-          );
-        } catch {
-          // Transition is optional; ignore storage failures.
-        }
-      }
-    } else {
+    if (isMobileExperience) {
       try {
         window.sessionStorage.removeItem("unseen:product-view-transition");
         window.sessionStorage.removeItem("unseen:product-view-text-transition");
         window.sessionStorage.removeItem("unseen:return-focus-item");
         window.sessionStorage.removeItem("unseen:return-flight-finished-flag");
         document.getElementById("unseen-product-transition-source-hold")?.remove();
-      } catch {
-        // Transition is optional; ignore storage failures.
-      }
-    }
-
-    if (!isMobileExperience && containerRect) {
-      try {
-        window.sessionStorage.setItem(
-          "unseen:product-view-text-transition",
-          JSON.stringify({
-            itemId: entry.item.id,
-            left: containerRect.left,
-            top: containerRect.top,
-            width: containerRect.width,
-            height: containerRect.height,
-            at: Date.now(),
-          }),
-        );
       } catch {
         // Transition is optional; ignore storage failures.
       }

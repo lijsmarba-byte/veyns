@@ -21,7 +21,6 @@ import {
 import { GalleryHoverActions } from "@/components/unseen/GalleryHoverActions";
 import {
   nextAnimationFrame,
-  showProductTransitionHold,
   waitForProductImageDecode,
   warmProductImage,
 } from "@/components/unseen/productImagePreload";
@@ -227,39 +226,6 @@ function isPointerInCenteredHoverZone(
   const bottom = containerRect.bottom - insetY;
 
   return clientX >= left && clientX <= right && clientY >= top && clientY <= bottom;
-}
-
-function getContainRect(containerRect: DOMRect, aspectRatio: number) {
-  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
-    return containerRect;
-  }
-
-  const containerRatio = containerRect.width / Math.max(containerRect.height, 1);
-  if (aspectRatio > containerRatio) {
-    const fittedHeight = containerRect.width / aspectRatio;
-    const insetY = (containerRect.height - fittedHeight) / 2;
-    return {
-      left: containerRect.left,
-      top: containerRect.top + insetY,
-      width: containerRect.width,
-      height: fittedHeight,
-    };
-  }
-
-  const fittedWidth = containerRect.height * aspectRatio;
-  const insetX = (containerRect.width - fittedWidth) / 2;
-  return {
-    left: containerRect.left + insetX,
-    top: containerRect.top,
-    width: fittedWidth,
-    height: containerRect.height,
-  };
-}
-
-function getLoadedImageAspectRatio(image: HTMLImageElement | null) {
-  return image && image.naturalWidth > 0 && image.naturalHeight > 0
-    ? image.naturalWidth / image.naturalHeight
-    : undefined;
 }
 
 function getItemNumber(item: MockCatalogItem) {
@@ -575,7 +541,6 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const activeCapsule = mode === "archive" ? getCapsuleFromParams(searchParams) : null;
   const isVerticalFlow = true;
   const isFocusRoute = pathname.endsWith("/focus");
-  const focusLabelRef = useRef<HTMLParagraphElement | null>(null);
   const focusedImageRef = useRef<HTMLDivElement | null>(null);
   const isOpeningProductRef = useRef(false);
   const categoryCloseTimerRef = useRef<number | null>(null);
@@ -1505,33 +1470,6 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           return;
         }
 
-        const containerRect = imageNode?.getBoundingClientRect() ?? null;
-        const imgRect = imgEl?.getBoundingClientRect() ?? null;
-        const aspectRatio = getLoadedImageAspectRatio(imgEl);
-        const containRect =
-          containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
-        const sourceRect = containRect ?? imgRect ?? containerRect;
-        showProductTransitionHold(imageNode, item.imgSrc, aspectRatio, item.id);
-
-        if (sourceRect) {
-          try {
-            window.sessionStorage.setItem(
-              "unseen:product-view-transition",
-              JSON.stringify({
-                itemId: item.id,
-                src: item.imgSrc,
-                left: sourceRect.left,
-                top: sourceRect.top,
-                width: sourceRect.width,
-                height: sourceRect.height,
-                aspectRatio,
-                at: Date.now(),
-              }),
-            );
-          } catch {
-            // Transition is optional; ignore storage failures.
-          }
-        }
       } else {
         if (!imageNode?.isConnected) {
           isOpeningProductRef.current = false;
@@ -1545,25 +1483,6 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           document.getElementById("unseen-product-transition-source-hold")?.remove();
         } catch {
           // Optional cleanup failure is non-blocking.
-        }
-      }
-
-      if (!isMobileExperience && focusLabelRef.current) {
-        const textRect = focusLabelRef.current.getBoundingClientRect();
-        try {
-          window.sessionStorage.setItem(
-            "unseen:product-view-text-transition",
-            JSON.stringify({
-              itemId: item.id,
-              left: textRect.left,
-              top: textRect.top,
-              width: textRect.width,
-              height: textRect.height,
-              at: Date.now(),
-            }),
-          );
-        } catch {
-          // Transition is optional; ignore storage failures.
         }
       }
 
@@ -2571,10 +2490,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           }}
         >
           <div className="mx-auto flex w-full flex-col items-center gap-[3px] text-center text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
-            <p
-              ref={focusLabelRef}
-              className="inline-flex h-[22px] items-center justify-center font-ui text-meta"
-            >
+            <p className="inline-flex h-[22px] items-center justify-center font-ui text-meta">
               <span aria-hidden="true">|</span>
               <span className="px-[2px]">{focusedIdLabel}</span>
               <span aria-hidden="true">|</span>
@@ -2708,7 +2624,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         </div>
       ) : null}
 
-      {showGalleryCategoryNav ? (
+      {showGalleryCategoryNav && isMobileExperience ? (
         <MobileFloatingCategoryPill
           ariaLabel="Focus categories"
           enableDragSnap

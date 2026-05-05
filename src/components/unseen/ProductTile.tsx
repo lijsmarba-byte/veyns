@@ -1,11 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import type { MockCatalogItem } from "@/data/mockCatalog";
 import { GalleryHoverActions } from "@/components/unseen/GalleryHoverActions";
-import { showProductTransitionHold, warmProductImage } from "@/components/unseen/productImagePreload";
+import {
+  buildMobileGridOverlayPayload,
+  MOBILE_GRID_QUERY_BACK_KEY,
+  MOBILE_GRID_QUERY_EDIT_KEY,
+  MOBILE_GRID_QUERY_IMG_KEY,
+  MOBILE_GRID_QUERY_ITEM_KEY,
+  MOBILE_GRID_QUERY_MODE_KEY,
+  MOBILE_GRID_PRODUCT_OPEN_EVENT,
+} from "@/components/unseen/mobileGridProductOverlayEvent";
+import { warmProductImage } from "@/components/unseen/productImagePreload";
 import { useViewportMode } from "@/lib/ui/viewportMode";
 
 type ProductTileProps = {
@@ -15,64 +24,7 @@ type ProductTileProps = {
   issueNumber?: string;
 };
 
-const RETURN_FOCUS_ITEM_KEY = "unseen:return-focus-item";
-const RETURN_FLIGHT_FINISHED_EVENT = "unseen:return-flight-finished";
-const RETURN_FLIGHT_FINISHED_KEY = "unseen:return-flight-finished-flag";
-const DEFAULT_RETURN_REVEAL_DELAY_MS = 820;
 let hasPrefetchedProductViewRoute = false;
-
-type ReturnFocusPayload = {
-  at?: number;
-  hideUntil?: number;
-  itemId?: string;
-};
-
-function readReturnFocusDelayMs(itemId: string, consume = true) {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(RETURN_FOCUS_ITEM_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as ReturnFocusPayload;
-    const isFresh = typeof parsed.at === "number" && Date.now() - parsed.at < 90 * 1000;
-    if (!isFresh || parsed.itemId !== itemId) return null;
-
-    if (consume) {
-      window.sessionStorage.removeItem(RETURN_FOCUS_ITEM_KEY);
-    }
-    return typeof parsed.hideUntil === "number"
-      ? Math.max(0, Math.min(2000, parsed.hideUntil - Date.now()))
-      : DEFAULT_RETURN_REVEAL_DELAY_MS;
-  } catch {
-    return null;
-  }
-}
-
-function getContainRect(containerRect: DOMRect, aspectRatio: number) {
-  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
-    return containerRect;
-  }
-
-  const containerRatio = containerRect.width / Math.max(containerRect.height, 1);
-  if (aspectRatio > containerRatio) {
-    const fittedHeight = containerRect.width / aspectRatio;
-    const insetY = (containerRect.height - fittedHeight) / 2;
-    return {
-      left: containerRect.left,
-      top: containerRect.top + insetY,
-      width: containerRect.width,
-      height: fittedHeight,
-    };
-  }
-
-  const fittedWidth = containerRect.height * aspectRatio;
-  const insetX = (containerRect.width - fittedWidth) / 2;
-  return {
-    left: containerRect.left + insetX,
-    top: containerRect.top,
-    width: fittedWidth,
-    height: containerRect.height,
-  };
-}
 
 function getItemNumber(item: MockCatalogItem) {
   const fromIdxLabel = item.idxLabel.match(/\d+/)?.[0];
@@ -89,9 +41,7 @@ export function ProductTile({
 }: ProductTileProps) {
   const hasHoverActions = mode === "gallery" || mode === "archive";
   const [hoverResetKey, setHoverResetKey] = useState(0);
-  const [returnImageState, setReturnImageState] = useState({ delayMs: 0, hidden: false });
   const imageAreaRef = useRef<HTMLDivElement | null>(null);
-  const topLabelRef = useRef<HTMLParagraphElement | null>(null);
   const brandLabelRef = useRef<HTMLParagraphElement | null>(null);
   const prefetchedHrefRef = useRef<string | null>(null);
   const [isMobileBrandWrapped, setIsMobileBrandWrapped] = useState(false);
@@ -144,42 +94,6 @@ export function ProductTile({
     warmProductTransition();
   }, [imagePriority, warmProductTransition]);
 
-  useLayoutEffect(() => {
-    if (returnImageState.hidden) return;
-    const delayMs = readReturnFocusDelayMs(item.id, true);
-    if (delayMs === null) return;
-    setReturnImageState({ hidden: true, delayMs });
-  }, [item.id, returnImageState.hidden]);
-
-  useEffect(() => {
-    if (!returnImageState.hidden) return;
-    let isRevealed = false;
-    const revealImage = () => {
-      if (isRevealed) return;
-      isRevealed = true;
-      setReturnImageState((state) => (state.hidden ? { ...state, hidden: false } : state));
-    };
-
-    const timer = window.setTimeout(revealImage, returnImageState.delayMs || DEFAULT_RETURN_REVEAL_DELAY_MS);
-    const handleFlightFinished = () => {
-      revealImage();
-    };
-    window.addEventListener(RETURN_FLIGHT_FINISHED_EVENT, handleFlightFinished as EventListener);
-
-    try {
-      if (window.sessionStorage.getItem(RETURN_FLIGHT_FINISHED_KEY)) {
-        revealImage();
-      }
-    } catch {
-      // Keep timer fallback when storage is unavailable.
-    }
-
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener(RETURN_FLIGHT_FINISHED_EVENT, handleFlightFinished as EventListener);
-    };
-  }, [returnImageState.delayMs, returnImageState.hidden]);
-
   const syncMobileBrandWrap = useCallback(() => {
     const labelNode = brandLabelRef.current;
     if (!labelNode) return;
@@ -220,15 +134,6 @@ export function ProductTile({
       imgEl.style.filter = "none";
       imgEl.style.transition = "none";
     }
-    const containerRect = imageAreaRef.current?.getBoundingClientRect();
-    const imgRect = imgEl?.getBoundingClientRect();
-    const aspectRatio =
-      imgEl && imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0
-        ? imgEl.naturalWidth / imgEl.naturalHeight
-        : undefined;
-    const containRect =
-      containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
-    const rect = containRect ?? imgRect ?? containerRect;
     if (isMobileExperience) {
       try {
         window.sessionStorage.removeItem("unseen:product-view-transition");
@@ -239,60 +144,55 @@ export function ProductTile({
       } catch {
         // Ignore storage failures.
       }
-    } else {
-      showProductTransitionHold(imageAreaRef.current, item.imgSrc, aspectRatio, item.id);
-      if (rect) {
-        try {
-          window.sessionStorage.setItem(
-            "unseen:product-view-transition",
-            JSON.stringify({
-              itemId: item.id,
-              src: item.imgSrc,
-              left: rect.left,
-              top: rect.top,
-              width: rect.width,
-              height: rect.height,
-              aspectRatio,
-              at: Date.now(),
-            }),
-          );
-        } catch {
-          // Transition is optional; ignore storage failures.
-        }
+    }
+
+    const isMobileGridRoute = isMobileExperience && (pathname === "/gallery" || pathname === "/archive");
+    if (isMobileGridRoute) {
+      const payload = buildMobileGridOverlayPayload(item, mode, backHref, editParam);
+      const backUrl = new URL(backHref, window.location.origin);
+      backUrl.searchParams.set(MOBILE_GRID_QUERY_ITEM_KEY, item.id);
+      backUrl.searchParams.set(MOBILE_GRID_QUERY_MODE_KEY, mode);
+      backUrl.searchParams.set(MOBILE_GRID_QUERY_IMG_KEY, item.imgSrc);
+      backUrl.searchParams.set(MOBILE_GRID_QUERY_BACK_KEY, backHref);
+      if (editParam) {
+        backUrl.searchParams.set(MOBILE_GRID_QUERY_EDIT_KEY, editParam);
+      } else {
+        backUrl.searchParams.delete(MOBILE_GRID_QUERY_EDIT_KEY);
       }
-      const textRect = topLabelRef.current?.getBoundingClientRect();
-      if (textRect) {
-        try {
-          window.sessionStorage.setItem(
-            "unseen:product-view-text-transition",
-            JSON.stringify({
-              itemId: item.id,
-              left: textRect.left,
-              top: textRect.top,
-              width: textRect.width,
-              height: textRect.height,
-              at: Date.now(),
-            }),
-          );
-        } catch {
-          // Transition is optional; ignore storage failures.
-        }
+      try {
+        window.history.pushState(
+          {
+            unseenMobileGridOverlay: true,
+            overlayPayload: payload,
+          },
+          "",
+          backUrl.pathname + backUrl.search,
+        );
+      } catch {
+        router.push(payload.productViewHref);
+        return;
       }
+      window.dispatchEvent(
+        new CustomEvent(MOBILE_GRID_PRODUCT_OPEN_EVENT, {
+          detail: payload,
+        }),
+      );
+      return;
     }
 
     try {
-      if (!isMobileExperience) {
-        window.sessionStorage.setItem(
-          "unseen:return-scroll",
-          JSON.stringify({
-            at: Date.now(),
-            backHref,
-            scrollY: window.scrollY,
-          }),
-        );
-      } else {
-        window.sessionStorage.removeItem("unseen:return-scroll");
-      }
+      const stickyPhaseAttr = document.documentElement.getAttribute("data-unseen-mobile-sticky-phase");
+      const stickyPhase =
+        stickyPhaseAttr === "compact" ? 2 : stickyPhaseAttr === "mid" ? 1 : stickyPhaseAttr === "full" ? 0 : null;
+      window.sessionStorage.setItem(
+        "unseen:return-scroll",
+        JSON.stringify({
+          at: Date.now(),
+          backHref,
+          scrollY: window.scrollY,
+          ...(isMobileExperience && stickyPhase !== null ? { stickyPhase } : {}),
+        }),
+      );
     } catch {
       // Ignore storage failures.
     }
@@ -315,9 +215,7 @@ export function ProductTile({
       <div
         ref={imageAreaRef}
         data-product-tile-image-root="true"
-        className={`relative mx-auto h-[212px] w-full max-w-[162px] cursor-pointer min-[641px]:h-[280px] min-[641px]:max-w-[210px] ${
-          returnImageState.hidden ? "pointer-events-none opacity-0" : "opacity-100"
-        }`}
+        className="relative mx-auto h-[212px] w-full max-w-[162px] cursor-pointer min-[641px]:h-[280px] min-[641px]:max-w-[210px]"
         onPointerDown={warmProductTransition}
         onFocus={warmProductTransition}
         onClick={(event) => {
@@ -359,10 +257,7 @@ export function ProductTile({
         onFocus={warmProductTransition}
         onClick={openProductView}
       >
-        <p
-          ref={topLabelRef}
-          className="inline-flex h-[22px] items-center justify-center font-ui text-meta"
-        >
+        <p className="inline-flex h-[22px] items-center justify-center font-ui text-meta">
           <span aria-hidden="true">|</span>
           <span className="px-[2px]">{topLabel}</span>
           <span aria-hidden="true">|</span>

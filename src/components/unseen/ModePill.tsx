@@ -7,6 +7,8 @@ type ModePillProps = {
   selected: "gallery" | "archive";
 };
 
+const MODE_SWITCH_LOCK_MS = 260;
+
 export function ModePill({ selected }: ModePillProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -47,7 +49,7 @@ export function ModePill({ selected }: ModePillProps) {
     const resetTimer = window.setTimeout(() => {
       setIsSwitchingMode(false);
       switchingTargetRef.current = null;
-    }, 900);
+    }, MODE_SWITCH_LOCK_MS);
     return () => {
       window.clearTimeout(resetTimer);
     };

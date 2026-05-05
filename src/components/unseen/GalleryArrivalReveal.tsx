@@ -5,9 +5,13 @@ import { useEffect, useState } from "react";
 const GALLERY_ENTRY_ARRIVAL_KEY = "unseen:gallery-entry-arrival";
 const GALLERY_ARRIVAL_ACTIVE_KEY = "unseen:gallery-arrival-active";
 const MOBILE_GRID_PRODUCT_RETURN_KEY = "unseen:mobile-grid-product-return";
+const DESKTOP_GRID_PRODUCT_RETURN_KEY = "unseen:desktop-grid-product-return";
 const ARRIVAL_COMPLETE_EVENT = "unseen:gallery-arrival-complete";
 const ARRIVAL_DURATION_SIGNUP_MS = 2800;
 const ARRIVAL_DURATION_LOGIN_MS = 620;
+const MOBILE_GRID_RETURN_MASK_HOLD_MS = 220;
+const MOBILE_GRID_RETURN_MASK_FADE_MS = 150;
+type RevealVariant = "arrival" | "mobile-return";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -16,14 +20,16 @@ function clamp(value: number, min: number, max: number): number {
 export function GalleryArrivalReveal() {
   const [isActive, setIsActive] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [variant, setVariant] = useState<RevealVariant>("arrival");
 
   useEffect(() => {
     let rafId = 0;
     let settleTimer: number | null = null;
     let completionTimer: number | null = null;
+    let holdTimer: number | null = null;
     let completed = false;
 
-    const completeArrival = () => {
+    const completeArrival = (settleMs = 180) => {
       if (completed) return;
       completed = true;
 
@@ -42,6 +48,22 @@ export function GalleryArrivalReveal() {
     let arrivalDurationMs = ARRIVAL_DURATION_SIGNUP_MS;
     let isLoginArrival = false;
     try {
+      const rawDesktopProductReturn = window.sessionStorage.getItem(DESKTOP_GRID_PRODUCT_RETURN_KEY);
+      if (rawDesktopProductReturn) {
+        try {
+          const parsed = JSON.parse(rawDesktopProductReturn) as { at?: unknown };
+          const isFreshDesktopProductReturn = typeof parsed.at === "number" && Date.now() - parsed.at < 5000;
+          if (isFreshDesktopProductReturn) {
+            window.sessionStorage.removeItem(DESKTOP_GRID_PRODUCT_RETURN_KEY);
+            window.sessionStorage.removeItem(GALLERY_ENTRY_ARRIVAL_KEY);
+            window.sessionStorage.removeItem(GALLERY_ARRIVAL_ACTIVE_KEY);
+            return () => undefined;
+          }
+        } catch {
+          window.sessionStorage.removeItem(DESKTOP_GRID_PRODUCT_RETURN_KEY);
+        }
+      }
+
       const rawProductReturn = window.sessionStorage.getItem(MOBILE_GRID_PRODUCT_RETURN_KEY);
       if (rawProductReturn) {
         try {
@@ -51,6 +73,22 @@ export function GalleryArrivalReveal() {
             window.sessionStorage.removeItem(MOBILE_GRID_PRODUCT_RETURN_KEY);
             window.sessionStorage.removeItem(GALLERY_ENTRY_ARRIVAL_KEY);
             window.sessionStorage.removeItem(GALLERY_ARRIVAL_ACTIVE_KEY);
+            setVariant("mobile-return");
+            setIsActive(true);
+            setProgress(0);
+            holdTimer = window.setTimeout(() => {
+              const startedAt = performance.now();
+              const tick = (now: number) => {
+                const raw = clamp((now - startedAt) / MOBILE_GRID_RETURN_MASK_FADE_MS, 0, 1);
+                setProgress(raw);
+                if (raw < 1) {
+                  rafId = window.requestAnimationFrame(tick);
+                  return;
+                }
+                completeArrival(0);
+              };
+              rafId = window.requestAnimationFrame(tick);
+            }, MOBILE_GRID_RETURN_MASK_HOLD_MS);
             return () => undefined;
           }
         } catch {
@@ -102,10 +140,22 @@ export function GalleryArrivalReveal() {
       if (completionTimer !== null) {
         window.clearTimeout(completionTimer);
       }
+      if (holdTimer !== null) {
+        window.clearTimeout(holdTimer);
+      }
     };
   }, []);
 
   if (!isActive) return null;
+
+  if (variant === "mobile-return") {
+    const veilOpacity = 1 - progress;
+    return (
+      <div className="pointer-events-none fixed inset-0 z-[140]" aria-hidden="true">
+        <div className="absolute inset-0 bg-paper" style={{ opacity: veilOpacity }} />
+      </div>
+    );
+  }
 
   const blurPx = (1 - progress) * 7;
   const veilOpacity = (1 - progress) * 0.26;

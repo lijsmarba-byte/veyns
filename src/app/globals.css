@@ -97,6 +97,14 @@
     transition: opacity 120ms ease-out !important;
   }
 
+  html[data-unseen-mobile-grid-product-overlay-open="true"] [data-sticky-root="true"],
+  html[data-unseen-mobile-grid-product-overlay-open="true"] [data-mobile-floating-category-pill="true"],
+  html[data-unseen-mobile-grid-product-overlay-open="true"] [data-mobile-floating-category-cue="true"] {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: opacity 120ms ease-out !important;
+  }
+
   html[data-unseen-mobile-product-closing="true"]::view-transition-old(root),
   html[data-unseen-mobile-product-closing="true"]::view-transition-new(root) {
     animation: none !important;

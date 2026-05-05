@@ -195,7 +195,7 @@ export function GalleryEditNav({
       const plusRect = mobilePlusRef.current?.getBoundingClientRect();
       if (!rootRect || !plusRect) return;
       setMobileTrayPos({
-        left: plusRect.right - rootRect.left + 6,
+        left: plusRect.left - rootRect.left - 6,
         top: plusRect.top - rootRect.top + plusRect.height / 2 - MOBILE_PLUS_GLYPH_SHIFT_PX,
       });
     };
@@ -414,7 +414,7 @@ export function GalleryEditNav({
             style={{
               left: `${mobileTrayPos.left}px`,
               top: `${mobileTrayPos.top}px`,
-              transform: "translateY(-50%)",
+              transform: "translate(-100%, -50%)",
             }}
           >
             <div className="inline-flex h-[35px] items-center gap-[5px]">
