@@ -16,6 +16,9 @@ type ProductViewMobileProps = {
   backHref: string;
   brand: string;
   cues: string[];
+  disableEnterAnimation?: boolean;
+  disableGridReturnPrep?: boolean;
+  forceReplaceOnClose?: boolean;
   description: string;
   editId?: string | null;
   images: MobileProductImage[];
@@ -60,17 +63,9 @@ const MOBILE_CUE_MOVE_ACTIVATE_PX = 3;
 const MOBILE_BACKDROP_CLOSE_ARM_DELAY_MS = 420;
 const MOBILE_OVERLAY_OPEN_DURATION_MS = 260;
 const MOBILE_OVERLAY_TRANSITION_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
-const MOBILE_PRODUCT_CLOSE_ATTR = "data-unseen-mobile-product-closing";
-const MOBILE_PRODUCT_CLOSE_ATTR_CLEAR_MS = 900;
 const MOBILE_GRID_PRODUCT_RETURN_KEY = "unseen:mobile-grid-product-return";
 const IMMERSIVE_RETURN_STEADY_KEY = "unseen:immersive-return-steady";
 const RETURN_FOCUS_ITEM_KEY = "unseen:return-focus-item";
-const MOBILE_GRID_RETURN_FREEZE_ID = "unseen-mobile-grid-return-freeze";
-const MOBILE_GRID_RETURN_FREEZE_MAX_WAIT_MS = 900;
-const MOBILE_GRID_RETURN_FREEZE_HOLD_MS = 170;
-const MOBILE_GRID_RETURN_FREEZE_FADE_MS = 220;
-const MOBILE_PRODUCT_CLOSE_PREV_ROOT_VT_ATTR = "data-unseen-prev-root-vt";
-const MOBILE_PRODUCT_CLOSE_PREV_BODY_VT_ATTR = "data-unseen-prev-body-vt";
 const MOBILE_MAIN_IMAGE_SIZE = { width: 1094, height: 1237 };
 const MOBILE_DETAIL_IMAGE_SIZE = { width: 2160, height: 2441 };
 const MOBILE_IMAGE_LIMITS = [
@@ -127,7 +122,12 @@ function readSavedCapsuleId(itemId: string) {
 function isMobileProductViewHit(target: EventTarget | null) {
   if (!(target instanceof Node)) return false;
   const element = target instanceof Element ? target : target.parentElement;
-  return Boolean(element?.closest('[data-pv-mobile-hit="true"]'));
+  if (!element) return false;
+  return Boolean(
+    element.closest(
+      '[data-pv-mobile-close-guard="true"], [data-pv-mobile-scroll-region="true"], [data-pv-info-hit="true"]',
+    ),
+  );
 }
 
 function clampNumber(value: number, min: number, max: number) {
@@ -143,81 +143,12 @@ function isMobileImmersiveBackHref(backHref: string) {
   return backHref.includes("/focus") || backHref.includes("/immersive");
 }
 
-function createMobileGridReturnFreeze(sourceNode: HTMLElement | null) {
-  if (!sourceNode) return;
-
-  document.getElementById(MOBILE_GRID_RETURN_FREEZE_ID)?.remove();
-
-  const overlay = document.createElement("div");
-  overlay.id = MOBILE_GRID_RETURN_FREEZE_ID;
-  overlay.setAttribute("aria-hidden", "true");
-  overlay.style.position = "fixed";
-  overlay.style.inset = "0";
-  overlay.style.zIndex = "220";
-  overlay.style.width = "100vw";
-  overlay.style.height = "100dvh";
-  overlay.style.minHeight = "100svh";
-  overlay.style.overflow = "hidden";
-  overlay.style.pointerEvents = "none";
-  overlay.style.background = "var(--paper)";
-  overlay.style.opacity = "1";
-  overlay.style.contain = "layout paint style";
-  overlay.style.willChange = "opacity";
-
-  const clone = sourceNode.cloneNode(true) as HTMLElement;
-  clone.style.position = "absolute";
-  clone.style.left = "0";
-  clone.style.top = "0";
-  clone.style.zIndex = "0";
-  clone.style.width = "100vw";
-  clone.style.maxWidth = "100vw";
-  clone.style.height = "100dvh";
-  clone.style.minHeight = "100svh";
-  clone.style.opacity = "1";
-  clone.style.transform = "none";
-  clone.style.transition = "none";
-  clone.style.pointerEvents = "none";
-  clone.querySelectorAll("button, a, input, textarea, select").forEach((node) => {
-    if (node instanceof HTMLElement) {
-      node.setAttribute("tabindex", "-1");
-    }
-  });
-  overlay.appendChild(clone);
-  document.body.appendChild(overlay);
-
-  const startedAt = performance.now();
-  let didFade = false;
-  const fadeWhenGridIsReady = () => {
-    if (didFade) return;
-    const hasGridReturned = Boolean(document.querySelector('[data-grid-root="true"]'));
-    const hasWaitedLongEnough = performance.now() - startedAt >= MOBILE_GRID_RETURN_FREEZE_MAX_WAIT_MS;
-    if (!hasGridReturned && !hasWaitedLongEnough) {
-      window.requestAnimationFrame(fadeWhenGridIsReady);
-      return;
-    }
-
-    didFade = true;
-    window.setTimeout(() => {
-      overlay.style.transition = `opacity ${MOBILE_GRID_RETURN_FREEZE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
-      overlay.style.opacity = "0";
-      window.setTimeout(() => overlay.remove(), MOBILE_GRID_RETURN_FREEZE_FADE_MS + 80);
-    }, MOBILE_GRID_RETURN_FREEZE_HOLD_MS);
-  };
-
-  window.requestAnimationFrame(fadeWhenGridIsReady);
-}
-
-function prepareMobileProductClose(backHref: string, sourceNode: HTMLElement | null) {
+function prepareMobileProductClose(backHref: string) {
   if (typeof window === "undefined") return;
   if (!isMobileGridBackHref(backHref)) return;
-  const root = document.documentElement;
-  const body = document.body;
-  createMobileGridReturnFreeze(sourceNode);
-  root.setAttribute(MOBILE_PRODUCT_CLOSE_ATTR, "true");
-  root.setAttribute(MOBILE_PRODUCT_CLOSE_PREV_ROOT_VT_ATTR, root.style.getPropertyValue("view-transition-name"));
-  body.setAttribute(MOBILE_PRODUCT_CLOSE_PREV_BODY_VT_ATTR, body.style.getPropertyValue("view-transition-name"));
-  root.style.setProperty("view-transition-name", "none", "important");
-  body.style.setProperty("view-transition-name", "none", "important");
+  // Grid return should follow the same deterministic close feel as focus/immersive:
+  // no freeze-layer choreography that can introduce image flash on mobile browsers.
+  // We still keep the return marker for arrival-reveal gating.
   try {
     window.sessionStorage.setItem(
       MOBILE_GRID_PRODUCT_RETURN_KEY,
@@ -229,23 +160,6 @@ function prepareMobileProductClose(backHref: string, sourceNode: HTMLElement | n
   } catch {
     // Optional return polish only.
   }
-  window.setTimeout(() => {
-    const prevRootViewTransition = root.getAttribute(MOBILE_PRODUCT_CLOSE_PREV_ROOT_VT_ATTR);
-    const prevBodyViewTransition = body.getAttribute(MOBILE_PRODUCT_CLOSE_PREV_BODY_VT_ATTR);
-    if (prevRootViewTransition) {
-      root.style.setProperty("view-transition-name", prevRootViewTransition);
-    } else {
-      root.style.removeProperty("view-transition-name");
-    }
-    if (prevBodyViewTransition) {
-      body.style.setProperty("view-transition-name", prevBodyViewTransition);
-    } else {
-      body.style.removeProperty("view-transition-name");
-    }
-    root.removeAttribute(MOBILE_PRODUCT_CLOSE_PREV_ROOT_VT_ATTR);
-    body.removeAttribute(MOBILE_PRODUCT_CLOSE_PREV_BODY_VT_ATTR);
-    root.removeAttribute(MOBILE_PRODUCT_CLOSE_ATTR);
-  }, MOBILE_PRODUCT_CLOSE_ATTR_CLEAR_MS);
 }
 
 function MobileActionRow({
@@ -435,6 +349,9 @@ export function ProductViewMobile({
   backHref,
   brand,
   cues,
+  disableEnterAnimation = false,
+  disableGridReturnPrep = false,
+  forceReplaceOnClose = false,
   description,
   editId,
   images,
@@ -469,7 +386,7 @@ export function ProductViewMobile({
   const brandTextRef = useRef<HTMLParagraphElement | null>(null);
   const preOwnedTagRef = useRef<HTMLSpanElement | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
-  const [isEntered, setIsEntered] = useState(false);
+  const [isEntered, setIsEntered] = useState(disableEnterAnimation);
   const [isReducingMotion, setIsReducingMotion] = useState(false);
   const [isMobileCueVisible, setIsMobileCueVisible] = useState(false);
   const [activeMobileCueIndex, setActiveMobileCueIndex] = useState(0);
@@ -480,7 +397,9 @@ export function ProductViewMobile({
   const close = useCallback(() => {
     if (closeRequestedRef.current) return;
     closeRequestedRef.current = true;
-    prepareMobileProductClose(backHref, productViewRootRef.current);
+    if (!disableGridReturnPrep) {
+      prepareMobileProductClose(backHref);
+    }
     if (isMobileImmersiveBackHref(backHref)) {
       try {
         window.sessionStorage.setItem(
@@ -495,12 +414,12 @@ export function ProductViewMobile({
         // Optional return polish only.
       }
     }
-    if (window.history.length > 1) {
+    if (!forceReplaceOnClose && window.history.length > 1) {
       window.history.back();
       return;
     }
     router.replace(backHref, { scroll: false });
-  }, [backHref, router]);
+  }, [backHref, disableGridReturnPrep, forceReplaceOnClose, router]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -520,10 +439,12 @@ export function ProductViewMobile({
     } else {
       reduceMotionQuery.addListener(onReduceMotionChange);
     }
-    if (!reduceMotionQuery.matches) {
+    if (!reduceMotionQuery.matches && !disableEnterAnimation) {
       enterRafRef.current = window.requestAnimationFrame(() => {
         setIsEntered(true);
       });
+    } else {
+      setIsEntered(true);
     }
 
     return () => {
@@ -548,7 +469,7 @@ export function ProductViewMobile({
         mobileCueActivationTimerRef.current = null;
       }
     };
-  }, [backHref, router]);
+  }, [backHref, disableEnterAnimation, router]);
 
   useEffect(() => {
     const resetSwipe = () => {
@@ -838,7 +759,13 @@ export function ProductViewMobile({
   };
 
   const titleToneClass = isArchiveMode ? "text-accent" : "text-ink";
-  const overlayStyle = isReducingMotion
+  const overlayStyle = disableEnterAnimation
+    ? {
+        opacity: 1,
+        transform: "scale(1)",
+        transition: "none",
+      }
+    : isReducingMotion
     ? {
         opacity: 1,
         transform: "scale(1)",
@@ -853,7 +780,7 @@ export function ProductViewMobile({
   return (
     <main
       ref={productViewRootRef}
-      className="fixed left-0 top-0 z-40 block overflow-hidden overscroll-none bg-paper text-ink md:hidden"
+      className="fixed left-0 top-0 z-[1600] block overflow-hidden overscroll-none bg-paper text-ink md:hidden"
       style={{
         width: "100vw",
         maxWidth: "100vw",
@@ -885,13 +812,18 @@ export function ProductViewMobile({
           <button
             type="button"
             data-pv-mobile-hit="true"
+            data-pv-mobile-close-guard="true"
             aria-label="Close preview"
             className="fixed z-50 inline-flex h-[14px] w-[20px] items-center justify-center text-meta"
             style={{
               right: "calc(env(safe-area-inset-right, 0px) + 16px)",
-              top: "calc(env(safe-area-inset-top, 0px) + 27px)",
+              top: "calc(env(safe-area-inset-top, 0px) + 31px)",
             }}
             onClick={close}
+            onTouchEnd={(event) => {
+              event.preventDefault();
+              close();
+            }}
           >
             <span aria-hidden="true" className="absolute left-1/2 block h-[1.5px] w-[20px] -translate-x-1/2 rotate-45 rounded-full bg-current" />
             <span aria-hidden="true" className="absolute left-1/2 block h-[1.5px] w-[20px] -translate-x-1/2 -rotate-45 rounded-full bg-current" />
@@ -904,6 +836,7 @@ export function ProductViewMobile({
           style={{ transform: "translateY(-16px)" }}
         >
           <div
+            data-pv-mobile-close-guard="true"
             className="relative h-full w-full min-w-0 touch-pan-y select-none overflow-visible"
             onTouchStart={handleImageTouchStart}
             onTouchMove={handleImageTouchMove}

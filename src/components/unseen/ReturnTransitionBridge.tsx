@@ -25,17 +25,11 @@ function getStickyBottomOffset() {
 
 export function ReturnTransitionBridge() {
   const overlayRef = useRef<HTMLDivElement | null>(null);
-  const holdTimerRef = useRef<number | null>(null);
   const cleanupTimerRef = useRef<number | null>(null);
-  const raiseAnimRef = useRef<Animation | null>(null);
-  const fallAnimRef = useRef<Animation | null>(null);
+  const motionRef = useRef<Animation | null>(null);
 
   useEffect(() => {
     const clearTimers = () => {
-      if (holdTimerRef.current !== null) {
-        window.clearTimeout(holdTimerRef.current);
-        holdTimerRef.current = null;
-      }
       if (cleanupTimerRef.current !== null) {
         window.clearTimeout(cleanupTimerRef.current);
         cleanupTimerRef.current = null;
@@ -43,20 +37,16 @@ export function ReturnTransitionBridge() {
     };
 
     const clearAnimations = () => {
-      raiseAnimRef.current?.cancel();
-      fallAnimRef.current?.cancel();
-      raiseAnimRef.current = null;
-      fallAnimRef.current = null;
+      motionRef.current?.cancel();
+      motionRef.current = null;
     };
 
     const handleStart = (event: Event) => {
       const detail = (event as CustomEvent<ReturnTransitionDetail>).detail ?? {};
-      const raiseMs = Math.max(40, detail.raiseMs ?? 110);
-      const holdMs = Math.max(0, detail.holdMs ?? 180);
-      const fallMs = Math.max(120, detail.fallMs ?? 2350);
-      const targetOpacity = Math.max(0, Math.min(0.95, detail.targetOpacity ?? 0.08));
-      const riseEase = "cubic-bezier(0.2, 0.88, 0.24, 1)";
-      const fallEase = "cubic-bezier(0.23, 0.84, 0.18, 1)";
+      const raiseMs = Math.max(30, detail.raiseMs ?? 90);
+      const holdMs = Math.max(0, detail.holdMs ?? 40);
+      const fallMs = Math.max(120, detail.fallMs ?? 220);
+      const targetOpacity = Math.max(0, Math.min(0.24, detail.targetOpacity ?? 0.06));
       const overlay = overlayRef.current;
       if (!overlay) return;
       const stickyBottom = getStickyBottomOffset();
@@ -75,53 +65,39 @@ export function ReturnTransitionBridge() {
       overlay.style.willChange = "opacity";
 
       window.requestAnimationFrame(() => {
-        raiseAnimRef.current = overlay.animate(
+        motionRef.current = overlay.animate(
           [
             { opacity: 0 },
-            { opacity: targetOpacity },
-          ],
-          {
-            duration: raiseMs,
-            easing: riseEase,
-            fill: "forwards",
-          },
-        );
-      });
-
-      holdTimerRef.current = window.setTimeout(() => {
-        fallAnimRef.current = overlay.animate(
-          [
-            { opacity: targetOpacity },
-            { opacity: targetOpacity * 0.92, offset: 0.28 },
-            { opacity: targetOpacity * 0.62, offset: 0.62 },
-            { opacity: targetOpacity * 0.24, offset: 0.9 },
+            { opacity: targetOpacity, offset: raiseMs / Math.max(1, raiseMs + holdMs + fallMs) },
+            { opacity: targetOpacity, offset: (raiseMs + holdMs) / Math.max(1, raiseMs + holdMs + fallMs) },
             { opacity: 0 },
           ],
           {
-            duration: fallMs,
-            easing: fallEase,
+            duration: raiseMs + holdMs + fallMs,
+            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
             fill: "forwards",
           },
         );
-        fallAnimRef.current.addEventListener(
+        motionRef.current.addEventListener(
           "finish",
           () => {
             overlay.style.opacity = "0";
-            overlay.style.backdropFilter = "none";
-            overlay.style.setProperty("-webkit-backdrop-filter", "none");
+            overlay.style.willChange = "";
+            overlay.style.top = "";
+            overlay.style.height = "";
+            clearAnimations();
           },
           { once: true },
         );
-      }, holdMs);
+      });
 
       cleanupTimerRef.current = window.setTimeout(() => {
+        overlay.style.opacity = "0";
         overlay.style.willChange = "";
-        overlay.style.backdropFilter = "none";
-        overlay.style.setProperty("-webkit-backdrop-filter", "none");
         overlay.style.top = "";
         overlay.style.height = "";
         clearAnimations();
-      }, holdMs + fallMs + 120);
+      }, raiseMs + holdMs + fallMs + 80);
     };
 
     window.addEventListener("unseen:return-transition-start", handleStart as EventListener);

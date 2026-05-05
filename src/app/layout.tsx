@@ -3,7 +3,6 @@ import localFont from "next/font/local";
 import { BrowserEnvSync } from "@/components/unseen/BrowserEnvSync";
 import { BrowserCompatibilityNotice } from "@/components/unseen/BrowserCompatibilityNotice";
 import { MobileZoomGuard } from "@/components/unseen/MobileZoomGuard";
-import { ProductTransitionOverlayHost } from "@/components/unseen/ProductTransitionOverlayHost";
 import { ReturnTransitionBridge } from "@/components/unseen/ReturnTransitionBridge";
 import "./globals.css";
 
@@ -94,7 +93,6 @@ export default function RootLayout({
         <BrowserEnvSync />
         <MobileZoomGuard />
         <BrowserCompatibilityNotice />
-        <ProductTransitionOverlayHost />
         {children}
         <ReturnTransitionBridge />
       </body>

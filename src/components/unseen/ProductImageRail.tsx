@@ -3,11 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
 import Image from "next/image";
 import {
-  clearProductTransitionHold,
-  completeProductTransitionHold,
   nextAnimationFrame,
-  waitForProductImageDecode,
-  warmProductImage,
 } from "@/components/unseen/productImagePreload";
 import { useViewportMode } from "@/lib/ui/viewportMode";
 
@@ -30,9 +26,6 @@ const PRIMARY_IMAGE_BASE_WIDTH = 560;
 const SECONDARY_IMAGE_BASE_WIDTH = 562;
 const STACKED_TEXT_COLUMN_WIDTH = 460;
 const DEFAULT_VIEWPORT_SIZE = { width: 1440, height: 900 };
-const ENTER_SCROLL_LOCK_KEY = "unseen:enter-scroll-lock";
-const ENTER_SCROLL_INTENT_KEY = "unseen:enter-scroll-intent";
-const ENTER_PREV_BODY_PADDING_ATTR = "data-unseen-enter-prev-pr";
 const IPAD_PREV_SCROLL_Y_ATTR = "data-unseen-ipad-pv-scroll-y";
 const IPAD_PREV_BODY_POSITION_ATTR = "data-unseen-ipad-pv-prev-position";
 const IPAD_PREV_BODY_TOP_ATTR = "data-unseen-ipad-pv-prev-top";
@@ -42,87 +35,6 @@ const IPAD_VERTICAL_SWIPE_INTENT_PX = 14;
 const IPAD_VERTICAL_SWIPE_COMMIT_PX = 62;
 const IPAD_VERTICAL_SWIPE_MAX_HORIZONTAL_PX = 64;
 const IPAD_VERTICAL_SWIPE_CUE_BLOCK_EXTRA_PX = 36;
-
-function lockPageScrollForEnter() {
-  if (typeof window === "undefined") return;
-  const root = document.documentElement;
-  const body = document.body;
-  const prevBodyPaddingRight = body.style.paddingRight;
-  body.setAttribute(ENTER_PREV_BODY_PADDING_ATTR, prevBodyPaddingRight);
-
-  const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
-  if (scrollbarWidth > 0) {
-    const computedBodyPaddingRight = Number.parseFloat(window.getComputedStyle(body).paddingRight);
-    const safeBodyPaddingRight = Number.isFinite(computedBodyPaddingRight) ? computedBodyPaddingRight : 0;
-    body.style.paddingRight = `${safeBodyPaddingRight + scrollbarWidth}px`;
-  }
-
-  try {
-    window.sessionStorage.setItem(ENTER_SCROLL_LOCK_KEY, "1");
-    window.sessionStorage.setItem(ENTER_SCROLL_INTENT_KEY, "0");
-  } catch {
-    // Non-critical.
-  }
-  root.style.overflow = "hidden";
-  body.style.overflow = "hidden";
-  root.style.overscrollBehavior = "none";
-  body.style.overscrollBehavior = "none";
-  root.style.touchAction = "none";
-  body.style.touchAction = "none";
-}
-
-function unlockPageScrollForEnter() {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.removeItem(ENTER_SCROLL_LOCK_KEY);
-    window.sessionStorage.removeItem(ENTER_SCROLL_INTENT_KEY);
-  } catch {
-    // Non-critical.
-  }
-  const root = document.documentElement;
-  const body = document.body;
-  root.style.overflow = "";
-  body.style.overflow = "";
-  root.style.overscrollBehavior = "";
-  body.style.overscrollBehavior = "";
-  root.style.touchAction = "";
-  body.style.touchAction = "";
-
-  const prevBodyPaddingRight = body.getAttribute(ENTER_PREV_BODY_PADDING_ATTR);
-  if (prevBodyPaddingRight !== null) {
-    body.style.paddingRight = prevBodyPaddingRight;
-    body.removeAttribute(ENTER_PREV_BODY_PADDING_ATTR);
-  } else {
-    body.style.paddingRight = "";
-  }
-}
-
-function readTransitionAspectRatio(productId: string) {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem("unseen:product-view-transition");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { at?: number; aspectRatio?: number; itemId?: string };
-    const isFresh = typeof parsed.at === "number" && Date.now() - parsed.at < 30 * 60 * 1000;
-    if (!isFresh || parsed.itemId !== productId) return null;
-    if (!Number.isFinite(parsed.aspectRatio) || (parsed.aspectRatio ?? 0) <= 0) return null;
-    return parsed.aspectRatio as number;
-  } catch {
-    return null;
-  }
-}
-
-function hasFreshProductTransitionPayload(productId: string) {
-  if (typeof window === "undefined") return false;
-  try {
-    const raw = window.sessionStorage.getItem("unseen:product-view-transition");
-    if (!raw) return false;
-    const parsed = JSON.parse(raw) as { at?: number; itemId?: string };
-    return typeof parsed.at === "number" && Date.now() - parsed.at < 6000 && parsed.itemId === productId;
-  } catch {
-    return false;
-  }
-}
 
 function getContainRect(containerRect: DOMRect, aspectRatio: number) {
   if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
@@ -166,19 +78,6 @@ function interpolateClamped(value: number, start: number, end: number, startValu
   return startValue + (endValue - startValue) * progress;
 }
 
-function readProductViewBackHref() {
-  if (typeof window === "undefined") return "";
-  try {
-    return new URLSearchParams(window.location.search).get("back") ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function isImmersiveBackHref(backHref: string) {
-  return /\/immersive(?:$|[?#])/.test(backHref);
-}
-
 export function ProductImageRail({
   images,
   cues,
@@ -186,10 +85,10 @@ export function ProductImageRail({
   productId,
   disableMainImageTopLift = false,
 }: ProductImageRailProps) {
-  const { isIPadExperience } = useViewportMode();
-  const ENTER_DURATION_MS = 640;
-  const ENTER_END_HOLD_MS = 0;
-  const ENTER_CROSSFADE_MS = 220;
+  const { isIPadExperience, isMobileExperience } = useViewportMode();
+  const useLegacyIpadInteractionStage = true;
+  const ENTER_OPACITY_MS = 360;
+  const ENTER_TRANSFORM_MS = 440;
   const railRef = useRef<HTMLDivElement | null>(null);
   const iPadStageRef = useRef<HTMLDivElement | null>(null);
   const firstImageRef = useRef<HTMLDivElement | null>(null);
@@ -221,6 +120,7 @@ export function ProductImageRail({
   const [railViewportBounds, setRailViewportBounds] = useState({ left: 0, width: 0 });
   const [viewportSize, setViewportSize] = useState(DEFAULT_VIEWPORT_SIZE);
   const [hasMeasuredViewport, setHasMeasuredViewport] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
   const [isCueVisible, setIsCueVisible] = useState(false);
   const [activeCueIndex, setActiveCueIndex] = useState(0);
   const [previousCueText, setPreviousCueText] = useState<string | null>(null);
@@ -548,6 +448,10 @@ export function ProductImageRail({
   }, []);
 
   useEffect(() => {
+    setHasHydrated(true);
+  }, []);
+
+  useEffect(() => {
     cueActiveIndexRef.current = activeCueIndex;
   }, [activeCueIndex]);
 
@@ -565,9 +469,36 @@ export function ProductImageRail({
     };
   }, []);
 
-  useLayoutEffect(() => {
-    setMainImageAspectRatio(readTransitionAspectRatio(productId) ?? DEFAULT_MAIN_ASPECT_RATIO);
-  }, [hasMeasuredViewport, productId]);
+  useEffect(() => {
+    const firstImageSrc = images[0]?.src;
+    if (!firstImageSrc) {
+      setMainImageAspectRatio(DEFAULT_MAIN_ASPECT_RATIO);
+      return;
+    }
+
+    let didCancel = false;
+    const probe = new window.Image();
+    probe.onload = () => {
+      if (didCancel) return;
+      if (probe.naturalWidth > 0 && probe.naturalHeight > 0) {
+        setMainImageAspectRatio(probe.naturalWidth / probe.naturalHeight);
+      } else {
+        setMainImageAspectRatio(DEFAULT_MAIN_ASPECT_RATIO);
+      }
+    };
+    probe.onerror = () => {
+      if (!didCancel) {
+        setMainImageAspectRatio(DEFAULT_MAIN_ASPECT_RATIO);
+      }
+    };
+    probe.src = firstImageSrc;
+
+    return () => {
+      didCancel = true;
+      probe.onload = null;
+      probe.onerror = null;
+    };
+  }, [images]);
 
   useEffect(() => {
     const syncSavedState = () => {
@@ -603,483 +534,78 @@ export function ProductImageRail({
 
   useLayoutEffect(() => {
     const root = firstImageRef.current;
-    if (!root || hasMeasuredViewport) return;
-    if (!hasFreshProductTransitionPayload(productId)) return;
+    if (!root || hasMeasuredViewport || isMobileExperience) return;
 
     root.style.transition = "none";
     root.style.opacity = "0";
     root.style.willChange = "opacity";
-  }, [hasMeasuredViewport, productId]);
+  }, [hasMeasuredViewport, isMobileExperience]);
 
   useLayoutEffect(() => {
-    if (!hasMeasuredViewport) return;
+    if (!hasMeasuredViewport || isMobileExperience) return;
 
-    let cleanupTimer: number | null = null;
-    let unlockFallbackTimer: number | null = null;
     const root = firstImageRef.current;
-    const image = root?.querySelector("img") as HTMLImageElement | null;
-    let overlay: HTMLDivElement | null = null;
-    let overlayMotion: Animation | null = null;
-    let removeImageReadyListeners: (() => void) | null = null;
-    let removeIntentListeners: (() => void) | null = null;
-    let assistRafId: number | null = null;
-    let assistInputDetachTimer: number | null = null;
-    let assistVelocity = 0;
-    let assistUntil = 0;
-    let assistLastTs = 0;
-    let pendingScrollIntent = 0;
-    let pendingScrollIntentAt = 0;
-    let pendingScrollMagnitude = 16;
-    let touchStartY: number | null = null;
-    let hasEnterScrollLock = false;
-    let didComplete = false;
+    let cleanupTimer: number | null = null;
+    let raf1: number | null = null;
+    let raf2: number | null = null;
     let didCancel = false;
-    setAreCuesEnabled(true);
-
-    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-    const normalizeMagnitude = (delta: number) => clamp(Math.abs(delta), 8, 120);
-
-    const feedAssistInput = (delta: number) => {
-      const direction = delta > 0 ? 1 : -1;
-      const magnitude = normalizeMagnitude(delta);
-      const velocityBoost = 0.12 + magnitude * 0.0075;
-      assistVelocity = clamp(assistVelocity * 0.78 + direction * velocityBoost, -2.8, 2.8);
-      assistUntil = Math.max(assistUntil, performance.now() + 900);
-    };
-
-    const startAssistScroll = (direction: number, intentAt: number, magnitude: number) => {
-      const now = Date.now();
-      const age = now - intentAt;
-      const freshFactor = age < 600 ? 1 : age < 1200 ? 0.82 : 0.68;
-      const baseVelocity = clamp((0.28 + magnitude * 0.0115) * freshFactor, 0.38, 2.4);
-      assistVelocity = direction * baseVelocity;
-      assistUntil = performance.now() + 1050;
-      assistLastTs = 0;
-
-      const handleAssistWheel = (event: WheelEvent) => {
-        if (Math.abs(event.deltaY) < 0.5) return;
-        feedAssistInput(event.deltaY);
-      };
-      const handleAssistTouchStart = (event: TouchEvent) => {
-        const touch = event.touches[0];
-        touchStartY = touch ? touch.clientY : null;
-      };
-      const handleAssistTouchMove = (event: TouchEvent) => {
-        const touch = event.touches[0];
-        if (!touch || touchStartY === null) return;
-        const delta = touchStartY - touch.clientY;
-        touchStartY = touch.clientY;
-        if (Math.abs(delta) < 0.5) return;
-        feedAssistInput(delta);
-      };
-      const handleAssistKey = (event: KeyboardEvent) => {
-        if (["ArrowDown", "PageDown", " ", "End"].includes(event.key)) {
-          feedAssistInput(18);
-          return;
-        }
-        if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
-          feedAssistInput(-18);
-        }
-      };
-      const detachAssistInput = () => {
-        window.removeEventListener("wheel", handleAssistWheel);
-        window.removeEventListener("touchstart", handleAssistTouchStart);
-        window.removeEventListener("touchmove", handleAssistTouchMove);
-        window.removeEventListener("keydown", handleAssistKey);
-      };
-      window.addEventListener("wheel", handleAssistWheel, { passive: true });
-      window.addEventListener("touchstart", handleAssistTouchStart, { passive: true });
-      window.addEventListener("touchmove", handleAssistTouchMove, { passive: true });
-      window.addEventListener("keydown", handleAssistKey);
-      assistInputDetachTimer = window.setTimeout(() => {
-        detachAssistInput();
-        assistInputDetachTimer = null;
-      }, 1300);
-
-      const tick = (ts: number) => {
-        const dt = assistLastTs > 0 ? Math.min(34, Math.max(0, ts - assistLastTs)) : 16;
-        assistLastTs = ts;
-        const active = ts <= assistUntil;
-        const damping = active ? 0.92 : 0.85;
-        assistVelocity *= damping;
-        const step = assistVelocity * dt;
-        if (Math.abs(step) > 0.01) {
-          window.scrollBy({ top: step, left: 0, behavior: "auto" });
-        }
-        if (Math.abs(assistVelocity) > 0.035 || active) {
-          assistRafId = window.requestAnimationFrame(tick);
-        } else {
-          assistRafId = null;
-          if (assistInputDetachTimer !== null) {
-            window.clearTimeout(assistInputDetachTimer);
-            assistInputDetachTimer = null;
-          }
-          detachAssistInput();
-        }
-      };
-
-      assistRafId = window.requestAnimationFrame(tick);
-    };
-
-    const rememberScrollIntent = (delta: number) => {
-      if (!hasEnterScrollLock) return;
-      if (Math.abs(delta) < 1) return;
-      const magnitude = normalizeMagnitude(delta);
-      pendingScrollIntent = delta > 0 ? 1 : -1;
-      pendingScrollIntentAt = Date.now();
-      pendingScrollMagnitude = magnitude;
-      try {
-        window.sessionStorage.setItem(
-          ENTER_SCROLL_INTENT_KEY,
-          JSON.stringify({
-            direction: pendingScrollIntent,
-            at: pendingScrollIntentAt,
-            magnitude,
-          }),
-        );
-      } catch {
-        // Non-critical.
-      }
-    };
-
-    const startEnterIntentCapture = () => {
-      const onWheel = (event: WheelEvent) => {
-        rememberScrollIntent(event.deltaY);
-      };
-      const onTouchStart = (event: TouchEvent) => {
-        const touch = event.touches[0];
-        touchStartY = touch ? touch.clientY : null;
-      };
-      const onTouchMove = (event: TouchEvent) => {
-        const touch = event.touches[0];
-        if (!touch || touchStartY === null) return;
-        const delta = touchStartY - touch.clientY;
-        touchStartY = touch.clientY;
-        rememberScrollIntent(delta);
-      };
-      const onKeyDown = (event: KeyboardEvent) => {
-        if (["ArrowDown", "PageDown", " ", "End"].includes(event.key)) {
-          rememberScrollIntent(1);
-          return;
-        }
-        if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
-          rememberScrollIntent(-1);
-        }
-      };
-
-      window.addEventListener("wheel", onWheel, { passive: true });
-      window.addEventListener("touchstart", onTouchStart, { passive: true });
-      window.addEventListener("touchmove", onTouchMove, { passive: true });
-      window.addEventListener("keydown", onKeyDown);
-      removeIntentListeners = () => {
-        window.removeEventListener("wheel", onWheel);
-        window.removeEventListener("touchstart", onTouchStart);
-        window.removeEventListener("touchmove", onTouchMove);
-        window.removeEventListener("keydown", onKeyDown);
-      };
-    };
-
-    const releaseEnterScrollLock = () => {
-      if (!hasEnterScrollLock) return;
-      hasEnterScrollLock = false;
-      if (unlockFallbackTimer !== null) {
-        window.clearTimeout(unlockFallbackTimer);
-        unlockFallbackTimer = null;
-      }
-      removeIntentListeners?.();
-      removeIntentListeners = null;
-      unlockPageScrollForEnter();
-      if (pendingScrollIntent !== 0) {
-        const direction = pendingScrollIntent;
-        const intentAt = pendingScrollIntentAt || Date.now();
-        const magnitude = pendingScrollMagnitude;
-        pendingScrollIntent = 0;
-        pendingScrollIntentAt = 0;
-        pendingScrollMagnitude = 16;
-        window.requestAnimationFrame(() => {
-          startAssistScroll(direction, intentAt, magnitude);
-        });
-      }
-    };
 
     const clearStyles = () => {
       if (!root) return;
       root.style.opacity = "";
       root.style.transition = "";
       root.style.transform = "";
-      root.style.transformOrigin = "";
       root.style.willChange = "";
     };
 
     const completeTransition = () => {
-      if (didComplete) return;
-      didComplete = true;
-      enterTransitionActiveRef.current = false;
       if (cleanupTimer !== null) {
         window.clearTimeout(cleanupTimer);
         cleanupTimer = null;
       }
-      removeImageReadyListeners?.();
-      removeImageReadyListeners = null;
-      overlayMotion?.cancel();
-      overlay?.remove();
-      overlayMotion = null;
-      overlay = null;
+      enterTransitionActiveRef.current = false;
       clearStyles();
-      releaseEnterScrollLock();
       setAreCuesEnabled(true);
-    };
-
-    const handleViewportResizeDuringEnter = () => {
-      if (!overlay && !overlayMotion) return;
-      if (root) root.style.opacity = "1";
-      completeTransition();
     };
 
     const runTransition = async () => {
       if (!root) return;
-      let raw: string | null = null;
       try {
-        raw = window.sessionStorage.getItem("unseen:product-view-transition");
-      } catch {
-        return;
-      }
-      if (!raw) {
-        clearStyles();
-        return;
-      }
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          clearStyles();
+          return;
+        }
 
-      try {
-        const parsed = JSON.parse(raw) as {
-          at: number;
-          height: number;
-          itemId: string;
-          left: number;
-          src: string;
-          top: number;
-          width: number;
-          aspectRatio?: number;
-        };
-        const isFresh = Date.now() - parsed.at < 6000;
-        if (!isFresh || parsed.itemId !== productId) return;
-        if (!parsed.src?.startsWith("/")) return;
         if (alignFirstImageToInfoCenterNow()) {
           await nextAnimationFrame();
           if (didCancel || !root) return;
         }
+
         const container = root.getBoundingClientRect();
-        if (container.width < 2 || container.height < 2) return;
-
-        const ratio =
-          parsed.aspectRatio && parsed.aspectRatio > 0
-            ? parsed.aspectRatio
-            : image && image.naturalWidth > 0 && image.naturalHeight > 0
-              ? image.naturalWidth / image.naturalHeight
-              : DEFAULT_MAIN_ASPECT_RATIO;
-        const fallbackLast = ratio > 0 ? getContainRect(container, ratio) : container;
-        const last = fallbackLast;
-        if (last.width < 2 || last.height < 2) return;
-        enterTransitionActiveRef.current = true;
-        const isImmersiveEnter = isImmersiveBackHref(readProductViewBackHref());
-        const isIpadEnter = isIPadExperience;
-        const enterDurationMs = isImmersiveEnter ? 720 : ENTER_DURATION_MS;
-        const enterDecodeTimeoutMs = isIpadEnter ? 320 : isImmersiveEnter ? 120 : 80;
-        const enterCrossfadeMs = isIpadEnter ? 160 : ENTER_CROSSFADE_MS;
-
-        // Hide the destination image before any async decode work so the first
-        // product-view paint cannot flash a second, unanimated image layer.
-        root.style.transition = "none";
-        root.style.opacity = "0";
-        root.style.willChange = "opacity";
-
-        await waitForProductImageDecode(image, parsed.src, enterDecodeTimeoutMs);
-        void warmProductImage(image?.currentSrc || parsed.src);
-        if (didCancel || !root) return;
-
-        lockPageScrollForEnter();
-        hasEnterScrollLock = true;
-        startEnterIntentCapture();
-        unlockFallbackTimer = window.setTimeout(() => {
-          releaseEnterScrollLock();
-        }, enterDurationMs + ENTER_END_HOLD_MS + enterCrossfadeMs + 700);
-
-        setAreCuesEnabled(false);
-
-        const persistentOverlayDidStart = !isIpadEnter
-          ? completeProductTransitionHold({
-              productId,
-              src: image?.currentSrc || parsed.src,
-              targetRect: last,
-              durationMs: enterDurationMs,
-              crossfadeMs: enterCrossfadeMs,
-              easing: isImmersiveEnter ? "cubic-bezier(0.2, 0.88, 0.24, 1)" : "cubic-bezier(0.22, 1, 0.36, 1)",
-              onArrive: () => {
-                if (!root) return;
-                root.style.willChange = "opacity";
-                root.style.opacity = "1";
-              },
-              onDone: () => {
-                completeTransition();
-              },
-            })
-          : false;
-
-        if (persistentOverlayDidStart) {
-          cleanupTimer = window.setTimeout(() => {
-            clearProductTransitionHold();
-            if (root) root.style.opacity = "1";
-            completeTransition();
-          }, enterDurationMs + enterCrossfadeMs + 900);
+        if (container.width < 2 || container.height < 2) {
+          clearStyles();
           return;
         }
-        if (isIpadEnter) {
-          // iPad uses the local overlay path for a more stable end-of-enter handoff.
-          clearProductTransitionHold();
-        }
 
-        let targetWidth = last.width;
-        let targetHeight = last.height;
-        let targetLeft = last.left;
-        let targetTop = last.top;
-        let startTransform = "";
-        let startOpacity = 1;
-
-        // Keep fallback enter zoom uniformly scaled to avoid aspect warping during flight.
-        const scaleX = last.width / Math.max(parsed.width, 1);
-        const scaleY = last.height / Math.max(parsed.height, 1);
-        const scale = Math.max(0.0001, (scaleX + scaleY) * 0.5);
-        targetWidth = parsed.width * scale;
-        targetHeight = parsed.height * scale;
-        targetLeft = last.left + (last.width - targetWidth) * 0.5;
-        targetTop = last.top + (last.height - targetHeight) * 0.5;
-        const invertScale = 1 / scale;
-        const invertX = parsed.left - targetLeft;
-        const invertY = parsed.top - targetTop;
-        startTransform = `translate3d(${invertX}px, ${invertY}px, 0px) scale(${invertScale}, ${invertScale})`;
-
-        overlay = document.createElement("div");
-        overlay.style.position = "fixed";
-        overlay.style.left = `${targetLeft}px`;
-        overlay.style.top = `${targetTop}px`;
-        overlay.style.width = `${targetWidth}px`;
-        overlay.style.height = `${targetHeight}px`;
-        overlay.style.transformOrigin = "top left";
-        overlay.style.pointerEvents = "none";
-        overlay.style.zIndex = "145";
-        overlay.style.willChange = "transform, opacity";
-        overlay.style.backfaceVisibility = "hidden";
-        overlay.style.transformStyle = "preserve-3d";
-        overlay.style.userSelect = "none";
-        overlay.style.contain = "layout paint style";
-        overlay.style.transform = startTransform;
-        overlay.style.opacity = String(startOpacity);
-        overlay.style.setProperty("-webkit-backface-visibility", "hidden");
-
-        const overlayImg = document.createElement("img");
-        overlayImg.src = image?.currentSrc || parsed.src;
-        overlayImg.alt = "";
-        overlayImg.decoding = "sync";
-        overlayImg.loading = "eager";
-        overlayImg.style.display = "block";
-        overlayImg.style.width = "100%";
-        overlayImg.style.height = "100%";
-        overlayImg.style.objectFit = "contain";
-        overlayImg.style.backfaceVisibility = "hidden";
-        overlayImg.style.transform = "translateZ(0)";
-        overlayImg.style.userSelect = "none";
-        overlayImg.style.setProperty("-webkit-backface-visibility", "hidden");
-        overlay.appendChild(overlayImg);
-        document.body.appendChild(overlay);
-
-        await waitForProductImageDecode(overlayImg, parsed.src, 120);
-        await nextAnimationFrame();
-        await nextAnimationFrame();
-        if (didCancel || !overlay) return;
-
-        overlayMotion = overlay.animate(
-          [
-            { transform: startTransform, opacity: startOpacity },
-            { transform: "translate3d(0px, 0px, 0px) scale(1, 1)", opacity: 1 },
-          ],
-          {
-            duration: enterDurationMs,
-            easing: isImmersiveEnter ? "cubic-bezier(0.2, 0.88, 0.24, 1)" : "cubic-bezier(0.22, 1, 0.36, 1)",
-            fill: "forwards",
-          },
-        );
-        clearProductTransitionHold();
-        overlayMotion.addEventListener(
-          "finish",
-          () => {
-            if (!root) return;
-            const revealLiveImage = () => {
-              if (!root) return;
-              // Hold the end state briefly, then overlap live image with overlay fade
-              // so no white flash appears between layers.
-              root.style.transition = "none";
-              root.style.willChange = "opacity";
-              root.style.opacity = "0";
-
-              const startCrossfade = () => {
-                if (!overlay) {
-                  root.style.opacity = "1";
-                  completeTransition();
-                  return;
-                }
-
-                // Keep live image visible through the whole overlay fade window
-                // to avoid end-of-enter brightness/flash artifacts.
-                root.style.transition = "none";
-                root.style.opacity = "1";
-
-                // Fade overlay slightly after live image starts to create a tiny overlap.
-                window.requestAnimationFrame(() => {
-                  if (!overlay) {
-                    completeTransition();
-                    return;
-                  }
-                  const fadeOverlay = overlay.animate(
-                    [{ opacity: 1 }, { opacity: 0 }],
-                    { duration: enterCrossfadeMs, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "forwards" },
-                  );
-                  fadeOverlay.addEventListener("finish", () => completeTransition(), { once: true });
-                  window.setTimeout(() => {
-                    completeTransition();
-                  }, enterCrossfadeMs + 120);
-                });
-              };
-
-              window.setTimeout(() => {
-                startCrossfade();
-              }, ENTER_END_HOLD_MS);
-            };
-
-            if (image && (!image.complete || image.naturalWidth <= 0)) {
-              const handleImageReady = () => {
-                removeImageReadyListeners?.();
-                removeImageReadyListeners = null;
-                revealLiveImage();
-              };
-              image.addEventListener("load", handleImageReady);
-              image.addEventListener("error", handleImageReady);
-              removeImageReadyListeners = () => {
-                image.removeEventListener("load", handleImageReady);
-                image.removeEventListener("error", handleImageReady);
-              };
-              return;
-            }
-
-            revealLiveImage();
-          },
-          { once: true },
-        );
-
+        enterTransitionActiveRef.current = true;
+        setAreCuesEnabled(false);
+        root.style.transition = "none";
+        root.style.opacity = "0";
+        root.style.transform = "translate3d(0px, 6px, 0px) scale(0.994)";
+        root.style.willChange = "opacity";
+        if (didCancel || !root) return;
+        raf1 = window.requestAnimationFrame(() => {
+          raf2 = window.requestAnimationFrame(() => {
+            if (!root || didCancel) return;
+            root.style.transition = `opacity ${ENTER_OPACITY_MS}ms ease-out, transform ${ENTER_TRANSFORM_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+            root.style.opacity = "1";
+            root.style.transform = "translate3d(0px, 0px, 0px) scale(1)";
+          });
+        });
         cleanupTimer = window.setTimeout(() => {
-          if (root) root.style.opacity = "1";
           completeTransition();
-        }, enterDurationMs + ENTER_END_HOLD_MS + enterCrossfadeMs + 420);
+        }, Math.max(ENTER_OPACITY_MS, ENTER_TRANSFORM_MS) + 180);
       } catch {
-        // Ignore malformed transition payloads.
         enterTransitionActiveRef.current = false;
         clearStyles();
         setAreCuesEnabled(true);
@@ -1088,34 +614,18 @@ export function ProductImageRail({
 
     void runTransition();
 
-    window.addEventListener("resize", handleViewportResizeDuringEnter);
-    window.visualViewport?.addEventListener("resize", handleViewportResizeDuringEnter);
-
     return () => {
       didCancel = true;
-      window.removeEventListener("resize", handleViewportResizeDuringEnter);
-      window.visualViewport?.removeEventListener("resize", handleViewportResizeDuringEnter);
-      if (cleanupTimer !== null) window.clearTimeout(cleanupTimer);
-      if (unlockFallbackTimer !== null) window.clearTimeout(unlockFallbackTimer);
-      removeImageReadyListeners?.();
-      removeIntentListeners?.();
-      overlayMotion?.cancel();
-      overlay?.remove();
-      if (assistRafId !== null) {
-        window.cancelAnimationFrame(assistRafId);
+      if (cleanupTimer !== null) {
+        window.clearTimeout(cleanupTimer);
       }
-      if (assistInputDetachTimer !== null) {
-        window.clearTimeout(assistInputDetachTimer);
-      }
-      if (hasEnterScrollLock) {
-        unlockPageScrollForEnter();
-        hasEnterScrollLock = false;
-      }
+      if (raf1 !== null) window.cancelAnimationFrame(raf1);
+      if (raf2 !== null) window.cancelAnimationFrame(raf2);
       enterTransitionActiveRef.current = false;
       clearStyles();
       setAreCuesEnabled(true);
     };
-  }, [hasMeasuredViewport, productId]);
+  }, [hasMeasuredViewport, isMobileExperience]);
 
   const mainImageIntrinsicWidth = Math.max(1, Math.round(mainImageAspectRatio * 1000));
   const mainImageIntrinsicHeight = 1000;
@@ -1481,7 +991,7 @@ export function ProductImageRail({
     };
   }, [activeIpadImageIndex, isIPadExperience]);
 
-  if (isIPadExperience) {
+  if (hasHydrated && useLegacyIpadInteractionStage && isIPadExperience) {
     const iPadStageHeight = "clamp(360px, 56vh, 620px)";
     const iPadDotsRightInset = "40px";
     return (
@@ -1719,10 +1229,10 @@ export function ProductImageRail({
                   cuePointerActiveRef.current = false;
                 }}
                 onMouseLeave={hideCuePill}
-                onTouchStart={isIPadExperience ? handleCueTouchStart : undefined}
-                onTouchMove={isIPadExperience ? handleCueTouchMove : undefined}
-                onTouchEnd={isIPadExperience ? handleCueTouchEnd : undefined}
-                onTouchCancel={isIPadExperience ? handleCueTouchEnd : undefined}
+                onTouchStart={handleCueTouchStart}
+                onTouchMove={handleCueTouchMove}
+                onTouchEnd={handleCueTouchEnd}
+                onTouchCancel={handleCueTouchEnd}
                 onMouseMove={(event) => {
                   if (!areCuesEnabled) return;
                   const rect = event.currentTarget.getBoundingClientRect();

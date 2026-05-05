@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { StickyShell } from "@/components/unseen/StickyShell";
 import { ProductTile } from "@/components/unseen/ProductTile";
+import { MobileGridProductOverlayHost } from "@/components/unseen/MobileGridProductOverlayHost";
 import { ReturnScrollRestore } from "@/components/unseen/ReturnScrollRestore";
 import { RouteShellFallback } from "@/components/unseen/RouteShellFallback";
 import { archiveCapsuleItems, type ArchiveCapsuleId } from "@/data/mockCatalog";
@@ -74,6 +75,7 @@ export default async function ArchivePage({ searchParams }: ArchivePageProps) {
             )}
           </div>
         </section>
+        <MobileGridProductOverlayHost mode="archive" />
       </Suspense>
     </main>
   );

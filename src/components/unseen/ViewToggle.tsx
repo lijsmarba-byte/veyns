@@ -19,9 +19,9 @@ const WORLD2_RETURN_REVEAL_KEY = "unseen:world2-return-reveal";
 const VIEW_TOGGLE_OPEN_KEY = "unseen:view-toggle-open";
 const VIEW_TOGGLE_HOVER_CLOSE_MS = 180;
 const VIEW_TOGGLE_COLLAPSE_TRANSITION_CLASS =
-  "duration-[240ms] ease-[cubic-bezier(0.22,0.75,0.28,1)]";
-const VIEW_TOGGLE_NAV_DELAY_MS = 210;
-const VIEW_TOGGLE_MOBILE_NAV_DELAY_MS = 90;
+  "duration-[200ms] ease-[cubic-bezier(0.22,0.82,0.28,1)]";
+const VIEW_TOGGLE_NAV_DELAY_MS = 90;
+const VIEW_TOGGLE_MOBILE_NAV_DELAY_MS = 60;
 const VIEW_TOGGLE_MOBILE_LOCK_HINT_MS = 1800;
 
 type ToggleGlyphVariant = "grid" | "focus" | "immersive";
