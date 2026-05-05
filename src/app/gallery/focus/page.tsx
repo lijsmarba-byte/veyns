@@ -8,10 +8,8 @@ export default function GalleryFocusPage() {
   return (
     <main
       data-return-root="true"
-      className="h-[var(--viewport-h)] w-full overflow-hidden bg-paper"
-      style={{
-        height: "var(--viewport-h)",
-      }}
+      data-mobile-first-paint-gate="true"
+      className="w-full bg-paper min-h-[calc(var(--viewport-h)+var(--mobile-safe-bottom))] md:h-[var(--viewport-h)] md:overflow-hidden"
     >
       <Suspense
         fallback={<RouteShellFallback />}

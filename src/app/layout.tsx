@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { BrowserEnvSync } from "@/components/unseen/BrowserEnvSync";
 import { BrowserCompatibilityNotice } from "@/components/unseen/BrowserCompatibilityNotice";
+import { MobileZoomGuard } from "@/components/unseen/MobileZoomGuard";
 import { ProductTransitionOverlayHost } from "@/components/unseen/ProductTransitionOverlayHost";
 import { ReturnTransitionBridge } from "@/components/unseen/ReturnTransitionBridge";
 import "./globals.css";
@@ -86,11 +87,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-ui-ready="0">
       <body
         className={`${inter.variable} ${instrumentSerif.variable} ${ibmPlexMono.variable} ${belmonteBallpoint.variable} antialiased`}
       >
         <BrowserEnvSync />
+        <MobileZoomGuard />
         <BrowserCompatibilityNotice />
         <ProductTransitionOverlayHost />
         {children}

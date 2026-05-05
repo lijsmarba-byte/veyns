@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FocusEvent } from "react";
+import { useViewportMode } from "@/lib/ui/viewportMode";
 
 type World2CategoryNavOption = {
   key: string;
@@ -55,6 +56,7 @@ export function World2CategoryNav({
   onSelect,
   className = "",
 }: World2CategoryNavProps) {
+  const { isIPadExperience } = useViewportMode();
   const [isExpanded, setIsExpanded] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const motionDurationMs = 150;
@@ -78,6 +80,7 @@ export function World2CategoryNav({
   const markerCenterOffsetPx = isExpanded
     ? Math.round((((options.length - 1) / 2) - activeIndex) * expandedRowStepPx)
     : 0;
+  const isTouchExpandMode = isIPadExperience;
 
   const openExpanded = () => {
     if (closeTimerRef.current !== null) {
@@ -124,7 +127,7 @@ export function World2CategoryNav({
       className={`group -m-4 hidden select-none p-4 lg:block ${className}`.trim()}
       onMouseEnter={openExpanded}
       onMouseLeave={closeExpanded}
-      onFocusCapture={openExpanded}
+      onFocusCapture={isTouchExpandMode ? undefined : openExpanded}
       onBlurCapture={handleBlurCapture}
     >
       <div className="relative h-[252px] w-[246px] rounded-xl px-4 py-4">
@@ -137,7 +140,13 @@ export function World2CategoryNav({
               type="button"
               aria-expanded={isExpanded}
               aria-controls={expandedListId}
-              onClick={() => onSelect(activeOption.key)}
+              onClick={() => {
+                if (isTouchExpandMode) {
+                  setIsExpanded((current) => !current);
+                  return;
+                }
+                onSelect(activeOption.key);
+              }}
               className="pointer-events-auto inline-flex translate-x-[2px] items-center justify-start rounded-md py-[2px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
               style={{ marginLeft: `${markerGapPx + markerWidthPx}px` }}
             >
@@ -230,7 +239,12 @@ export function World2CategoryNav({
                 <button
                   type="button"
                   tabIndex={isExpanded ? 0 : -1}
-                  onClick={() => onSelect(option.key)}
+                  onClick={() => {
+                    onSelect(option.key);
+                    if (isTouchExpandMode) {
+                      setIsExpanded(false);
+                    }
+                  }}
                   className="relative z-10 inline-flex items-center justify-start text-left font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-inactive transition-colors duration-300 ease-out hover:text-meta focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
                 >
                   <span className="relative inline-flex items-center">

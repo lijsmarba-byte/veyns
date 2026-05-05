@@ -11,7 +11,7 @@ type WelcomeProfile = {
 };
 
 const actionPillClass =
-  "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-meta shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none";
+  "inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none";
 const GALLERY_ARRIVAL_ACTIVE_KEY = "unseen:gallery-arrival-active";
 const ARRIVAL_COMPLETE_EVENT = "unseen:gallery-arrival-complete";
 
@@ -119,7 +119,7 @@ export function GalleryShowAround() {
 
       <div className="absolute inset-0 flex items-center justify-center px-6">
         <div
-          className="w-full max-w-[900px] rounded-[6px] bg-paper px-8 py-10 text-left shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-14 md:py-14"
+          className="w-full max-w-[900px] rounded-[6px] bg-paper px-6 py-8 text-left shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-14 md:py-14 lg:max-w-[760px]"
           style={{
             opacity: isVisible ? 1 : 0,
             transform: isVisible ? "translate3d(0,0,0) scale(1)" : "translate3d(0,8px,0) scale(0.995)",
@@ -127,34 +127,25 @@ export function GalleryShowAround() {
           }}
         >
           <p className="inline-flex items-baseline text-ink">
-            <span className="font-ui text-[30px] font-normal leading-none tracking-[-0.06em]">Dear</span>
-            <span className="-ml-[1px] font-ui text-[30px] font-normal leading-none tracking-[-0.06em]">–</span>
-            <span className="ml-[1px] font-instrument text-[30px] italic leading-none tracking-[0.01em]">{welcomeName}</span>
+            <span className="font-ui text-[24px] font-normal leading-none tracking-[-0.06em] md:text-[30px]">Dear</span>
+            <span className="-ml-[1px] font-ui text-[24px] font-normal leading-none tracking-[-0.06em] md:text-[30px]">–</span>
+            <span className="ml-[1px] font-instrument text-[24px] italic leading-none tracking-[0.01em] md:text-[30px]">
+              {welcomeName}
+            </span>
           </p>
 
           <p className="mt-6 font-ui text-[14px] font-normal leading-6 tracking-[0.01em] text-ink">
-            Welcome to a calm, curated commerce shaped entirely by individual taste. What appears here has been shown
-            to no one else — the selection is as individual as the references behind it.
+            Welcome to your curated commerce, shaped entirely by your individual taste.
           </p>
 
           <p className="mt-5 font-ui text-[14px] font-normal leading-6 tracking-[0.01em] text-ink">
-            Each week, the new <span className="font-semibold">Issue</span> refreshes the full selection in the Edits,
-            found in the <span className="font-semibold">Gallery</span>. Saved pieces move permanently to the{" "}
-            <span className="font-semibold">Archive</span>, forming personal Capsules paired to each Edit. The
-            individual Signature of your aesthetic direction, along with the references behind each Edit, can be
-            reviewed or rebuilt from the menu.
+            Each week, the new issue refreshes the full selection and the edits found in the gallery. Saved pieces move
+            permanently to the archive, forming personal capsules paired to each edit.
           </p>
 
           <p className="mt-5 font-ui text-[14px] font-normal leading-6 tracking-[0.01em] text-ink">
-            <span className="inline-flex items-center gap-2 align-middle">
-              <span className="font-ui text-[15px] font-bold leading-none tracking-[-0.03em] text-ink">cenoir</span>
-              <span className="inline-flex h-[12px] min-w-[28px] items-center justify-center rounded-[2px] bg-ink px-[5px]">
-                <span className="font-ui text-[6.5px] font-bold leading-[6.5px] tracking-[-0.08px] text-paper">BETA</span>
-              </span>
-            </span>
-            <span className="px-1">:</span>
-            Some recommendations may still be resolving. Certain links or functions remain in progress. Feedback
-            shapes what comes next. Thank you for being here this early.
+            Beta: Some recommendations may still be resolving, and certain links or functions remain in progress. Thank
+            you for being here this early.
           </p>
 
           <p className="mt-4 font-ui text-[14px] font-normal leading-6 tracking-[0.01em] text-ink">Best,</p>

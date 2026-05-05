@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useViewportMode } from "@/lib/ui/viewportMode";
 
 type ProductActionRowProps = {
   itemId: string;
@@ -46,6 +47,7 @@ function emitSavedItemsUpdated(itemId: string, isSaved: boolean) {
 }
 
 export function ProductActionRow({ itemId, mode, editId }: ProductActionRowProps) {
+  const { isIPadExperience } = useViewportMode();
   const acquireUrl = "https://www.mytheresa.com";
   const defaultCapsuleId = useMemo(() => getDefaultCapsuleId(editId), [editId]);
   const [selectedCapsuleId, setSelectedCapsuleId] = useState(defaultCapsuleId);
@@ -54,6 +56,7 @@ export function ProductActionRow({ itemId, mode, editId }: ProductActionRowProps
   const [isDropdownVisible, setIsDropdownVisible] = useState(false);
   const [isArchiveDeleteExpanded, setIsArchiveDeleteExpanded] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const useArchiveDeletePill = mode === "archive" && !isIPadExperience && isSaved;
   const [savePillWidth, setSavePillWidth] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const savePillRef = useRef<HTMLDivElement | null>(null);
@@ -61,16 +64,16 @@ export function ProductActionRow({ itemId, mode, editId }: ProductActionRowProps
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("unseen:saved-items");
-      if (!raw) return;
-      const records = JSON.parse(raw) as SavedItemRecord[];
+      const records = raw ? (JSON.parse(raw) as SavedItemRecord[]) : [];
       const existing = records.find((record) => record.itemId === itemId);
-      if (!existing) return;
-      setSelectedCapsuleId(existing.capsuleId);
-      setIsSaved(true);
+      setSelectedCapsuleId(existing?.capsuleId ?? defaultCapsuleId);
+      setIsSaved(mode === "archive" || Boolean(existing));
     } catch {
       // Ignore malformed local data.
+      setSelectedCapsuleId(defaultCapsuleId);
+      setIsSaved(mode === "archive");
     }
-  }, [itemId]);
+  }, [defaultCapsuleId, itemId, mode]);
 
   useEffect(() => {
     if (!isSaved) {
@@ -109,7 +112,7 @@ export function ProductActionRow({ itemId, mode, editId }: ProductActionRowProps
   }, [isDropdownOpen, isDropdownVisible]);
 
   useLayoutEffect(() => {
-    if (!isSaveFlowOpen || isSaved || mode === "archive") return;
+    if (!isSaveFlowOpen || isSaved || useArchiveDeletePill) return;
     const node = savePillRef.current;
     if (!node) return;
 
@@ -130,7 +133,7 @@ export function ProductActionRow({ itemId, mode, editId }: ProductActionRowProps
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [isSaveFlowOpen, isSaved, mode, selectedCapsuleId]);
+  }, [isSaveFlowOpen, isSaved, selectedCapsuleId, useArchiveDeletePill]);
 
   const saveToStorage = (capsuleId: string) => {
     try {
@@ -171,6 +174,10 @@ export function ProductActionRow({ itemId, mode, editId }: ProductActionRowProps
 
   const handleArchiveDelete = () => {
     removeFromStorage();
+    setIsSaved(false);
+    setIsSaveFlowOpen(false);
+    setIsDropdownOpen(false);
+    setSelectedCapsuleId(defaultCapsuleId);
     setIsArchiveDeleteExpanded(false);
   };
 
@@ -188,10 +195,11 @@ export function ProductActionRow({ itemId, mode, editId }: ProductActionRowProps
     "relative inline-flex h-[33px] w-auto items-center overflow-visible rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] pl-[12px] pr-0 font-ui text-[13px] leading-5 tracking-[-0.03em] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]";
   const dropdownItemClass =
     "w-full rounded-[10px] px-[10px] py-[6px] text-left font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-accent focus-visible:outline-none";
-  const archiveDeletePillClass =
-    "inline-flex h-[33px] items-center overflow-hidden rounded-[999px] border-[0.5px] border-accent bg-accent shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-[width] duration-220 ease-out";
+  const archiveDeletePillClass = "inline-flex h-[33px] items-center";
+  const archiveDeleteExpandedButtonClass =
+    "inline-flex h-[33px] w-[67px] items-center justify-center rounded-[999px] border-[0.5px] border-accent bg-accent px-4 font-ui text-[13px] font-medium leading-5 tracking-[-0.03em] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none";
   const archiveMinusCircleClass =
-    "inline-flex h-[33px] w-[33px] shrink-0 items-center justify-center rounded-full border-[0.5px] border-accent bg-accent shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none";
+    "inline-flex h-[33px] w-[33px] shrink-0 items-center justify-center rounded-full border-[0.5px] border-accent bg-accent p-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none";
 
   return (
     <div data-pv-info-hit="true" className="relative flex items-center gap-[10px]">
@@ -199,16 +207,12 @@ export function ProductActionRow({ itemId, mode, editId }: ProductActionRowProps
         acquire
       </button>
 
-      {mode === "archive" ? (
-        <div
-          className={archiveDeletePillClass}
-          style={{ width: isArchiveDeleteExpanded ? "67px" : "33px" }}
-          onMouseLeave={() => setIsArchiveDeleteExpanded(false)}
-        >
+      {useArchiveDeletePill ? (
+        <div className={archiveDeletePillClass} onMouseLeave={() => setIsArchiveDeleteExpanded(false)}>
           {isArchiveDeleteExpanded ? (
             <button
               type="button"
-              className="inline-flex h-[33px] w-full items-center justify-center px-4 font-ui text-[13px] font-medium leading-5 tracking-[-0.03em] text-paper focus-visible:outline-none"
+              className={archiveDeleteExpandedButtonClass}
               onClick={handleArchiveDelete}
               aria-label="Delete from capsule"
             >

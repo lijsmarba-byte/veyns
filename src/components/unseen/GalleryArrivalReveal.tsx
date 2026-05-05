@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 const GALLERY_ENTRY_ARRIVAL_KEY = "unseen:gallery-entry-arrival";
 const GALLERY_ARRIVAL_ACTIVE_KEY = "unseen:gallery-arrival-active";
+const MOBILE_GRID_PRODUCT_RETURN_KEY = "unseen:mobile-grid-product-return";
 const ARRIVAL_COMPLETE_EVENT = "unseen:gallery-arrival-complete";
 const ARRIVAL_DURATION_SIGNUP_MS = 2800;
 const ARRIVAL_DURATION_LOGIN_MS = 620;
@@ -13,14 +14,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export function GalleryArrivalReveal() {
-  const [isActive, setIsActive] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return Boolean(window.sessionStorage.getItem(GALLERY_ENTRY_ARRIVAL_KEY));
-    } catch {
-      return false;
-    }
-  });
+  const [isActive, setIsActive] = useState(false);
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
@@ -48,6 +42,22 @@ export function GalleryArrivalReveal() {
     let arrivalDurationMs = ARRIVAL_DURATION_SIGNUP_MS;
     let isLoginArrival = false;
     try {
+      const rawProductReturn = window.sessionStorage.getItem(MOBILE_GRID_PRODUCT_RETURN_KEY);
+      if (rawProductReturn) {
+        try {
+          const parsed = JSON.parse(rawProductReturn) as { at?: unknown };
+          const isFreshProductReturn = typeof parsed.at === "number" && Date.now() - parsed.at < 5000;
+          if (isFreshProductReturn) {
+            window.sessionStorage.removeItem(MOBILE_GRID_PRODUCT_RETURN_KEY);
+            window.sessionStorage.removeItem(GALLERY_ENTRY_ARRIVAL_KEY);
+            window.sessionStorage.removeItem(GALLERY_ARRIVAL_ACTIVE_KEY);
+            return () => undefined;
+          }
+        } catch {
+          window.sessionStorage.removeItem(MOBILE_GRID_PRODUCT_RETURN_KEY);
+        }
+      }
+
       const rawEntry = window.sessionStorage.getItem(GALLERY_ENTRY_ARRIVAL_KEY);
       if (!rawEntry) {
         window.sessionStorage.removeItem(GALLERY_ARRIVAL_ACTIVE_KEY);

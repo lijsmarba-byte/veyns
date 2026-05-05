@@ -1,15 +1,25 @@
 "use client";
 
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import Image from "next/image";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ModePill } from "@/components/unseen/ModePill";
 import { GalleryEditNav } from "@/components/unseen/GalleryEditNav";
 import { ViewToggle } from "@/components/unseen/ViewToggle";
 import { StickyHeightSync } from "@/components/unseen/StickyHeightSync";
 import { mockUsers } from "@/data/mockUsers";
+import { useViewportMode } from "@/lib/ui/viewportMode";
 
 type StickyMode = "gallery" | "archive";
+type StickyGridPhase = 0 | 1 | 2;
+
+type MobileCategoryScrollLock = {
+  phase: StickyGridPhase;
+  targetY: number | null;
+  releaseTimer: number | null;
+};
 
 type StickyShellProps = {
   mode: StickyMode;
@@ -50,6 +60,7 @@ const archiveCapsuleTabs = [
 
 const MODE_SWITCH_TOP_PX = 17;
 const MODE_SWITCH_HEIGHT_PX = 34;
+const MOBILE_MODE_SWITCH_TOP_PX = 14.5;
 const TITLE_BLOCK_TOP_PX = 59;
 const TITLE_BLOCK_HEIGHT_PX = 45;
 const TITLE_TEXT_SIZE_PX = 30;
@@ -64,7 +75,6 @@ const COMPACT_MENU_RAIL_WIDTH_CSS = "min(202px, 42vw)";
 const COMPACT_MENU_CONTENT_WIDTH_CSS = "min(680px, calc(100vw - min(202px, 42vw) - 28px))";
 const COMPACT_MENU_SHEET_WIDTH_CSS = `calc(${COMPACT_MENU_CONTENT_WIDTH_CSS} + ${COMPACT_MENU_RAIL_WIDTH_CSS})`;
 const PROFILE_MENU_CONTENT_WIDTH_CSS = "calc(100vw - 82px)";
-const PROFILE_MENU_FULL_EXTEND_BREAKPOINT_PX = 1320;
 const MENU_RAIL_CONTENT_LEFT_CLASS = "pl-9 md:pl-[52px]";
 const MENU_RAIL_CONTENT_RIGHT_CLASS = "pr-4 md:pr-10";
 const MENU_TRANSITION_MS = 650;
@@ -89,6 +99,34 @@ const MENU_ICON_STROKE_SAFARI_PX = 1.5;
 const MENU_ICON_MORPH_OPEN_MS = 720;
 const MENU_ICON_MORPH_CLOSE_MS = 220;
 const EDIT_ACTION_MENU_TRANSITION_CLASS = "duration-[240ms] ease-[cubic-bezier(0.22,0.75,0.28,1)]";
+const EDIT_ACTION_MENU_HOVER_CLOSE_MS = 180;
+const STICKY_COLLAPSE_START_Y_PX = 220;
+const STICKY_COLLAPSE_RANGE_PX = 180;
+const STICKY_COMPACT_DIVIDER_TOP_PX = MODE_SWITCH_TOP_PX + MODE_SWITCH_HEIGHT_PX + 12;
+const STICKY_MID_DIVIDER_TOP_MOBILE_PX = 106;
+const STICKY_MID_DIVIDER_TOP_DESKTOP_PX = 110;
+const STICKY_TRANSITION_CSS = "105ms cubic-bezier(0.2,0.78,0.22,1)";
+const IMMERSIVE_STICKY_TRANSITION_CSS = "280ms cubic-bezier(0.2,0.78,0.22,1)";
+const STICKY_PROGRESS_FULL = 0;
+const STICKY_PROGRESS_MID = 0.65;
+const STICKY_PROGRESS_COMPACT = 1;
+const STICKY_SCROLL_Y_TO_COMPACT = STICKY_COLLAPSE_START_Y_PX + 58;
+const STICKY_SCROLL_Y_MID_TO_FULL = 92;
+const STICKY_SCROLL_Y_FULL_TO_MID = STICKY_COLLAPSE_START_Y_PX - 8;
+const MOBILE_HEADER_ISSUE_LIFT_PX = 3;
+const MOBILE_HEADER_EXPANDED_DIVIDER_LIFT_PX = 20;
+const MOBILE_HEADER_FOLDED_DIVIDER_LIFT_PX = 10;
+const MOBILE_HEADER_COMPACT_DIVIDER_DROP_PX = 4;
+const MOBILE_EDIT_UNDERLINE_TOP_PX = 39;
+const MOBILE_TITLE_BLOCK_HEIGHT_PX = 43;
+const MOBILE_TITLE_TEXT_SIZE_PX = 26;
+const MOBILE_STICKY_LOGO_HEIGHT_PX = 20;
+
+function clamp01(value: number) {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
 
 function formatCalibrationMonth(value: string | undefined): string {
   if (!value) return "";
@@ -103,6 +141,7 @@ export function StickyShell({
   issueNumber = "04",
   archiveActiveItemCount,
 }: StickyShellProps) {
+  const { isMobileExperience } = useViewportMode();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isQuickMenuOpen, setIsQuickMenuOpen] = useState(false);
@@ -115,9 +154,9 @@ export function StickyShell({
   const [activeProfileOverlayTab, setActiveProfileOverlayTab] = useState<ProfileOverlayTab>("signature");
   const [profileOverlayEditFlow, setProfileOverlayEditFlow] = useState<"create" | null>(null);
   const [isEditActionMenuOpen, setIsEditActionMenuOpen] = useState(false);
-  const [viewportWidthPx, setViewportWidthPx] = useState<number>(
-    typeof window !== "undefined" ? window.innerWidth : 1440,
-  );
+  const [stickyCollapseProgress, setStickyCollapseProgress] = useState(0);
+  const [viewportWidthPx, setViewportWidthPx] = useState<number>(1440);
+  const [isSafariBrowser, setIsSafariBrowser] = useState(false);
   const activeProfileUser = mockUsers[0] ?? null;
   const fallbackIssueNumber = Number(issueNumber);
   const resolvedIssueNumber =
@@ -140,10 +179,39 @@ export function StickyShell({
     (isGallery ? GALLERY_STICKY_BACKDROP_HEIGHT_PX : ARCHIVE_STICKY_BACKDROP_HEIGHT_PX) - lowerNavLiftPx;
   const stickyStackHeightPx =
     (isGallery ? GALLERY_STICKY_STACK_HEIGHT_PX : ARCHIVE_STICKY_STACK_HEIGHT_PX) - lowerNavLiftPx;
-  const dividerTopPx = 187 - lowerNavLiftPx;
+  const mobileHeaderIssueLiftPx = isMobileExperience ? MOBILE_HEADER_ISSUE_LIFT_PX : 0;
+  const mobileHeaderExpandedDividerLiftPx = isMobileExperience ? MOBILE_HEADER_EXPANDED_DIVIDER_LIFT_PX : 0;
+  const mobileHeaderFoldedDividerLiftPx = isMobileExperience ? MOBILE_HEADER_FOLDED_DIVIDER_LIFT_PX : 0;
+  const dividerTopBasePx = (isMobileExperience ? 184 - mobileHeaderExpandedDividerLiftPx : 187) - lowerNavLiftPx;
+  const dividerTopMidPx = isMobileExperience
+    ? STICKY_MID_DIVIDER_TOP_MOBILE_PX - mobileHeaderFoldedDividerLiftPx
+    : STICKY_MID_DIVIDER_TOP_DESKTOP_PX;
+  const isImmersiveMobile = isMobileExperience && view === "immersive";
+  const isMobileFocus = isMobileExperience && view === "focus";
+  const effectiveStickyCollapseProgress = stickyCollapseProgress;
+  const editRevealProgress = isMobileExperience
+    ? clamp01((1 - effectiveStickyCollapseProgress) / (isImmersiveMobile ? 0.2 : 0.28))
+    : 1;
+  const issueRevealProgress = isMobileExperience
+    ? clamp01(
+        ((isImmersiveMobile ? 0.36 : 0.55) - effectiveStickyCollapseProgress) /
+          (isImmersiveMobile ? 0.36 : 0.55),
+      )
+    : 1;
+  const dividerTopCompactPx = isMobileExperience
+    ? STICKY_COMPACT_DIVIDER_TOP_PX + MOBILE_HEADER_COMPACT_DIVIDER_DROP_PX
+    : STICKY_COMPACT_DIVIDER_TOP_PX;
+  const dividerTopPx = isMobileExperience
+    ? dividerTopCompactPx +
+      (dividerTopMidPx - dividerTopCompactPx) * editRevealProgress +
+      (dividerTopBasePx - dividerTopMidPx) * issueRevealProgress
+    : 187 - lowerNavLiftPx;
   const stickyBoundaryHeightPx = dividerTopPx + 1;
   const effectiveStickyBackdropHeightPx = Math.min(stickyBackdropHeightPx, stickyBoundaryHeightPx);
-  const effectiveStickyStackHeightPx = Math.min(stickyStackHeightPx, stickyBoundaryHeightPx);
+  const effectiveStickyStackHeightPx = isImmersiveMobile
+    ? stickyStackHeightPx
+    : Math.min(stickyStackHeightPx, stickyBoundaryHeightPx);
+  const resolvedStickyStackHeightPx = effectiveStickyStackHeightPx;
   const isProfileOverlayOpen = false;
   const isCompactOverlayOpen =
     activeOverlaySurface === "profile" ||
@@ -151,17 +219,23 @@ export function StickyShell({
     activeOverlaySurface === "feedback" ||
     activeOverlaySurface === "about";
   const isCompactProfileOverlay = activeOverlaySurface === "profile";
+  const isMobileMenuPageOverlay =
+    isMobileExperience &&
+    (activeOverlaySurface === "settings" || activeOverlaySurface === "feedback" || activeOverlaySurface === "about");
   const shouldHideCompactMenuLinks =
-    isCompactProfileOverlay &&
+    (isCompactProfileOverlay || isMobileMenuPageOverlay) &&
     (compactOverlayPhase === "opening" || compactOverlayPhase === "open" || compactOverlayPhase === "closing");
   const isSettingsOrFeedbackOverlay = activeOverlaySurface === "settings" || activeOverlaySurface === "feedback";
   const isAnyOverlayOpen = isProfileOverlayOpen || isCompactOverlayOpen;
   const isQuickMenuVisible = quickMenuPhase !== "closed";
   const isQuickMenuEntering = quickMenuPhase === "open";
-  const shouldUseFullWidthProfileOverlay =
-    isCompactProfileOverlay && viewportWidthPx <= PROFILE_MENU_FULL_EXTEND_BREAKPOINT_PX;
-  const profileOverlayTargetWidth = shouldUseFullWidthProfileOverlay ? "100vw" : PROFILE_MENU_CONTENT_WIDTH_CSS;
-  const compactOverlayTargetWidth = isCompactProfileOverlay ? profileOverlayTargetWidth : COMPACT_MENU_SHEET_WIDTH_CSS;
+  const isCompactFullWidthOverlay = (isCompactProfileOverlay && isMobileExperience) || isMobileMenuPageOverlay;
+  const isCompactFloatingRailOverlay = isCompactProfileOverlay || isMobileMenuPageOverlay;
+  const compactOverlayTargetWidth = isCompactFullWidthOverlay
+    ? "100vw"
+    : isCompactProfileOverlay
+      ? PROFILE_MENU_CONTENT_WIDTH_CSS
+      : COMPACT_MENU_SHEET_WIDTH_CSS;
   const compactOverlayShouldExtendFromMenu = compactOverlayOrigin === "menu";
   const compactOverlayCurrentWidth =
     compactOverlayShouldExtendFromMenu && compactOverlayPhase !== "open"
@@ -174,6 +248,40 @@ export function StickyShell({
     compactOverlayShouldExtendFromMenu && compactOverlayPhase === "closing" && isCompactOverlayRailClosing;
   const isMenuTriggerMorphed = isQuickMenuVisible || isAnyOverlayOpen;
   const menuButtonAriaLabel = isQuickMenuOpen || isAnyOverlayOpen ? "Close menu" : "Open menu";
+  const headerLeftPx = isMobileExperience ? "calc(var(--mobile-safe-left) + 16px)" : "41px";
+  const modeSwitchTopPx = isMobileExperience ? MOBILE_MODE_SWITCH_TOP_PX : MODE_SWITCH_TOP_PX;
+  const brandRowTopPx = isMobileExperience
+    ? `calc(var(--mobile-safe-top) + ${MODE_SWITCH_TOP_PX + (MODE_SWITCH_HEIGHT_PX - 26) / 2}px)`
+    : "23px";
+  const brandRowRightPx = isMobileExperience ? "calc(var(--mobile-safe-right) + 16px)" : "40px";
+  const editNavTopPx = isMobileExperience ? dividerTopMidPx - MOBILE_EDIT_UNDERLINE_TOP_PX : 137.5 - lowerNavLiftPx;
+  const viewToggleTopPx = isMobileExperience ? editNavTopPx + 0.5 : 198 - lowerNavLiftPx;
+  const viewToggleRightPx = isMobileExperience ? "calc(var(--mobile-safe-right) + 10px)" : "33px";
+  const dividerLeftPx = isMobileExperience ? "0px" : "40px";
+  const dividerRightPx = isMobileExperience ? "0px" : "40px";
+  const mobileTitleBlockStyle: CSSProperties | undefined = isMobileExperience
+    ? { height: `${MOBILE_TITLE_BLOCK_HEIGHT_PX}px` }
+    : undefined;
+  const mobileTitleTextStyle: CSSProperties | undefined = isMobileExperience
+    ? { fontSize: `${MOBILE_TITLE_TEXT_SIZE_PX}px` }
+    : undefined;
+  const editLayerOpacity = editRevealProgress;
+  const issueLayerOpacity = issueRevealProgress;
+  const editLayerIssueOffsetPx = isMobileExperience ? (dividerTopBasePx - dividerTopMidPx) * issueRevealProgress : 0;
+  const editLayerTranslateYPx = isMobileExperience ? editLayerIssueOffsetPx - 10 * (1 - editRevealProgress) : 0;
+  const issueLayerTranslateYPx = isMobileExperience ? -14 * (1 - issueRevealProgress) : 0;
+  const isEditLayerHidden = isMobileExperience ? editRevealProgress < 0.02 : false;
+  const isIssueLayerHidden = isMobileExperience ? issueRevealProgress < 0.02 : false;
+  const stickyTransitionCss = isMobileExperience
+    ? isImmersiveMobile
+      ? IMMERSIVE_STICKY_TRANSITION_CSS
+      : isMobileFocus
+        ? "240ms cubic-bezier(0.2,0.78,0.22,1)"
+        : STICKY_TRANSITION_CSS
+    : "0ms linear";
+  const dividerTransitionCss = isMobileExperience && isImmersiveMobile
+    ? "top 320ms cubic-bezier(0.2,0.78,0.22,1), opacity 220ms ease-out"
+    : `top ${stickyTransitionCss}`;
   const editActionMenuRef = useRef<HTMLDivElement | null>(null);
   const quickMenuSurfaceRef = useRef<HTMLDivElement | null>(null);
   const quickMenuBrandLabelRef = useRef<HTMLSpanElement | null>(null);
@@ -186,19 +294,17 @@ export function StickyShell({
   const compactContentAnimationRef = useRef<number | null>(null);
   const compactOverlayCloseTimerRef = useRef<number | null>(null);
   const compactOverlayHoverCloseTimerRef = useRef<number | null>(null);
+  const editActionMenuCloseTimerRef = useRef<number | null>(null);
   const compactIframeRef = useRef<HTMLIFrameElement | null>(null);
   const compactContentScrollRef = useRef<HTMLDivElement | null>(null);
   const compactIframeCleanupRef = useRef<(() => void) | null>(null);
   const isPointerInWindowRef = useRef(true);
+  const mobileCategoryScrollLockRef = useRef<MobileCategoryScrollLock | null>(null);
   const [compactSettingsFeedbackHeight, setCompactSettingsFeedbackHeight] = useState<number | null>(null);
   const [quickMenuContentInsetPx, setQuickMenuContentInsetPx] = useState<number>(52);
-  const safariUa = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  const safariVendor = typeof navigator !== "undefined" ? navigator.vendor : "";
-  const isChromiumBased = /(Chrome|CriOS|Chromium|Edg|OPR|OPiOS|FxiOS)/i.test(safariUa);
-  const isSafariBrowser = /Safari/i.test(safariUa) && /Apple Computer/i.test(safariVendor) && !isChromiumBased;
   const menuIconStrokePx = isSafariBrowser ? MENU_ICON_STROKE_SAFARI_PX : MENU_ICON_STROKE_PX;
   const safariGalleryLogoStyle: CSSProperties | undefined =
-    isSafariBrowser && isGallery ? { fontWeight: 700, letterSpacing: "-0.04em" } : undefined;
+    isSafariBrowser ? { fontWeight: 700, letterSpacing: "-0.04em" } : undefined;
   const menuIconClosedTopPx = MENU_ICON_CENTER_Y_PX - MENU_ICON_HALF_GAP_PX - menuIconStrokePx / 2;
   const menuIconClosedBottomPx = MENU_ICON_CENTER_Y_PX + MENU_ICON_HALF_GAP_PX - menuIconStrokePx / 2;
   const menuIconCenterPx = MENU_ICON_CENTER_Y_PX - menuIconStrokePx / 2;
@@ -208,6 +314,46 @@ export function StickyShell({
     height: `${menuIconStrokePx}px`,
     backfaceVisibility: "hidden",
     WebkitBackfaceVisibility: "hidden",
+  };
+  const overlayPortalRoot = typeof document !== "undefined" ? document.body : null;
+  const mobileOverlayHeaderRowStyle: CSSProperties = {
+    top: brandRowTopPx,
+    right: brandRowRightPx,
+  };
+  const mobileOverlayHeaderButtonStyle: CSSProperties = {
+    top: `calc(${brandRowTopPx} + 6px)`,
+    right: brandRowRightPx,
+  };
+  const mobileOverlayHeaderBackButtonStyle: CSSProperties = {
+    top: `calc(${brandRowTopPx} + 6px)`,
+    left: headerLeftPx,
+  };
+  const mobileStickyLogoStyle: CSSProperties = {
+    top: `calc(${brandRowTopPx} + ${(26 - MOBILE_STICKY_LOGO_HEIGHT_PX) / 2}px)`,
+    left: headerLeftPx,
+  };
+  const mobileMenuRailBrandStyle: CSSProperties = {
+    top: brandRowTopPx,
+    right: "86px",
+  };
+  const mobileQuickMenuSocialRowStyle: CSSProperties = {
+    width: `calc(100% + ${Math.max(0, quickMenuContentInsetPx - 16)}px)`,
+  };
+
+  const cancelEditActionMenuClose = () => {
+    if (editActionMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(editActionMenuCloseTimerRef.current);
+      editActionMenuCloseTimerRef.current = null;
+    }
+  };
+
+  const scheduleEditActionMenuClose = () => {
+    if (!isEditActionMenuOpen) return;
+    if (editActionMenuCloseTimerRef.current !== null) return;
+    editActionMenuCloseTimerRef.current = window.setTimeout(() => {
+      editActionMenuCloseTimerRef.current = null;
+      setIsEditActionMenuOpen(false);
+    }, EDIT_ACTION_MENU_HOVER_CLOSE_MS);
   };
 
   const clearQuickMenuTimers = () => {
@@ -336,7 +482,7 @@ export function StickyShell({
   const closeOverlaySurface = () => {
     if (compactOverlayPhase === "closing" || compactOverlayPhase === "closed") return;
     clearCompactOverlayAnimation();
-    const shouldCloseThroughMenuRail = compactOverlayOrigin === "menu";
+    const shouldCloseThroughMenuRail = compactOverlayOrigin === "menu" || isMobileMenuPageOverlay;
     const finishCompactOverlayClose = () => {
       compactOverlayCloseTimerRef.current = null;
       setCompactOverlayPhase("closed");
@@ -395,6 +541,18 @@ export function StickyShell({
       quickMenuCloseTimerRef.current = null;
       setQuickMenuPhase("closed");
     }, QUICK_MENU_TRANSITION_MS);
+  };
+
+  const returnToQuickMenuFromOverlay = () => {
+    clearCompactOverlayAnimation();
+    setActiveOverlaySurface(null);
+    setCompactOverlayPhase("closed");
+    setCompactContentPhase("open");
+    setCompactOverlayOrigin("edge");
+    setIsCompactOverlayRailClosing(false);
+    setCompactSettingsFeedbackHeight(null);
+    setIsQuickMenuOpen(true);
+    setQuickMenuPhase("open");
   };
 
   const closeQuickMenuOnSurfaceLeave = (nextTarget: EventTarget | null) => {
@@ -508,12 +666,299 @@ export function StickyShell({
   }, [isEditActionMenuOpen]);
 
   useEffect(() => {
+    return () => {
+      if (editActionMenuCloseTimerRef.current !== null) {
+        window.clearTimeout(editActionMenuCloseTimerRef.current);
+        editActionMenuCloseTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const syncViewportWidth = () => {
       setViewportWidthPx(window.innerWidth);
     };
     syncViewportWidth();
     window.addEventListener("resize", syncViewportWidth);
     return () => window.removeEventListener("resize", syncViewportWidth);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isMobileExperience) return;
+    if (view !== "focus") return;
+    setStickyCollapseProgress(STICKY_PROGRESS_FULL);
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [isMobileExperience, mode, pathname, view]);
+
+  useLayoutEffect(() => {
+    if (!isMobileExperience) return;
+    if (view !== "immersive") return;
+
+    const root = document.documentElement;
+    const readCurrentStickyHeight = () => {
+      const targetHeight = document.getElementById("sticky-stack")?.getBoundingClientRect().height ?? 0;
+      if (targetHeight > 0) return targetHeight;
+
+      const cssHeight = Number.parseFloat(window.getComputedStyle(root).getPropertyValue("--sticky-h"));
+      return Number.isFinite(cssHeight) && cssHeight > 0 ? cssHeight : 156;
+    };
+
+    const freezeImmersiveStickyHeight = () => {
+      root.style.setProperty("--immersive-sticky-h", `${Math.round(readCurrentStickyHeight())}px`);
+    };
+
+    freezeImmersiveStickyHeight();
+    let rafB: number | null = null;
+    const rafA = window.requestAnimationFrame(() => {
+      freezeImmersiveStickyHeight();
+      rafB = window.requestAnimationFrame(freezeImmersiveStickyHeight);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafA);
+      if (rafB !== null) window.cancelAnimationFrame(rafB);
+      root.style.removeProperty("--immersive-sticky-h");
+    };
+  }, [isMobileExperience, mode, pathname, view]);
+
+  useEffect(() => {
+    if (!isMobileExperience) return;
+
+    const navEntries = performance.getEntriesByType("navigation") as PerformanceNavigationTiming[];
+    const navType =
+      navEntries[0]?.type ??
+      (((performance as { navigation?: { type?: number } }).navigation?.type ?? 0) === 1 ? "reload" : "navigate");
+    if (navType !== "reload") return;
+
+    const previousScrollRestoration = history.scrollRestoration;
+    history.scrollRestoration = "manual";
+    setStickyCollapseProgress(STICKY_PROGRESS_FULL);
+
+    const resetToEntryPoint = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      setStickyCollapseProgress(STICKY_PROGRESS_FULL);
+    };
+
+    resetToEntryPoint();
+    let rafB: number | null = null;
+    const rafA = window.requestAnimationFrame(() => {
+      rafB = window.requestAnimationFrame(resetToEntryPoint);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafA);
+      if (rafB !== null) window.cancelAnimationFrame(rafB);
+      history.scrollRestoration = previousScrollRestoration;
+    };
+  }, [isMobileExperience]);
+
+  useEffect(() => {
+    if (!isMobileExperience) return;
+    if (view !== "grid") {
+      return;
+    }
+
+    let rafId: number | null = null;
+    let lastScrollY = Math.max(window.scrollY, 0);
+    let currentPhase: StickyGridPhase = 0; // 0=full, 1=mid, 2=compact
+    let upIntentPx = 0;
+    let downIntentPx = 0;
+    const DIRECTION_EPSILON_PX = 0.8;
+    const UP_INTENT_TO_MID_PX = 4;
+    const DOWN_INTENT_TO_COMPACT_PX = 10;
+
+    const resolvePhaseFromScrollY = (scrollY: number): StickyGridPhase => {
+      if (scrollY <= STICKY_SCROLL_Y_MID_TO_FULL) return 0;
+      if (scrollY >= STICKY_SCROLL_Y_TO_COMPACT) return 2;
+      if (scrollY >= STICKY_SCROLL_Y_FULL_TO_MID) return 1;
+      return 0;
+    };
+
+    const phaseToProgress = (phase: 0 | 1 | 2) =>
+      phase === 0 ? STICKY_PROGRESS_FULL : phase === 1 ? STICKY_PROGRESS_MID : STICKY_PROGRESS_COMPACT;
+
+    const clearMobileCategoryScrollLock = () => {
+      const lock = mobileCategoryScrollLockRef.current;
+      if (lock?.releaseTimer !== null && lock?.releaseTimer !== undefined) {
+        window.clearTimeout(lock.releaseTimer);
+      }
+      mobileCategoryScrollLockRef.current = null;
+    };
+
+    const scheduleMobileCategoryScrollLockRelease = (delayMs: number) => {
+      const lock = mobileCategoryScrollLockRef.current;
+      if (!lock || lock.releaseTimer !== null) return;
+      lock.releaseTimer = window.setTimeout(() => {
+        clearMobileCategoryScrollLock();
+      }, delayMs);
+    };
+
+    const handleMobileCategoryScrollAnchor = (event: Event) => {
+      clearMobileCategoryScrollLock();
+      const detail = (event as CustomEvent<{ targetY?: number; durationMs?: number }>).detail;
+      const targetY = Number.isFinite(detail?.targetY) ? Math.max(0, detail.targetY as number) : null;
+      const durationMs = Number.isFinite(detail?.durationMs) ? Math.max(0, detail.durationMs as number) : 1800;
+      mobileCategoryScrollLockRef.current = {
+        phase: currentPhase,
+        targetY,
+        releaseTimer: window.setTimeout(() => {
+          clearMobileCategoryScrollLock();
+        }, durationMs + 220),
+      };
+      setStickyCollapseProgress(phaseToProgress(currentPhase));
+    };
+
+    const syncCollapseProgress = () => {
+      const scrollY = Math.max(window.scrollY, 0);
+
+      const categoryScrollLock = mobileCategoryScrollLockRef.current;
+      if (categoryScrollLock) {
+        currentPhase = categoryScrollLock.phase;
+        setStickyCollapseProgress((current) => {
+          const lockedProgress = phaseToProgress(categoryScrollLock.phase);
+          return current === lockedProgress ? current : lockedProgress;
+        });
+        lastScrollY = scrollY;
+        if (
+          categoryScrollLock.targetY !== null &&
+          Math.abs(scrollY - categoryScrollLock.targetY) <= 2
+        ) {
+          scheduleMobileCategoryScrollLockRelease(160);
+        }
+        return;
+      }
+
+      const delta = scrollY - lastScrollY;
+      const isUp = delta < -DIRECTION_EPSILON_PX;
+      const isDown = delta > DIRECTION_EPSILON_PX;
+
+      if (isUp) {
+        upIntentPx += Math.abs(delta);
+        downIntentPx = 0;
+      } else if (isDown) {
+        downIntentPx += Math.abs(delta);
+        upIntentPx = 0;
+      } else {
+        upIntentPx *= 0.7;
+        downIntentPx *= 0.7;
+      }
+
+      let nextPhase = currentPhase;
+
+      if (currentPhase === 2) {
+        if (scrollY < STICKY_SCROLL_Y_TO_COMPACT || upIntentPx >= UP_INTENT_TO_MID_PX) {
+          nextPhase = 1;
+          upIntentPx = 0;
+          downIntentPx = 0;
+        }
+      } else if (currentPhase === 1) {
+        if (scrollY <= STICKY_SCROLL_Y_MID_TO_FULL) {
+          nextPhase = 0;
+          upIntentPx = 0;
+          downIntentPx = 0;
+        } else if (scrollY >= STICKY_SCROLL_Y_TO_COMPACT && downIntentPx >= DOWN_INTENT_TO_COMPACT_PX) {
+          nextPhase = 2;
+          upIntentPx = 0;
+          downIntentPx = 0;
+        }
+      } else if (currentPhase === 0) {
+        if (scrollY >= STICKY_SCROLL_Y_FULL_TO_MID && isDown) {
+          nextPhase = 1;
+          upIntentPx = 0;
+          downIntentPx = 0;
+        }
+      }
+
+      // Keep state anchored when user jumps (tap status bar, etc.)
+      const hardPhase = resolvePhaseFromScrollY(scrollY);
+      if (hardPhase === 0 && scrollY <= STICKY_SCROLL_Y_MID_TO_FULL) {
+        nextPhase = 0;
+      }
+
+      if (nextPhase !== currentPhase) {
+        currentPhase = nextPhase;
+        const nextProgress = phaseToProgress(nextPhase);
+        setStickyCollapseProgress((current) => (current === nextProgress ? current : nextProgress));
+      }
+
+      lastScrollY = scrollY;
+    };
+
+    currentPhase = resolvePhaseFromScrollY(lastScrollY);
+    setStickyCollapseProgress(phaseToProgress(currentPhase));
+
+    const scheduleSync = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        syncCollapseProgress();
+      });
+    };
+
+    syncCollapseProgress();
+    window.addEventListener("scroll", scheduleSync, { passive: true });
+    window.addEventListener("resize", scheduleSync);
+    window.addEventListener("wheel", clearMobileCategoryScrollLock, { passive: true });
+    window.addEventListener("touchstart", clearMobileCategoryScrollLock, { passive: true });
+    window.addEventListener("keydown", clearMobileCategoryScrollLock);
+    window.addEventListener("unseen:mobile-category-scroll-anchor", handleMobileCategoryScrollAnchor);
+    window.visualViewport?.addEventListener("resize", scheduleSync);
+
+    return () => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+      clearMobileCategoryScrollLock();
+      window.removeEventListener("scroll", scheduleSync);
+      window.removeEventListener("resize", scheduleSync);
+      window.removeEventListener("wheel", clearMobileCategoryScrollLock);
+      window.removeEventListener("touchstart", clearMobileCategoryScrollLock);
+      window.removeEventListener("keydown", clearMobileCategoryScrollLock);
+      window.removeEventListener("unseen:mobile-category-scroll-anchor", handleMobileCategoryScrollAnchor);
+      window.visualViewport?.removeEventListener("resize", scheduleSync);
+    };
+  }, [isMobileExperience, view]);
+
+  useEffect(() => {
+    if (!isMobileExperience) return;
+    if (view !== "focus") return;
+
+    const handleFocusHeaderCollapse = (event: Event) => {
+      const detail = (event as CustomEvent<{ collapsed?: boolean }>).detail;
+      const nextProgress = detail?.collapsed ? STICKY_PROGRESS_COMPACT : STICKY_PROGRESS_FULL;
+      setStickyCollapseProgress((current) => (current === nextProgress ? current : nextProgress));
+    };
+
+    window.addEventListener("unseen:focus-header-collapse", handleFocusHeaderCollapse as EventListener);
+    return () => {
+      window.removeEventListener("unseen:focus-header-collapse", handleFocusHeaderCollapse as EventListener);
+    };
+  }, [isMobileExperience, view]);
+
+  useEffect(() => {
+    if (!isMobileExperience) return;
+    if (view !== "immersive") return;
+
+    const handleImmersiveHeaderCollapse = (event: Event) => {
+      const detail = (event as CustomEvent<{ collapsed?: boolean; phase?: "full" | "mid" | "compact" }>).detail;
+      const nextProgress =
+        detail?.phase === "mid"
+          ? STICKY_PROGRESS_MID
+          : detail?.phase === "compact" || detail?.collapsed
+            ? STICKY_PROGRESS_COMPACT
+            : STICKY_PROGRESS_FULL;
+      setStickyCollapseProgress((current) => (current === nextProgress ? current : nextProgress));
+    };
+
+    window.addEventListener("unseen:immersive-header-collapse", handleImmersiveHeaderCollapse as EventListener);
+    return () => {
+      window.removeEventListener("unseen:immersive-header-collapse", handleImmersiveHeaderCollapse as EventListener);
+    };
+  }, [isMobileExperience, view]);
+
+  useEffect(() => {
+    const ua = navigator.userAgent;
+    const vendor = navigator.vendor;
+    const isChromiumBased = /(Chrome|CriOS|Chromium|Edg|OPR|OPiOS|FxiOS)/i.test(ua);
+    setIsSafariBrowser(/Safari/i.test(ua) && /Apple Computer/i.test(vendor) && !isChromiumBased);
   }, []);
 
   useEffect(() => {
@@ -614,6 +1059,19 @@ export function StickyShell({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isAnyOverlayOpen, isQuickMenuOpen]);
+
+  useEffect(() => {
+    if (!isMobileMenuPageOverlay) return;
+
+    const handleMobileMenuPageBack = () => {
+      returnToQuickMenuFromOverlay();
+    };
+
+    window.addEventListener("unseen:mobile-menu-page-back", handleMobileMenuPageBack);
+    return () => {
+      window.removeEventListener("unseen:mobile-menu-page-back", handleMobileMenuPageBack);
+    };
+  }, [isMobileMenuPageOverlay]);
 
   useEffect(() => {
     return () => {
@@ -741,20 +1199,55 @@ export function StickyShell({
   return (
     <header data-sticky-root="true" className="sticky top-0 z-50">
       <StickyHeightSync targetId="sticky-stack" />
-      <div id="sticky-stack" className="relative w-full" style={{ height: `${effectiveStickyStackHeightPx}px` }}>
+      <div
+        id="sticky-stack"
+        className="relative w-full"
+        style={{ height: `${resolvedStickyStackHeightPx}px`, transition: `height ${stickyTransitionCss}` }}
+      >
         <div
           className="relative w-full bg-paper/90 backdrop-blur-md"
-          style={{ height: `${effectiveStickyBackdropHeightPx}px` }}
+          style={{ height: `${effectiveStickyBackdropHeightPx}px`, transition: `height ${stickyTransitionCss}` }}
           data-node-id={isGallery ? "768:2169" : "770:2181"}
         >
+          {isMobileExperience ? (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 z-[5]"
+              style={{ height: "calc(var(--mobile-safe-top) + 20px)" }}
+            >
+              <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(254,254,253,0.96)_0%,rgba(254,254,253,0.74)_48%,rgba(254,254,253,0)_100%)]" />
+            </div>
+          ) : null}
+
+          {isMobileExperience ? (
+            <div
+              className="pointer-events-none absolute z-20 h-[20px] w-[29px]"
+              data-sticky-mobile-logo="true"
+              style={mobileStickyLogoStyle}
+            >
+              <Image
+                src="/logos/logo-cenoir.png"
+                alt="Cenoir"
+                width={386}
+                height={266}
+                priority
+                className="h-full w-full object-contain"
+              />
+            </div>
+          ) : null}
+
           <div
-            className="absolute left-[calc(50%+10px)] h-[34px] w-[198px] -translate-x-1/2 max-[760px]:left-1/2"
-            style={{ top: `${MODE_SWITCH_TOP_PX}px` }}
+            className="absolute left-[calc(50%+10px)] h-[36px] w-[210px] -translate-x-1/2 md:h-[34px] md:w-[198px] max-[760px]:left-1/2"
+            style={{ top: `${modeSwitchTopPx}px` }}
           >
             <ModePill selected={isGallery ? "gallery" : "archive"} />
           </div>
 
-          <div className="absolute right-10 top-[23px]" data-sticky-brand-row="true">
+          <div
+            className="absolute"
+            style={{ top: brandRowTopPx, right: brandRowRightPx }}
+            data-sticky-brand-row="true"
+          >
             <div className="flex h-[26px] items-center gap-[8px]">
               <p className="hidden h-[26px] items-center text-right text-ink leading-none min-[700px]:inline-flex" data-sticky-logo-wrap="true">
                 <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]" style={safariGalleryLogoStyle}>cenoir</span>
@@ -805,24 +1298,43 @@ export function StickyShell({
             </div>
           </div>
 
-          <div className="absolute left-[41px]" style={{ top: `${TITLE_BLOCK_TOP_PX}px` }}>
+          <div
+            className="absolute"
+            data-mobile-ui-unstable="true"
+            style={{
+              left: headerLeftPx,
+              top: `${TITLE_BLOCK_TOP_PX - mobileHeaderIssueLiftPx}px`,
+              opacity: issueLayerOpacity,
+              transform: `translateY(${issueLayerTranslateYPx}px)`,
+              pointerEvents: isIssueLayerHidden ? "none" : "auto",
+              transition: `opacity ${stickyTransitionCss}, transform ${stickyTransitionCss}`,
+            }}
+          >
             <div className="group flex items-end gap-[10px] pb-0">
-              <div className="flex h-[45px] items-end">
+              <div className="flex h-[45px] items-end" style={mobileTitleBlockStyle}>
                 {isGallery ? (
-                  <h1 className={`inline-flex items-end text-[30px] leading-none ${headerColorClass}`}>
+                  <h1
+                    className={`inline-flex items-end text-[30px] leading-none ${headerColorClass}`}
+                    style={mobileTitleTextStyle}
+                    data-mobile-title-label="issue"
+                  >
                     <span className="font-ui font-normal tracking-[-0.06em]">Issue</span>
                     <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">-</span>
-                    <span className="ml-[1px] font-instrument italic tracking-[0.01em]">
+                    <span className="ml-[1px] inline-block translate-y-[1px] font-instrument italic tracking-[0.01em]">
                       {activeIssueNumber}
                     </span>
                   </h1>
                 ) : (
-                  <h1 className={`inline-flex items-end text-[30px] leading-none ${headerColorClass}`}>
+                  <h1
+                    className={`inline-flex items-end text-[30px] leading-none ${headerColorClass}`}
+                    style={mobileTitleTextStyle}
+                    data-mobile-title-label="capsules"
+                  >
                     <span className="font-ui font-normal tracking-[-0.06em]">
                       {archiveOwnerName}<span>&apos;</span><span className="-ml-[2px]">s</span>
                     </span>
                     <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">-</span>
-                    <span className="ml-[1px] font-instrument italic tracking-[0.01em]">
+                    <span className="ml-[1px] inline-block translate-y-[1px] font-instrument italic tracking-[0.01em]">
                       Capsules
                     </span>
                   </h1>
@@ -842,15 +1354,40 @@ export function StickyShell({
             </div>
           </div>
 
-          <div className="absolute left-[41px] z-20" style={{ top: `${137.5 - lowerNavLiftPx}px` }}>
+          <div
+            className={`absolute ${isMobileExperience ? "z-[130]" : "z-20"}`}
+            data-mobile-ui-unstable="true"
+            style={{
+              left: headerLeftPx,
+              top: `${editNavTopPx}px`,
+              opacity: editLayerOpacity,
+              transform: `translateY(${editLayerTranslateYPx}px)`,
+              pointerEvents: isEditLayerHidden ? "none" : "auto",
+              transition: `top ${stickyTransitionCss}, opacity ${stickyTransitionCss}, transform ${stickyTransitionCss}`,
+            }}
+          >
             <GalleryEditNav
               tabs={isGallery ? undefined : archiveCapsuleTabs}
               tone={isGallery ? "gallery" : "archive"}
               queryKey={isGallery ? "edit" : "capsule"}
+              smoothUnderline={isImmersiveMobile}
+              onCreateAction={isGallery ? handleCreateNewEdit : undefined}
+              onReviewAction={isGallery ? handleManageEdits : undefined}
             />
           </div>
 
-          <div className="absolute right-[33px] z-20" style={{ top: `${198 - lowerNavLiftPx}px` }}>
+          <div
+            className={`absolute ${isMobileExperience ? "z-[160]" : "z-20"}`}
+            data-mobile-ui-unstable="true"
+            style={{
+              right: viewToggleRightPx,
+              top: `${viewToggleTopPx}px`,
+              opacity: editLayerOpacity,
+              transform: `translateY(${editLayerTranslateYPx}px)`,
+              pointerEvents: isEditLayerHidden ? "none" : "auto",
+              transition: `top ${stickyTransitionCss}, opacity ${stickyTransitionCss}, transform ${stickyTransitionCss}`,
+            }}
+          >
             <ViewToggle
               mode={mode}
               view={view}
@@ -859,24 +1396,34 @@ export function StickyShell({
             />
           </div>
 
-          {isGallery ? (
+          {isGallery && !isMobileExperience ? (
             <div
               ref={editActionMenuRef}
               className="absolute right-[33px] z-40 h-8"
-              onMouseLeave={() => setIsEditActionMenuOpen(false)}
+              onMouseEnter={cancelEditActionMenuClose}
+              onMouseLeave={scheduleEditActionMenuClose}
               onBlurCapture={(event) => {
                 const nextTarget = event.relatedTarget;
                 if (nextTarget instanceof Node && editActionMenuRef.current?.contains(nextTarget)) return;
-                setIsEditActionMenuOpen(false);
+                scheduleEditActionMenuClose();
               }}
-              style={{ top: `${146 - lowerNavLiftPx}px` }}
+              style={{
+                top: `${146 - lowerNavLiftPx}px`,
+                opacity: editLayerOpacity,
+                transform: `translateY(${editLayerTranslateYPx}px)`,
+                pointerEvents: isEditLayerHidden ? "none" : "auto",
+                transition: `opacity ${stickyTransitionCss}, transform ${stickyTransitionCss}`,
+              }}
             >
               <button
                 type="button"
                 aria-label="Show edit actions"
                 aria-haspopup="menu"
                 aria-expanded={isEditActionMenuOpen}
-                onClick={() => setIsEditActionMenuOpen(true)}
+                onClick={() => {
+                  cancelEditActionMenuClose();
+                  setIsEditActionMenuOpen(true);
+                }}
                 className={`font-ui inline-flex h-[33px] w-[33px] items-center justify-center rounded-full border-[0.5px] text-[18px] font-normal leading-none tracking-[0.02em] transition-[opacity,color,border-color,background-color,box-shadow] ${EDIT_ACTION_MENU_TRANSITION_CLASS} focus-visible:outline-none ${
                   isEditActionMenuOpen
                     ? "pointer-events-none border-[#ECECED] bg-mist/70 text-meta opacity-0"
@@ -919,21 +1466,36 @@ export function StickyShell({
             </div>
           ) : null}
 
-          <div aria-hidden="true" className="pointer-events-none absolute left-[41px] right-[33px] z-10" style={{ top: `${136 - lowerNavLiftPx}px`, height: "42px" }} />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute right-[33px] z-10"
+            style={{ left: headerLeftPx, top: `${136 - lowerNavLiftPx}px`, height: "42px" }}
+          />
 
           <div
-            className="pointer-events-none absolute left-10 right-10 z-10 h-[1.5px]"
+            className="pointer-events-none absolute z-10 h-[1.5px]"
             data-sticky-divider="true"
-            style={{ top: `${dividerTopPx}px`, backgroundColor: DIVIDER_COLOR, boxShadow: DIVIDER_SHADOW }}
+            data-mobile-ui-divider="true"
+            style={{
+              top: `${dividerTopPx}px`,
+              left: dividerLeftPx,
+              right: dividerRightPx,
+              backgroundColor: DIVIDER_COLOR,
+              boxShadow: DIVIDER_SHADOW,
+              transition: dividerTransitionCss,
+              transform: "translateZ(0)",
+              WebkitTransform: "translateZ(0)",
+              willChange: isImmersiveMobile ? "top, opacity" : undefined,
+            }}
           />
         </div>
       </div>
 
-      {isQuickMenuVisible && !isAnyOverlayOpen ? (
+      {overlayPortalRoot && isQuickMenuVisible && !isAnyOverlayOpen ? createPortal((
       <div
         data-unseen-shell-overlay="true"
         onMouseMove={handleQuickMenuOverlayMouseMove}
-        className="fixed inset-0 z-[126] pointer-events-auto"
+        className="fixed inset-0 z-[1000] pointer-events-auto"
         aria-hidden="false"
       >
         <div
@@ -968,8 +1530,11 @@ export function StickyShell({
             }`,
           }}
         >
-          <div className="absolute inset-x-0 top-[23px] h-[26px]">
-            <div className="absolute right-10 top-0 flex h-[26px] items-center gap-[8px]">
+          <div className="absolute inset-x-0 top-0 h-[calc(var(--mobile-safe-top)+49px)] md:top-[23px] md:h-[26px]">
+            <div
+              className="absolute top-0 flex h-[26px] items-center gap-[8px] md:right-10"
+              style={isMobileExperience ? mobileMenuRailBrandStyle : undefined}
+            >
               <p className="inline-flex h-[26px] items-center text-right text-ink leading-none">
                 <span
                   ref={quickMenuBrandLabelRef}
@@ -984,13 +1549,35 @@ export function StickyShell({
                   BETA
                 </span>
               </div>
+              {!isMobileExperience ? (
+                <button
+                  type="button"
+                  aria-label="Close quick menu"
+                  onClick={closeQuickMenu}
+                  className={`relative ml-[10px] inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 ${
+                    menuHoverColorClass
+                  } ${isGallery ? "active:text-ink" : "active:text-accent"} focus-visible:outline-none`}
+                >
+                  <span
+                    className="absolute left-1/2 block -translate-x-1/2 rotate-45 rounded-full bg-current"
+                    style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
+                  />
+                  <span
+                    className="absolute left-1/2 block -translate-x-1/2 -rotate-45 rounded-full bg-current"
+                    style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
+                  />
+                </button>
+              ) : null}
+            </div>
+            {isMobileExperience ? (
               <button
                 type="button"
                 aria-label="Close quick menu"
                 onClick={closeQuickMenu}
-                className={`relative ml-[10px] inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 ${
+                className={`absolute inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 ${
                   menuHoverColorClass
                 } ${isGallery ? "active:text-ink" : "active:text-accent"} focus-visible:outline-none`}
+                style={mobileOverlayHeaderButtonStyle}
               >
                 <span
                   className="absolute left-1/2 block -translate-x-1/2 rotate-45 rounded-full bg-current"
@@ -1001,11 +1588,11 @@ export function StickyShell({
                   style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
                 />
               </button>
-            </div>
+            ) : null}
           </div>
 
           <div
-            className="flex h-full w-full flex-col pb-6 pt-[78px]"
+            className={`flex h-full w-full flex-col pt-[78px] ${isMobileExperience ? "pb-4" : "pb-6"}`}
             style={{ paddingLeft: `${quickMenuContentInsetPx}px`, paddingRight: `${quickMenuContentInsetPx}px` }}
           >
             <ol className="grid gap-[2px]">
@@ -1014,7 +1601,7 @@ export function StickyShell({
                   <button
                     type="button"
                     onClick={() => openOverlaySurface(item.id)}
-                    className="inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[14px] font-medium leading-5 tracking-[0.28px] text-meta transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
+                  className="inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[15px] font-medium leading-5 tracking-[0.28px] text-meta transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
                   >
                     {item.label}
                   </button>
@@ -1022,49 +1609,91 @@ export function StickyShell({
               ))}
             </ol>
 
-            <div className="mt-auto">
-              {bottomQuickMenuItem ? (
-                <button
-                  type="button"
-                  onClick={() => openOverlaySurface(bottomQuickMenuItem.id)}
-                  className="mb-5 inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[14px] font-medium leading-5 tracking-[0.28px] text-meta transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
-                >
-                  {bottomQuickMenuItem.label}
-                </button>
-              ) : null}
-
-              <div className="flex w-full items-center justify-between">
-                {quickMenuSocialSymbols.map((item) => (
-                  <a
-                    key={item.id}
-                    href={item.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={item.label}
-                    className="inline-flex h-[20px] w-[20px] items-center justify-center overflow-hidden text-meta transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
+            {isMobileExperience ? (
+              <div className="mt-auto">
+                {bottomQuickMenuItem ? (
+                  <button
+                    type="button"
+                    onClick={() => openOverlaySurface(bottomQuickMenuItem.id)}
+                    className="mb-3 inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[15px] font-medium leading-5 tracking-[0.28px] text-meta transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
                   >
-                    <span
-                      aria-hidden="true"
-                      className="h-[20px] w-[20px] bg-current"
-                      style={{
-                        maskImage: `url(${item.src})`,
-                        maskRepeat: "no-repeat",
-                        maskPosition: "center",
-                        maskSize: "contain",
-                        WebkitMaskImage: `url(${item.src})`,
-                        WebkitMaskRepeat: "no-repeat",
-                        WebkitMaskPosition: "center",
-                        WebkitMaskSize: "contain",
-                      }}
-                    />
-                  </a>
-                ))}
+                    {bottomQuickMenuItem.label}
+                  </button>
+                ) : null}
+
+                <div className="flex items-center justify-between" style={mobileQuickMenuSocialRowStyle}>
+                  {quickMenuSocialSymbols.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={item.label}
+                      className="inline-flex h-[26px] w-[26px] items-center justify-center overflow-hidden text-meta transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="h-[26px] w-[26px] bg-current"
+                        style={{
+                          maskImage: `url(${item.src})`,
+                          maskRepeat: "no-repeat",
+                          maskPosition: "center",
+                          maskSize: "contain",
+                          WebkitMaskImage: `url(${item.src})`,
+                          WebkitMaskRepeat: "no-repeat",
+                          WebkitMaskPosition: "center",
+                          WebkitMaskSize: "contain",
+                        }}
+                      />
+                    </a>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="mt-auto">
+                {bottomQuickMenuItem ? (
+                  <button
+                    type="button"
+                    onClick={() => openOverlaySurface(bottomQuickMenuItem.id)}
+                    className="mb-5 inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[15px] font-medium leading-5 tracking-[0.28px] text-meta transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
+                  >
+                    {bottomQuickMenuItem.label}
+                  </button>
+                ) : null}
+
+                <div className="flex w-full items-center justify-between">
+                  {quickMenuSocialSymbols.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={item.label}
+                      className="inline-flex h-[20px] w-[20px] items-center justify-center overflow-hidden text-meta transition-colors duration-150 hover:text-ink focus-visible:text-ink focus-visible:outline-none"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="h-[20px] w-[20px] bg-current"
+                        style={{
+                          maskImage: `url(${item.src})`,
+                          maskRepeat: "no-repeat",
+                          maskPosition: "center",
+                          maskSize: "contain",
+                          WebkitMaskImage: `url(${item.src})`,
+                          WebkitMaskRepeat: "no-repeat",
+                          WebkitMaskPosition: "center",
+                          WebkitMaskSize: "contain",
+                        }}
+                      />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
-      ) : null}
+      ), overlayPortalRoot) : null}
 
       {isProfileOverlayOpen ? (
       <div
@@ -1098,9 +1727,9 @@ export function StickyShell({
           />
         </button>
 
-        <div className="relative h-full w-full translate-y-0 scale-100 bg-paper transition-transform duration-300 ease-out">
-          <div className="absolute inset-x-0 top-0 z-10 px-10 pt-[24px]">
-            <div className="mx-auto w-full max-w-[1200px]">
+	                    <div className="relative h-full w-full translate-y-0 scale-100 bg-paper transition-transform duration-300 ease-out">
+		                    <div className={`absolute inset-x-0 top-0 z-10 ${isMobileExperience ? "px-4 pt-[14px]" : "px-10 pt-[24px]"}`}>
+	                      <div className="mx-auto w-full max-w-[1200px]">
               <p
                 className="text-center font-ui font-medium tracking-[0.02em] text-meta"
                 style={{ fontFamily: "var(--font-ui-sans), sans-serif" }}
@@ -1114,9 +1743,9 @@ export function StickyShell({
                 <span className="text-[13px] leading-5">Issue {activeIssueNumber}</span>
               </p>
 
-              <nav aria-label="Profile overlay sections" className="mt-[30px] w-full">
+	                        <nav aria-label="Profile overlay sections" className={`${isMobileExperience ? "mt-[14px]" : "mt-[30px]"} w-full`}>
                 <div className="relative mx-auto w-full max-w-[298px] rounded-[18px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] p-[2px] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]">
-                  <ol className="relative z-[1] grid h-[32px] w-full grid-cols-3 gap-[2px]">
+                  <ol className="relative z-[1] grid h-[35px] w-full grid-cols-3 gap-[2px] md:h-[32px]">
                     {profileOverlayTabs.map((tab) => {
                       const isActive = activeProfileOverlayTab === tab.id;
                       return (
@@ -1127,10 +1756,10 @@ export function StickyShell({
                               setActiveProfileOverlayTab(tab.id);
                               setProfileOverlayEditFlow(null);
                             }}
-                            className={`h-[32px] w-full rounded-[16px] px-3 text-center font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] transition-[background,color,box-shadow] duration-150 focus-visible:outline-none ${
+                            className={`h-[35px] w-full rounded-[999px] px-[15px] text-center font-ui text-[14px] font-normal leading-5 tracking-[-0.03em] transition-[background,color,box-shadow] duration-150 focus-visible:outline-none md:h-[32px] md:rounded-[16px] md:px-3 md:text-[13px] ${
                               isActive
                                 ? "bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)]"
-                                : "text-meta hover:text-[#5F6471]"
+                                : "text-[#6F7381] hover:text-[#5F6471]"
                             }`}
                           >
                             {tab.label}
@@ -1144,7 +1773,7 @@ export function StickyShell({
             </div>
           </div>
 
-          <div className="absolute inset-x-0 bottom-0 top-[136px] overflow-hidden">
+	                    <div className={`absolute inset-x-0 bottom-0 ${isMobileExperience ? "top-[106px]" : "top-[136px]"} overflow-hidden`}>
             <iframe
               key={`profile-${activeProfileOverlayTab}`}
               src={profileOverlayHref}
@@ -1156,11 +1785,11 @@ export function StickyShell({
       </div>
       ) : null}
 
-      {isCompactOverlayOpen ? (
+      {overlayPortalRoot && isCompactOverlayOpen ? createPortal((
       <div
         data-unseen-shell-overlay="true"
         onMouseMove={handleCompactOverlayMouseMove}
-        className="fixed inset-0 z-[130] pointer-events-auto"
+        className="fixed inset-0 z-[1000] pointer-events-auto"
         aria-hidden="false"
       >
         <div
@@ -1211,7 +1840,7 @@ export function StickyShell({
               onMouseLeave={(event) => closeCompactOverlayOnSurfaceLeave(event.relatedTarget)}
               onMouseEnter={cancelCompactOverlayHoverClose}
               className="h-full flex-none overflow-hidden"
-              style={{ width: isCompactProfileOverlay ? "100%" : COMPACT_MENU_CONTENT_WIDTH_CSS }}
+              style={{ width: isCompactFloatingRailOverlay ? "100%" : COMPACT_MENU_CONTENT_WIDTH_CSS }}
             >
               <div
                 ref={compactContentScrollRef}
@@ -1223,8 +1852,8 @@ export function StickyShell({
                 } ${isCompactProfileOverlay ? "overflow-hidden" : "overflow-y-auto px-5 pb-6 pt-0 md:px-10"}`}
               >
                 {isCompactProfileOverlay ? (
-                  <div className="relative h-full w-full translate-y-0 scale-100 bg-paper transition-transform duration-300 ease-out">
-                    <div className="absolute inset-x-0 top-0 z-10 px-10 pt-[24px]">
+	                  <div className="relative h-full w-full translate-y-0 scale-100 bg-paper transition-transform duration-300 ease-out">
+	                    <div className={`absolute inset-x-0 top-0 z-10 ${isMobileExperience ? "px-4 pt-[14px]" : "px-10 pt-[24px]"}`}>
                       <div className="mx-auto w-full max-w-[1200px]">
                         <p
                           className="text-center font-ui font-medium tracking-[0.02em] text-meta"
@@ -1239,9 +1868,9 @@ export function StickyShell({
                           <span className="text-[13px] leading-5">Issue {activeIssueNumber}</span>
                         </p>
 
-                        <nav aria-label="Profile overlay sections" className="mt-[30px] w-full">
+                        <nav aria-label="Profile overlay sections" className={`${isMobileExperience ? "mt-[14px]" : "mt-[30px]"} w-full`}>
                           <div className="relative mx-auto w-full max-w-[298px] rounded-[18px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] p-[2px] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]">
-                            <ol className="relative z-[1] grid h-[32px] w-full grid-cols-3 gap-[2px]">
+                            <ol className="relative z-[1] grid h-[35px] w-full grid-cols-3 gap-[2px] md:h-[32px]">
                               {profileOverlayTabs.map((tab) => {
                                 const isActive = activeProfileOverlayTab === tab.id;
                                 return (
@@ -1252,10 +1881,10 @@ export function StickyShell({
                                         setActiveProfileOverlayTab(tab.id);
                                         setProfileOverlayEditFlow(null);
                                       }}
-                                      className={`h-[32px] w-full rounded-[16px] px-3 text-center font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] transition-[background,color,box-shadow] duration-150 focus-visible:outline-none ${
+                                      className={`h-[35px] w-full rounded-[999px] px-[15px] text-center font-ui text-[14px] font-normal leading-5 tracking-[-0.03em] transition-[background,color,box-shadow] duration-150 focus-visible:outline-none md:h-[32px] md:rounded-[16px] md:px-3 md:text-[13px] ${
                                         isActive
                                           ? "bg-[linear-gradient(180deg,#151515_0%,#0d0d0d_100%)] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.05)]"
-                                          : "text-meta hover:text-[#5F6471]"
+                                          : "text-[#6F7381] hover:text-[#5F6471]"
                                       }`}
                                     >
                                       {tab.label}
@@ -1269,7 +1898,7 @@ export function StickyShell({
                       </div>
                     </div>
 
-                    <div className="absolute inset-x-0 bottom-0 top-[136px] overflow-hidden">
+                    <div className={`absolute inset-x-0 bottom-0 ${isMobileExperience ? "top-[104px]" : "top-[136px]"} overflow-hidden`}>
                       <iframe
                         key={`profile-${activeProfileOverlayTab}`}
                         src={profileOverlayHref}
@@ -1279,7 +1908,45 @@ export function StickyShell({
                     </div>
                   </div>
                 ) : (
-                  <div className="h-full w-full overflow-hidden">
+                  <div className="relative h-full w-full overflow-hidden">
+                    {isMobileMenuPageOverlay ? (
+                      <div className="pointer-events-none absolute inset-x-0 top-0 z-[2] h-[calc(var(--mobile-safe-top)+70px)] bg-paper/95 backdrop-blur-sm">
+                        <button
+                          type="button"
+                          aria-label="Back to menu"
+                          onClick={returnToQuickMenuFromOverlay}
+                          className="pointer-events-auto absolute inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 active:text-ink focus-visible:text-ink focus-visible:outline-none"
+                          style={mobileOverlayHeaderBackButtonStyle}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="absolute block origin-left rounded-full bg-current"
+                            style={{ width: "10px", height: `${menuIconStrokePx}px`, left: "5px", top: `${menuIconCenterPx}px`, transform: "rotate(-42deg)" }}
+                          />
+                          <span
+                            aria-hidden="true"
+                            className="absolute block origin-left rounded-full bg-current"
+                            style={{ width: "10px", height: `${menuIconStrokePx}px`, left: "5px", top: `${menuIconCenterPx}px`, transform: "rotate(42deg)" }}
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Close overlay"
+                          onClick={closeOverlaySurface}
+                          className="pointer-events-auto absolute inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 active:text-ink focus-visible:text-ink focus-visible:outline-none"
+                          style={mobileOverlayHeaderButtonStyle}
+                        >
+                          <span
+                            className="absolute left-1/2 block -translate-x-1/2 rotate-45 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)]"
+                            style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
+                          />
+                          <span
+                            className="absolute left-1/2 block -translate-x-1/2 -rotate-45 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)]"
+                            style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
+                          />
+                        </button>
+                      </div>
+                    ) : null}
                     {compactOverlayHref ? (
                     <iframe
                       ref={compactIframeRef}
@@ -1302,38 +1969,45 @@ export function StickyShell({
 
             <div
               ref={compactMenuSurfaceRef}
-              className={`${isCompactProfileOverlay ? "absolute inset-y-0 right-0" : "relative h-full flex-none"} ${
-              isCompactProfileOverlay ? "bg-transparent" : "bg-paper"
+              className={`${isCompactFloatingRailOverlay ? "pointer-events-none absolute inset-y-0 right-0" : "relative h-full flex-none"} ${
+              isCompactFloatingRailOverlay ? "bg-transparent" : "bg-paper"
             }`}
               style={{ width: COMPACT_MENU_RAIL_WIDTH_CSS }}
             >
-            <div className="absolute inset-x-0 top-[23px] h-[26px]">
-              <div
-                className="absolute right-10 top-0 flex h-[26px] items-center gap-[8px] transition-opacity duration-300 ease-out opacity-100"
-              >
-                <p className="inline-flex h-[26px] items-center text-right text-ink leading-none">
-                  <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]" style={safariGalleryLogoStyle}>cenoir</span>
-                </p>
-                <div className="inline-flex h-[12px] min-w-[28px] items-center justify-center rounded-[2px] bg-ink px-[5px]">
-                  <span className="font-ui text-[6.5px] font-bold leading-[6.5px] tracking-[-0.08px] text-paper">
-                    BETA
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  aria-label="Close overlay"
-                  onClick={closeOverlaySurface}
-                  className="relative ml-[10px] inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink active:text-ink focus-visible:text-ink focus-visible:outline-none"
-                >
-                  <span
-                    className="absolute left-1/2 block -translate-x-1/2 rotate-45 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)]"
-                    style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
-                  />
-                  <span
-                    className="absolute left-1/2 block -translate-x-1/2 -rotate-45 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)]"
-                    style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
-                  />
-                </button>
+	            <div className={`absolute inset-x-0 ${isMobileExperience ? "top-0 h-[calc(var(--mobile-safe-top)+49px)]" : "top-[23px] h-[26px]"}`}>
+	              <div
+	                className="absolute top-0 flex h-[26px] items-center gap-[8px] transition-opacity duration-300 ease-out opacity-100 md:right-10"
+	                style={isMobileExperience ? mobileOverlayHeaderRowStyle : undefined}
+	              >
+		                {!isMobileExperience || !isCompactFullWidthOverlay ? (
+	                  <>
+	                    <p className="inline-flex h-[26px] items-center text-right text-ink leading-none">
+	                      <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]" style={safariGalleryLogoStyle}>cenoir</span>
+	                    </p>
+	                    <div className="inline-flex h-[12px] min-w-[28px] items-center justify-center rounded-[2px] bg-ink px-[5px]">
+	                      <span className="font-ui text-[6.5px] font-bold leading-[6.5px] tracking-[-0.08px] text-paper">
+	                        BETA
+	                      </span>
+	                    </div>
+	                  </>
+	                ) : null}
+	                {!isMobileMenuPageOverlay ? (
+	                  <button
+	                    type="button"
+	                    aria-label="Close overlay"
+	                    onClick={closeOverlaySurface}
+	                    className={`${isMobileExperience && isCompactFullWidthOverlay ? "" : "ml-[10px]"} pointer-events-auto relative inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink active:text-ink focus-visible:text-ink focus-visible:outline-none`}
+	                  >
+	                    <span
+	                      className="absolute left-1/2 block -translate-x-1/2 rotate-45 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)]"
+	                      style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
+	                    />
+	                    <span
+	                      className="absolute left-1/2 block -translate-x-1/2 -rotate-45 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)]"
+	                      style={{ ...menuIconLineBaseStyle, top: `${menuIconCenterPx}px` }}
+	                    />
+	                  </button>
+	                ) : null}
               </div>
             </div>
 
@@ -1351,7 +2025,7 @@ export function StickyShell({
                       <button
                         type="button"
                         onClick={() => openOverlaySurface(item.id)}
-                        className={`inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[14px] font-medium leading-5 tracking-[0.28px] transition-colors duration-150 focus-visible:outline-none ${
+                        className={`inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[15px] font-medium leading-5 tracking-[0.28px] transition-colors duration-150 focus-visible:outline-none ${
                           isActiveCompactItem ? "text-ink" : "text-meta hover:text-ink focus-visible:text-ink"
                         }`}
                       >
@@ -1367,7 +2041,7 @@ export function StickyShell({
                   <button
                     type="button"
                     onClick={() => openOverlaySurface(bottomQuickMenuItem.id)}
-                    className={`mb-5 inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[14px] font-medium leading-5 tracking-[0.28px] transition-colors duration-150 focus-visible:outline-none ${
+                    className={`mb-5 inline-flex h-[31px] w-full items-center justify-start text-left font-ui text-[15px] font-medium leading-5 tracking-[0.28px] transition-colors duration-150 focus-visible:outline-none ${
                       activeOverlaySurface === bottomQuickMenuItem.id
                         ? "text-ink"
                         : "text-meta hover:text-ink focus-visible:text-ink"
@@ -1411,7 +2085,7 @@ export function StickyShell({
         </div>
       </div>
       </div>
-      ) : null}
+      ), overlayPortalRoot) : null}
     </header>
   );
 }

@@ -25,6 +25,8 @@ import {
   waitForProductImageDecode,
   warmProductImage,
 } from "@/components/unseen/productImagePreload";
+import { MobileFloatingCategoryPill } from "@/components/unseen/MobileFloatingCategoryPill";
+import { useViewportMode } from "@/lib/ui/viewportMode";
 
 type ImmersiveViewProps = {
   mode: "gallery" | "archive";
@@ -64,14 +66,21 @@ const SLOT_ORDER: SlotKey[] = [-2, -1, 0, 1, 2];
 const RETURN_FOCUS_ITEM_KEY = "unseen:return-focus-item";
 const RETURN_FLIGHT_FINISHED_EVENT = "unseen:return-flight-finished";
 const RETURN_FLIGHT_FINISHED_KEY = "unseen:return-flight-finished-flag";
+const IMMERSIVE_RETURN_STEADY_KEY = "unseen:immersive-return-steady";
 const IMMERSIVE_STATE_KEY = "unseen:immersive-state";
 const DEFAULT_RETURN_REVEAL_DELAY_MS = 820;
 const DEFAULT_VIEWPORT_WIDTH = 1440;
 const DEFAULT_SECTION_HEIGHT = 760;
+const MOBILE_FOCUS_FULL_STICKY_PX = 162;
+const MOBILE_FOCUS_COMPACT_STICKY_PX = 64;
 const CATEGORY_NAV_CLOSE_DELAY_MS = 180;
 const CATEGORY_NAV_LABEL_SWAP_DELAY_MS = 140;
 const CATEGORY_NAV_LABEL_SYNC_SUPPRESS_MS = 260;
 const ARCHIVE_ISSUE_NUMBER = "04";
+const MOBILE_FOCUS_CARD_TAP_MAX_MOVE_PX = 7;
+const DEFAULT_CARD_TAP_MAX_MOVE_PX = 14;
+const MOBILE_FOCUS_POST_NAV_OPEN_SUPPRESS_MS = 120;
+const POST_DRAG_CARD_CLICK_SUPPRESS_MS = 360;
 
 const SECTION_BY_KEY = new Map(
   sections.map((section) => [section.key as CategoryKey, section]),
@@ -105,6 +114,88 @@ function normalizeCarouselItems(items: MockCatalogItem[], minCount = 5) {
 
 function clampNumber(min: number, value: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getInitialViewportWidth() {
+  if (typeof window === "undefined") return DEFAULT_VIEWPORT_WIDTH;
+  const visualViewportWidth = window.visualViewport?.width ?? 0;
+  return Math.max(window.innerWidth, document.documentElement.clientWidth, visualViewportWidth);
+}
+
+function getInitialSectionHeight(isFocusRoute: boolean) {
+  if (typeof window === "undefined") return DEFAULT_SECTION_HEIGHT;
+  const visualViewportHeight = window.visualViewport?.height ?? 0;
+  const visibleViewportHeight = visualViewportHeight > 0 ? visualViewportHeight : window.innerHeight;
+  if (isFocusRoute && getInitialViewportWidth() < 768) {
+    return Math.round(Math.max(320, visibleViewportHeight - MOBILE_FOCUS_FULL_STICKY_PX));
+  }
+  return Math.round(visibleViewportHeight || DEFAULT_SECTION_HEIGHT);
+}
+
+function getInitialItemsForCategory(
+  mode: "gallery" | "archive",
+  activeCapsule: ArchiveCapsuleId | null,
+  category: FocusCategoryKey,
+) {
+  if (mode === "archive") {
+    return normalizeCarouselItems(archiveCapsuleItems[activeCapsule ?? "main"]);
+  }
+
+  if (category === "ALL") {
+    return normalizeCarouselItems(sections.flatMap((section) => section.items));
+  }
+
+  return normalizeCarouselItems(SECTION_BY_KEY.get(category)?.items ?? []);
+}
+
+function readInitialFocusState(mode: "gallery" | "archive", activeCapsule: ArchiveCapsuleId | null) {
+  const fallbackCategory: FocusCategoryKey = mode === "gallery" ? "ALL" : CATEGORY_KEYS[0];
+  const fallback = {
+    category: fallbackCategory,
+    focusedTrack: 0,
+  };
+
+  if (typeof window === "undefined") return fallback;
+
+  try {
+    const raw = window.sessionStorage.getItem(IMMERSIVE_STATE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as ImmersiveStatePayload;
+    const isFresh = Date.now() - parsed.at < 30 * 60 * 1000;
+    const isSameMode = parsed.mode === mode;
+    const isSameCapsule = mode !== "archive" || parsed.capsule === activeCapsule;
+    const isKnownCategory =
+      mode === "gallery"
+        ? GALLERY_CATEGORY_KEYS.includes(parsed.category)
+        : CATEGORY_KEYS.includes(parsed.category as CategoryKey);
+    if (!isFresh || !isSameMode || !isSameCapsule || !isKnownCategory) return fallback;
+
+    const restoredItems = getInitialItemsForCategory(mode, activeCapsule, parsed.category);
+    if (restoredItems.length === 0) return fallback;
+
+    if (Number.isFinite(parsed.focusedTrack)) {
+      const storedTrack = Math.trunc(parsed.focusedTrack as number);
+      const normalizedStoredIndex = normalizeIndex(storedTrack, restoredItems.length);
+      if (restoredItems[normalizedStoredIndex]?.id === parsed.itemId) {
+        return {
+          category: parsed.category,
+          focusedTrack: storedTrack,
+        };
+      }
+    }
+
+    const restoredIndex = restoredItems.findIndex((item) => item.id === parsed.itemId);
+    if (restoredIndex >= 0) {
+      return {
+        category: parsed.category,
+        focusedTrack: restoredIndex,
+      };
+    }
+  } catch {
+    // Keep fallback state if stored focus payload is malformed.
+  }
+
+  return fallback;
 }
 
 function normalizeWheelHoverZone(
@@ -197,6 +288,12 @@ function isImmersiveDragExemptTarget(target: EventTarget | null) {
   return Boolean(element?.closest('[data-immersive-drag-exempt="true"]'));
 }
 
+function isImmersiveCardTarget(target: EventTarget | null) {
+  if (!(target instanceof Node)) return false;
+  const element = target instanceof Element ? target : target.parentElement;
+  return Boolean(element?.closest('[data-immersive-card="true"]'));
+}
+
 function readReturnFocusDelayPayload() {
   if (typeof window === "undefined") return null;
   try {
@@ -230,9 +327,24 @@ function hasReturnFlightFinishedFlag() {
   }
 }
 
+function readImmersiveReturnSteadyFlag() {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.sessionStorage.getItem(IMMERSIVE_RETURN_STEADY_KEY);
+    if (!raw) return false;
+    window.sessionStorage.removeItem(IMMERSIVE_RETURN_STEADY_KEY);
+    window.sessionStorage.removeItem(RETURN_FOCUS_ITEM_KEY);
+    const parsed = JSON.parse(raw) as { at?: number };
+    return typeof parsed.at === "number" && Date.now() - parsed.at < 5000;
+  } catch {
+    return false;
+  }
+}
+
 type ImmersiveProductCardProps = {
   baseCardHeight: number;
   baseCardWidth: number;
+  enableHoverActions: boolean;
   enableEdgeEntryAnimation: boolean;
   focusLiftPx: number;
   isClickable: boolean;
@@ -240,6 +352,7 @@ type ImmersiveProductCardProps = {
   isMotionLocked: boolean;
   hiddenForReturn: boolean;
   item: MockCatalogItem;
+  loadImageEagerly: boolean;
   motionEasing: string;
   mode: "gallery" | "archive";
   motionDurationMs: number;
@@ -254,6 +367,7 @@ type ImmersiveProductCardProps = {
 function ImmersiveProductCard({
   baseCardHeight,
   baseCardWidth,
+  enableHoverActions,
   enableEdgeEntryAnimation,
   focusLiftPx,
   isClickable,
@@ -261,6 +375,7 @@ function ImmersiveProductCard({
   isMotionLocked,
   hiddenForReturn,
   item,
+  loadImageEagerly,
   motionEasing,
   mode,
   motionDurationMs,
@@ -276,7 +391,7 @@ function ImmersiveProductCard({
   const imageRef = useRef<HTMLDivElement | null>(null);
   const hoverDelayTimerRef = useRef<number | null>(null);
   const isFocused = slot === 0;
-  const hasHoverActions = isFocused && isFocusedHoverActive;
+  const hasHoverActions = enableHoverActions && isFocused && isFocusedHoverActive;
   const centeredLiftY = isFocused ? -focusLiftPx : 0;
   const shouldAnimateEdgeEntry = enableEdgeEntryAnimation && Math.abs(slot) === 2;
   const [edgeEntryProgress, setEdgeEntryProgress] = useState(shouldAnimateEdgeEntry ? 0 : 1);
@@ -433,7 +548,7 @@ function ImmersiveProductCard({
               ? "group-hover/product:blur-[1.8px] group-focus-within/product:blur-[1.8px]"
               : ""
           }`}
-          loading={isFocused ? "eager" : "lazy"}
+          loading={isFocused || loadImageEagerly ? "eager" : "lazy"}
           decoding="async"
           onDragStart={(event) => event.preventDefault()}
         />
@@ -454,6 +569,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { isIPadExperience, isMobileExperience } = useViewportMode();
+  const queryString = searchParams.toString();
+  const editParam = searchParams.get("edit");
+  const activeCapsule = mode === "archive" ? getCapsuleFromParams(searchParams) : null;
+  const isVerticalFlow = true;
+  const isFocusRoute = pathname.endsWith("/focus");
   const focusLabelRef = useRef<HTMLParagraphElement | null>(null);
   const focusedImageRef = useRef<HTMLDivElement | null>(null);
   const isOpeningProductRef = useRef(false);
@@ -480,7 +601,10 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     lastX: 0,
     moved: false,
     pointerId: -1,
+    startClientX: 0,
+    startClientY: 0,
     startAt: 0,
+    totalMovementPx: 0,
   });
   const suppressCardClickUntilRef = useRef(0);
   const navLockUntilRef = useRef(0);
@@ -495,21 +619,25 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     lastStepAt: 0,
   });
   const didInitialStateRestoreRef = useRef(false);
+  const focusHeaderCollapsedRef = useRef(false);
+  const mobileFocusHeaderCollapsedRef = useRef(false);
+  const initialFocusState = useMemo(() => readInitialFocusState(mode, activeCapsule), [activeCapsule, mode]);
 
-  const [selectedCategory, setSelectedCategory] = useState<FocusCategoryKey>(CATEGORY_KEYS[0]);
-  const [displayCategory, setDisplayCategory] = useState<FocusCategoryKey>(CATEGORY_KEYS[0]);
-  const [renderCategory, setRenderCategory] = useState<FocusCategoryKey>(CATEGORY_KEYS[0]);
+  const [selectedCategory, setSelectedCategory] = useState<FocusCategoryKey>(initialFocusState.category);
+  const [displayCategory, setDisplayCategory] = useState<FocusCategoryKey>(initialFocusState.category);
+  const [renderCategory, setRenderCategory] = useState<FocusCategoryKey>(initialFocusState.category);
   const [isCategoryNavExpanded, setIsCategoryNavExpanded] = useState(false);
   const [categoryTransitionPhase, setCategoryTransitionPhase] = useState<"idle" | "out" | "in">("idle");
-  const [focusedTrack, setFocusedTrack] = useState(0);
+  const [focusedTrack, setFocusedTrack] = useState(initialFocusState.focusedTrack);
   const [motionDurationMs, setMotionDurationMs] = useState(380);
   const [motionEasing, setMotionEasing] = useState("cubic-bezier(0.22, 1, 0.36, 1)");
   const [dragProgress, setDragProgress] = useState(0);
   const [isRowDragging, setIsRowDragging] = useState(false);
   const [stageCenterOffsetPx, setStageCenterOffsetPx] = useState(0);
-  const [viewportWidth, setViewportWidth] = useState(DEFAULT_VIEWPORT_WIDTH);
-  const [sectionHeight, setSectionHeight] = useState(DEFAULT_SECTION_HEIGHT);
+  const [viewportWidth, setViewportWidth] = useState(() => getInitialViewportWidth());
+  const [sectionHeight, setSectionHeight] = useState(() => getInitialSectionHeight(isFocusRoute));
   const [hasCompletedInitialCardMount, setHasCompletedInitialCardMount] = useState(false);
+  const [suppressReturnEntryAnimation, setSuppressReturnEntryAnimation] = useState(() => readImmersiveReturnSteadyFlag());
   const [hoveredWheelZone, setHoveredWheelZone] = useState<"none" | "left" | "right" | "top" | "center">("none");
   const [isSafariBrowser, setIsSafariBrowser] = useState(false);
   const [returnImageState, setReturnImageState] = useState(() => {
@@ -531,10 +659,30 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const isReturnInteractionLocked = returnImageState.freezeLane;
   const isReturnLaneFrozen = isReturnInteractionLocked;
 
-  const queryString = searchParams.toString();
-  const editParam = searchParams.get("edit");
-  const activeCapsule = mode === "archive" ? getCapsuleFromParams(searchParams) : null;
-  const isVerticalFlow = true;
+  const isMobileFocusViewport = viewportWidth < 768;
+  const usesMobileFocusTapZones = isFocusRoute && isMobileFocusViewport;
+  const setFocusHeaderCollapsed = useCallback(
+    (collapsed: boolean) => {
+      if (!isVerticalFlow) return;
+      mobileFocusHeaderCollapsedRef.current = collapsed;
+      if (focusHeaderCollapsedRef.current === collapsed) return;
+      focusHeaderCollapsedRef.current = collapsed;
+      window.dispatchEvent(new CustomEvent("unseen:focus-header-collapse", { detail: { collapsed } }));
+    },
+    [isVerticalFlow],
+  );
+
+  useEffect(() => {
+    if (!isVerticalFlow) return;
+    focusHeaderCollapsedRef.current = false;
+    mobileFocusHeaderCollapsedRef.current = false;
+    window.dispatchEvent(new CustomEvent("unseen:focus-header-collapse", { detail: { collapsed: false } }));
+    return () => {
+      focusHeaderCollapsedRef.current = false;
+      mobileFocusHeaderCollapsedRef.current = false;
+      window.dispatchEvent(new CustomEvent("unseen:focus-header-collapse", { detail: { collapsed: false } }));
+    };
+  }, [isVerticalFlow]);
 
   useEffect(() => {
     dragProgressRef.current = dragProgress;
@@ -566,6 +714,14 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     });
     return () => window.cancelAnimationFrame(raf);
   }, []);
+
+  useEffect(() => {
+    if (!suppressReturnEntryAnimation) return;
+    const timer = window.setTimeout(() => {
+      setSuppressReturnEntryAnimation(false);
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [suppressReturnEntryAnimation]);
 
   useEffect(() => {
     setIsSafariBrowser(detectSafariBrowser());
@@ -772,10 +928,15 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       body.style.paddingRight = `${currentBodyPaddingRight + scrollbarWidth}px`;
     }
 
+    const isInsideStickyEditNav = (target: EventTarget | null) =>
+      target instanceof Element && Boolean(target.closest('[data-gallery-edit-nav="true"]'));
+
     const preventPageScroll = (event: WheelEvent) => {
+      if (isInsideStickyEditNav(event.target)) return;
       event.preventDefault();
     };
     const preventTouchScroll = (event: TouchEvent) => {
+      if (isInsideStickyEditNav(event.target)) return;
       event.preventDefault();
     };
     const preventScrollKeys = (event: KeyboardEvent) => {
@@ -831,6 +992,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   }, [mode]);
 
   useLayoutEffect(() => {
+    const isSafariMobileViewport = detectSafariBrowser() && window.matchMedia("(max-width: 767px)").matches;
     const updateViewportWidth = () => {
       const visualViewportWidth = window.visualViewport?.width ?? 0;
       const visualViewportHeight = window.visualViewport?.height ?? 0;
@@ -851,20 +1013,43 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
 
       const sectionRect = sectionRef.current?.getBoundingClientRect();
       if (sectionRect?.height && sectionRect.height > 0) {
-        setSectionHeight(sectionRect.height);
+        const isMobileFocusViewport = isFocusRoute && viewportW < 768;
+        const visibleViewportHeight = visualViewportHeight > 0 ? visualViewportHeight : window.innerHeight;
+        const mobileFocusStickyHeight = mobileFocusHeaderCollapsedRef.current
+          ? MOBILE_FOCUS_COMPACT_STICKY_PX
+          : MOBILE_FOCUS_FULL_STICKY_PX;
+        const visibleSectionHeight =
+          isMobileFocusViewport && visibleViewportHeight > 0
+            ? Math.max(320, visibleViewportHeight - mobileFocusStickyHeight)
+            : sectionRect.height;
+        const nextSectionHeight = Math.round(visibleSectionHeight);
+        setSectionHeight((current) => (current === nextSectionHeight ? current : nextSectionHeight));
       } else if (visualViewportHeight > 0) {
-        setSectionHeight(visualViewportHeight);
+        const nextSectionHeight = Math.round(visualViewportHeight);
+        setSectionHeight((current) => (current === nextSectionHeight ? current : nextSectionHeight));
       }
     };
     updateViewportWidth();
-    window.addEventListener("resize", updateViewportWidth);
-    window.visualViewport?.addEventListener("resize", updateViewportWidth);
+    const sectionObserver = new ResizeObserver(() => updateViewportWidth());
+    if (sectionRef.current) {
+      sectionObserver.observe(sectionRef.current);
+    }
+    const handleViewportResize = () => updateViewportWidth();
+    window.addEventListener("resize", handleViewportResize);
+    window.addEventListener("sticky-height-change", handleViewportResize);
+    if (!isSafariMobileViewport) {
+      window.visualViewport?.addEventListener("resize", handleViewportResize);
+    }
 
     return () => {
-      window.removeEventListener("resize", updateViewportWidth);
-      window.visualViewport?.removeEventListener("resize", updateViewportWidth);
+      sectionObserver.disconnect();
+      window.removeEventListener("resize", handleViewportResize);
+      window.removeEventListener("sticky-height-change", handleViewportResize);
+      if (!isSafariMobileViewport) {
+        window.visualViewport?.removeEventListener("resize", handleViewportResize);
+      }
     };
-  }, []);
+  }, [isFocusRoute]);
 
   useEffect(() => {
     const renderCategoryItems = itemsByCategory[renderCategory] ?? [];
@@ -883,7 +1068,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const hideGallerySideSlots = isVerticalFlow && sectionHeight < 450;
   const hideGalleryMetaForSpace = isVerticalFlow && sectionHeight < 500;
   const galleryMetaRowHeightPx = 72;
-  const galleryMetaGapPx = 7;
+  const galleryMetaGapPx = usesMobileFocusTapZones ? 22 : 7;
   const galleryRowHeightPx = useMemo(() => {
     if (!isVerticalFlow) return 0;
     const vh = sectionHeight > 0 ? sectionHeight : DEFAULT_SECTION_HEIGHT;
@@ -903,11 +1088,66 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     if (isVerticalFlow) {
       // Rotate the same immersive spacing logic to vertical axis.
       const laneHeight = galleryRowHeightPx > 0 ? galleryRowHeightPx : 520;
+      if (isFocusRoute && vw < 768) {
+        const mobileFocusWidth = clampNumber(230, vw * 0.64, 286);
+        const mobileFocusHeight = clampNumber(300, laneHeight * 0.455, 352);
+        const mobileSideWidth = clampNumber(108, vw * 0.34, 148);
+        const mobileSideHeight = clampNumber(142, laneHeight * 0.218, 190);
+        const visibleCropPx = clampNumber(42, laneHeight * 0.076, 58);
+        const nearCenter = laneHeight / 2 + mobileSideHeight / 2 - visibleCropPx;
+        const farCenter = nearCenter + mobileSideHeight * 0.62;
+
+        return {
+          [-2]: {
+            width: mobileSideWidth,
+            height: mobileSideHeight,
+            translateX: -farCenter,
+            zIndex: 10,
+            opacity: gallerySideOpacity * 0.22,
+            scale: 1,
+          },
+          [-1]: {
+            width: mobileSideWidth,
+            height: mobileSideHeight,
+            translateX: -nearCenter,
+            zIndex: 20,
+            opacity: gallerySideOpacity,
+            scale: 1,
+          },
+          [0]: {
+            width: mobileFocusWidth,
+            height: mobileFocusHeight,
+            translateX: 0,
+            zIndex: 40,
+            opacity: 1,
+            scale: 1,
+          },
+          [1]: {
+            width: mobileSideWidth,
+            height: mobileSideHeight,
+            translateX: nearCenter,
+            zIndex: 20,
+            opacity: gallerySideOpacity,
+            scale: 1,
+          },
+          [2]: {
+            width: mobileSideWidth,
+            height: mobileSideHeight,
+            translateX: farCenter,
+            zIndex: 10,
+            opacity: gallerySideOpacity * 0.22,
+            scale: 1,
+          },
+        } satisfies Record<SlotKey, CardPresentation>;
+      }
+
       const focusWidth = clampNumber(210, focusWidthBase * 1.48, 405 + largeViewportGrowthPx * 0.05);
       const focusHeight = clampNumber(292, focusHeightBase * 1.48, 561 + largeViewportGrowthPx * 0.065);
       const heightPressure = clampNumber(0, (620 - sectionHeight) / 220, 1);
       const minGapPx = Math.round(58 + heightPressure * 14);
       const laneHalfPx = Math.max(0, laneHeight / 2 - 4);
+      const mobileFocusBottomOverscanPx =
+        isFocusRoute && vw < 768 ? Math.round(clampNumber(8, laneHeight * 0.018, 16)) : 0;
       const maxCombinedHeight = Math.max(1, (laneHalfPx - minGapPx) * 2);
       const combinedHeight = focusHeight + sideHeight;
       const compactScale = clampNumber(0.58, maxCombinedHeight / Math.max(1, combinedHeight), 1);
@@ -955,7 +1195,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         [1]: {
           width: compactSideWidth,
           height: compactSideHeight,
-          translateX: nearTopCenter,
+          translateX: nearTopCenter + mobileFocusBottomOverscanPx,
           zIndex: 20,
           opacity: gallerySideOpacity,
           scale: 1,
@@ -963,7 +1203,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         [2]: {
           width: compactSideWidth,
           height: compactSideHeight,
-          translateX: farClusterCenter,
+          translateX: farClusterCenter + mobileFocusBottomOverscanPx * 1.12,
           zIndex: 10,
           opacity: gallerySideOpacity * 0.7,
           scale: 1,
@@ -1022,7 +1262,15 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         scale: 1,
       },
     } satisfies Record<SlotKey, CardPresentation>;
-  }, [galleryRowHeightPx, gallerySideOpacity, isVerticalFlow, sectionHeight, stageCenterOffsetPx, viewportWidth]);
+  }, [
+    galleryRowHeightPx,
+    gallerySideOpacity,
+    isFocusRoute,
+    isVerticalFlow,
+    sectionHeight,
+    stageCenterOffsetPx,
+    viewportWidth,
+  ]);
 
   const edgeFadeWidth = useMemo(() => {
     const vw = viewportWidth > 0 ? viewportWidth : 1440;
@@ -1249,43 +1497,59 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       prefetchItem(item);
 
       const imgEl = imageNode?.querySelector("img") as HTMLImageElement | null;
-      await waitForProductImageDecode(imgEl, item.imgSrc, 180);
-      await nextAnimationFrame();
-      if (!imageNode?.isConnected) {
-        isOpeningProductRef.current = false;
-        return;
-      }
+      if (!isMobileExperience) {
+        await waitForProductImageDecode(imgEl, item.imgSrc, 180);
+        await nextAnimationFrame();
+        if (!imageNode?.isConnected) {
+          isOpeningProductRef.current = false;
+          return;
+        }
 
-      const containerRect = imageNode?.getBoundingClientRect() ?? null;
-      const imgRect = imgEl?.getBoundingClientRect() ?? null;
-      const aspectRatio = getLoadedImageAspectRatio(imgEl);
-      const containRect =
-        containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
-      const sourceRect = containRect ?? imgRect ?? containerRect;
-      showProductTransitionHold(imageNode, item.imgSrc, aspectRatio, item.id);
+        const containerRect = imageNode?.getBoundingClientRect() ?? null;
+        const imgRect = imgEl?.getBoundingClientRect() ?? null;
+        const aspectRatio = getLoadedImageAspectRatio(imgEl);
+        const containRect =
+          containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
+        const sourceRect = containRect ?? imgRect ?? containerRect;
+        showProductTransitionHold(imageNode, item.imgSrc, aspectRatio, item.id);
 
-      if (sourceRect) {
+        if (sourceRect) {
+          try {
+            window.sessionStorage.setItem(
+              "unseen:product-view-transition",
+              JSON.stringify({
+                itemId: item.id,
+                src: item.imgSrc,
+                left: sourceRect.left,
+                top: sourceRect.top,
+                width: sourceRect.width,
+                height: sourceRect.height,
+                aspectRatio,
+                at: Date.now(),
+              }),
+            );
+          } catch {
+            // Transition is optional; ignore storage failures.
+          }
+        }
+      } else {
+        if (!imageNode?.isConnected) {
+          isOpeningProductRef.current = false;
+          return;
+        }
         try {
-          window.sessionStorage.setItem(
-            "unseen:product-view-transition",
-            JSON.stringify({
-              itemId: item.id,
-              src: item.imgSrc,
-              left: sourceRect.left,
-              top: sourceRect.top,
-              width: sourceRect.width,
-              height: sourceRect.height,
-              aspectRatio,
-              at: Date.now(),
-            }),
-          );
+          window.sessionStorage.removeItem("unseen:product-view-transition");
+          window.sessionStorage.removeItem("unseen:product-view-text-transition");
+          window.sessionStorage.removeItem("unseen:return-focus-item");
+          window.sessionStorage.removeItem("unseen:return-flight-finished-flag");
+          document.getElementById("unseen-product-transition-source-hold")?.remove();
         } catch {
-          // Transition is optional; ignore storage failures.
+          // Optional cleanup failure is non-blocking.
         }
       }
 
-      const textRect = focusLabelRef.current?.getBoundingClientRect();
-      if (textRect) {
+      if (!isMobileExperience && focusLabelRef.current) {
+        const textRect = focusLabelRef.current.getBoundingClientRect();
         try {
           window.sessionStorage.setItem(
             "unseen:product-view-text-transition",
@@ -1318,14 +1582,18 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       }
 
       try {
-        window.sessionStorage.setItem(
-          "unseen:return-scroll",
-          JSON.stringify({
-            at: Date.now(),
-            backHref,
-            scrollY: window.scrollY,
-          }),
-        );
+        if (!isMobileExperience) {
+          window.sessionStorage.setItem(
+            "unseen:return-scroll",
+            JSON.stringify({
+              at: Date.now(),
+              backHref,
+              scrollY: window.scrollY,
+            }),
+          );
+        } else {
+          window.sessionStorage.removeItem("unseen:return-scroll");
+        }
       } catch {
         // Ignore storage failures.
       }
@@ -1343,11 +1611,11 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         }
       }, 420);
     },
-    [activeCapsule, backHref, buildProductViewHref, focusedTrack, mode, prefetchItem, renderCategory, router],
+    [activeCapsule, backHref, buildProductViewHref, focusedTrack, isMobileExperience, mode, prefetchItem, renderCategory, router],
   );
 
   const navigateBy = useCallback(
-    (delta: number, velocity = 1, mode: "default" | "rapid" = "default") => {
+    (delta: number, velocity = 1, mode: "default" | "rapid" = "default", syncFocusHeader = true) => {
       if (activeItems.length <= 1 || delta === 0) return;
       const now = performance.now();
       if (mode === "default" && now < navLockUntilRef.current) return;
@@ -1359,26 +1627,46 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       dragProgressRef.current = 0;
       setDragProgress(0);
       setMotionEasing(
-        mode === "rapid" ? "cubic-bezier(0.16, 0.92, 0.2, 1)" : "cubic-bezier(0.2, 0.9, 0.24, 1)",
+        usesMobileFocusTapZones
+          ? mode === "rapid"
+            ? "cubic-bezier(0.18, 0.84, 0.24, 1)"
+            : "cubic-bezier(0.22, 0.86, 0.26, 1)"
+          : mode === "rapid"
+            ? "cubic-bezier(0.16, 0.92, 0.2, 1)"
+            : "cubic-bezier(0.2, 0.9, 0.24, 1)",
       );
       const steps = Math.max(1, Math.round(Math.abs(delta)));
       const direction = delta > 0 ? 1 : -1;
+      if (isVerticalFlow && syncFocusHeader) {
+        setFocusHeaderCollapsed(direction > 0);
+      }
       const isBurst = mode === "rapid" && now - lastRapidNavAtRef.current < 260;
       const duration = Math.round(
-        mode === "rapid"
-          ? clampNumber(320, 560 - velocity * 90 - (steps - 1) * 26 - (isBurst ? 80 : 0), 560)
-          : clampNumber(620, 860 - velocity * 85 - (steps - 1) * 20, 860),
+        isVerticalFlow
+          ? mode === "rapid"
+            ? usesMobileFocusTapZones
+              ? clampNumber(210, 410 - velocity * 70 - (steps - 1) * 18 - (isBurst ? 42 : 0), 410)
+              : clampNumber(210, 420 - velocity * 80 - (steps - 1) * 22 - (isBurst ? 70 : 0), 420)
+            : usesMobileFocusTapZones
+              ? clampNumber(290, 510 - velocity * 58 - (steps - 1) * 14, 510)
+              : clampNumber(320, 560 - velocity * 70 - (steps - 1) * 18, 560)
+          : mode === "rapid"
+            ? clampNumber(320, 560 - velocity * 90 - (steps - 1) * 26 - (isBurst ? 80 : 0), 560)
+            : clampNumber(620, 860 - velocity * 85 - (steps - 1) * 20, 860),
       );
+      if (usesMobileFocusTapZones) {
+        suppressCardClickUntilRef.current = Date.now() + duration + MOBILE_FOCUS_POST_NAV_OPEN_SUPPRESS_MS;
+      }
       setMotionDurationMs(duration);
       setFocusedTrack((current) => current + direction * steps);
       if (mode === "rapid") {
         lastRapidNavAtRef.current = now;
-        navLockUntilRef.current = now + 90;
+        navLockUntilRef.current = now + (isVerticalFlow ? (usesMobileFocusTapZones ? 30 : 56) : 90);
       } else {
-        navLockUntilRef.current = now + duration * 0.9;
+        navLockUntilRef.current = now + duration * (isVerticalFlow ? (usesMobileFocusTapZones ? 0.5 : 0.72) : 0.9);
       }
     },
-    [activeItems.length],
+    [activeItems.length, isVerticalFlow, setFocusHeaderCollapsed, usesMobileFocusTapZones],
   );
 
   const selectCategory = useCallback(
@@ -1489,7 +1777,11 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         : hasHorizontalIntent
           ? event.deltaX
           : event.deltaY;
-      if (Math.abs(primaryDelta) < 1.2) return;
+      const minDelta = usesMobileFocusTapZones ? 0.7 : 1.2;
+      if (Math.abs(primaryDelta) < minDelta) return;
+      if (isVerticalFlow) {
+        setFocusHeaderCollapsed(primaryDelta > 0);
+      }
 
       event.preventDefault();
       const normalizedDelta =
@@ -1498,9 +1790,11 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           : event.deltaMode === 2
             ? primaryDelta * 120
             : primaryDelta;
-      const dampedDelta = clampNumber(-52, normalizedDelta, 52);
+      const dampedDelta = usesMobileFocusTapZones
+        ? clampNumber(-68, normalizedDelta, 68)
+        : clampNumber(-52, normalizedDelta, 52);
       rowWheelAccumulatorRef.current += dampedDelta;
-      const threshold = 170;
+      const threshold = isVerticalFlow ? (usesMobileFocusTapZones ? 40 : 56) : 170;
       const wheelIntensity = clampNumber(0.7, Math.abs(normalizedDelta) / 26, 2.8);
       rowWheelPendingDirectionRef.current = rowWheelAccumulatorRef.current > 0 ? 1 : -1;
       if (rowWheelRafRef.current !== null) return;
@@ -1518,21 +1812,30 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         }
 
         if (Math.abs(rowWheelAccumulatorRef.current) < threshold || direction === 0) return;
-        const stepCooldownMs = Math.round(clampNumber(90, 220 - wheelIntensity * 60, 220));
+        const stepCooldownMs = isVerticalFlow
+          ? usesMobileFocusTapZones
+            ? Math.round(clampNumber(16, 70 - wheelIntensity * 24, 78))
+            : Math.round(clampNumber(28, 96 - wheelIntensity * 28, 104))
+          : Math.round(clampNumber(90, 220 - wheelIntensity * 60, 220));
         if (now - rowWheelLastStepAtRef.current < stepCooldownMs) return;
         if (!isDirectionFlip && now < rowWheelNavLockUntilRef.current) return;
 
-        const navMode = isDirectionFlip || wheelIntensity > 1.2 ? "rapid" : "default";
+        const navMode = isDirectionFlip || wheelIntensity > (usesMobileFocusTapZones ? 0.95 : 1.2) ? "rapid" : "default";
         navigateBy(direction, isDirectionFlip ? Math.max(1.6, wheelIntensity) : wheelIntensity, navMode);
         rowWheelAccumulatorRef.current -= direction * threshold;
         rowWheelLastStepAtRef.current = now;
         rowWheelNavLockUntilRef.current = isDirectionFlip
-          ? now + 28
-          : now + Math.round(clampNumber(90, 240 - wheelIntensity * 70, 240));
+          ? now + (isVerticalFlow ? (usesMobileFocusTapZones ? 4 : 8) : 28)
+          : now +
+              (isVerticalFlow
+                ? usesMobileFocusTapZones
+                  ? Math.round(clampNumber(18, 74 - wheelIntensity * 24, 82))
+                  : Math.round(clampNumber(30, 110 - wheelIntensity * 30, 120))
+                : Math.round(clampNumber(90, 240 - wheelIntensity * 70, 240)));
         rowWheelLastDirectionRef.current = direction;
       });
     },
-    [activeItems.length, isReturnInteractionLocked, isVerticalFlow, navigateBy],
+    [activeItems.length, isReturnInteractionLocked, isVerticalFlow, navigateBy, setFocusHeaderCollapsed, usesMobileFocusTapZones],
   );
 
   const handleRowPointerDown = useCallback(
@@ -1553,7 +1856,10 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       rowDragRef.current.accumX = 0;
       rowDragRef.current.lastVelocityX = 0;
       rowDragRef.current.moved = false;
+      rowDragRef.current.startClientX = event.clientX;
+      rowDragRef.current.startClientY = event.clientY;
       dragProgressRef.current = 0;
+      rowDragRef.current.totalMovementPx = 0;
       if (dragProgressRafRef.current !== null) {
         cancelAnimationFrame(dragProgressRafRef.current);
         dragProgressRafRef.current = null;
@@ -1579,23 +1885,33 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       drag.lastX = primaryPointer;
       drag.lastT = now;
       drag.accumX += dx;
+      drag.totalMovementPx = Math.max(
+        drag.totalMovementPx,
+        Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY),
+      );
 
-      if (Math.abs(drag.accumX) > 18) {
+      if (
+        Math.abs(drag.accumX) > 18 ||
+        drag.totalMovementPx > (usesMobileFocusTapZones ? MOBILE_FOCUS_CARD_TAP_MAX_MOVE_PX : DEFAULT_CARD_TAP_MAX_MOVE_PX)
+      ) {
         drag.moved = true;
       }
+      if (isVerticalFlow && Math.abs(drag.accumX) > 8) {
+        setFocusHeaderCollapsed(drag.accumX < 0);
+      }
 
-      const holdLatencyMs = 220;
-      const earlyDragAllowancePx = 56;
+      const holdLatencyMs = isVerticalFlow ? (usesMobileFocusTapZones ? 8 : 30) : 220;
+      const earlyDragAllowancePx = isVerticalFlow ? (usesMobileFocusTapZones ? 10 : 18) : 56;
       if (now - drag.startAt < holdLatencyMs && Math.abs(drag.accumX) < earlyDragAllowancePx) {
         return;
       }
 
       // Scrub-only during drag; commit decision is made on release for calmer behavior.
-      const scrubDistancePx = 320;
+      const scrubDistancePx = isVerticalFlow ? (usesMobileFocusTapZones ? 220 : 260) : 320;
       const targetProgress = clampNumber(-4.8, drag.accumX / scrubDistancePx, 4.8);
       const current = dragProgressRef.current;
-      const easedNext = current + (targetProgress - current) * 0.24;
-      const maxStepPerFrame = 0.42;
+      const easedNext = current + (targetProgress - current) * (isVerticalFlow ? (usesMobileFocusTapZones ? 0.36 : 0.34) : 0.24);
+      const maxStepPerFrame = isVerticalFlow ? (usesMobileFocusTapZones ? 0.64 : 0.72) : 0.42;
       dragProgressRef.current = clampNumber(
         -4.8,
         current + clampNumber(-maxStepPerFrame, easedNext - current, maxStepPerFrame),
@@ -1609,7 +1925,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         });
       }
     },
-    [isReturnInteractionLocked, isVerticalFlow],
+    [isReturnInteractionLocked, isVerticalFlow, setFocusHeaderCollapsed, usesMobileFocusTapZones],
   );
 
   const finishRowDrag = useCallback(
@@ -1627,41 +1943,67 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       }
 
       const absDrag = Math.abs(drag.accumX);
+      const totalMovementPx = Math.max(
+        drag.totalMovementPx,
+        Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY),
+      );
+      const cleanTapMaxMovePx = usesMobileFocusTapZones
+        ? MOBILE_FOCUS_CARD_TAP_MAX_MOVE_PX
+        : DEFAULT_CARD_TAP_MAX_MOVE_PX;
       if (absDrag < 18) {
         setIsRowDragging(false);
         dragProgressRef.current = 0;
         setDragProgress(0);
-        const clickTarget = document
-          .elementFromPoint(event.clientX, event.clientY)
-          ?.closest<HTMLElement>('[data-immersive-card="true"]');
+        const clickTarget =
+          totalMovementPx <= cleanTapMaxMovePx
+            ? document
+                .elementFromPoint(event.clientX, event.clientY)
+                ?.closest<HTMLElement>('[data-immersive-card="true"]')
+            : null;
         if (clickTarget) {
           // Pointer capture can swallow native child click; forward tap intent explicitly.
           requestAnimationFrame(() => {
             clickTarget.click();
           });
+        } else if (totalMovementPx > cleanTapMaxMovePx) {
+          suppressCardClickUntilRef.current = Date.now() + POST_DRAG_CARD_CLICK_SUPPRESS_MS;
         }
         drag.pointerId = -1;
         drag.accumX = 0;
         drag.lastVelocityX = 0;
         drag.moved = false;
+        drag.startClientX = 0;
+        drag.startClientY = 0;
         drag.startAt = 0;
+        drag.totalMovementPx = 0;
         return;
       }
 
       if (drag.moved) {
-        suppressCardClickUntilRef.current = Date.now() + 280;
+        suppressCardClickUntilRef.current = Date.now() + POST_DRAG_CARD_CLICK_SUPPRESS_MS;
       }
 
-      const scrubDistancePx = 320;
+      const scrubDistancePx = isVerticalFlow ? (usesMobileFocusTapZones ? 220 : 260) : 320;
       const releaseProgress = clampNumber(-4.8, drag.accumX / scrubDistancePx, 4.8);
-      const snapShift = Math.round(releaseProgress);
+      if (isVerticalFlow && Math.abs(releaseProgress) > 0.04) {
+        setFocusHeaderCollapsed(releaseProgress < 0);
+      }
+      const snapShift = usesMobileFocusTapZones
+        ? Math.abs(releaseProgress) >= 0.32
+          ? Math.sign(releaseProgress)
+          : 0
+        : Math.round(releaseProgress);
       const shouldCommit = snapShift !== 0 && activeItems.length > 1;
 
       if (shouldCommit) {
         const velocity = Math.abs(drag.lastVelocityX);
-        const commitDuration = Math.round(clampNumber(460, 700 - velocity * 100, 700));
+        const commitDuration = isVerticalFlow
+          ? usesMobileFocusTapZones
+            ? Math.round(clampNumber(230, 440 - velocity * 74, 460))
+            : Math.round(clampNumber(250, 500 - velocity * 80, 520))
+          : Math.round(clampNumber(460, 700 - velocity * 100, 700));
         setMotionDurationMs(commitDuration);
-        setMotionEasing("cubic-bezier(0.16, 0.92, 0.2, 1)");
+        setMotionEasing(usesMobileFocusTapZones ? "cubic-bezier(0.18, 0.84, 0.24, 1)" : "cubic-bezier(0.16, 0.92, 0.2, 1)");
 
         // Keep continuity at release: keep residual phase after index snap, then settle to center.
         const residual = releaseProgress - snapShift;
@@ -1674,9 +2016,13 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
           setDragProgress(0);
         });
       } else {
-        const settleDuration = Math.round(clampNumber(400, 620 - Math.abs(drag.lastVelocityX) * 80, 620));
+        const settleDuration = isVerticalFlow
+          ? usesMobileFocusTapZones
+            ? Math.round(clampNumber(210, 340 - Math.abs(drag.lastVelocityX) * 54, 360))
+            : Math.round(clampNumber(220, 360 - Math.abs(drag.lastVelocityX) * 60, 380))
+          : Math.round(clampNumber(400, 620 - Math.abs(drag.lastVelocityX) * 80, 620));
         setMotionDurationMs(settleDuration);
-        setMotionEasing("cubic-bezier(0.2, 0.88, 0.28, 1)");
+        setMotionEasing(usesMobileFocusTapZones ? "cubic-bezier(0.22, 0.86, 0.26, 1)" : "cubic-bezier(0.2, 0.88, 0.28, 1)");
         setIsRowDragging(false);
         dragProgressRef.current = 0;
         setDragProgress(0);
@@ -1686,9 +2032,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       drag.accumX = 0;
       drag.lastVelocityX = 0;
       drag.moved = false;
+      drag.startClientX = 0;
+      drag.startClientY = 0;
       drag.startAt = 0;
+      drag.totalMovementPx = 0;
     },
-    [activeItems.length, isReturnInteractionLocked],
+    [activeItems.length, isReturnInteractionLocked, isVerticalFlow, setFocusHeaderCollapsed, usesMobileFocusTapZones],
   );
 
   const getWheelAngle = useCallback((clientX: number, clientY: number) => {
@@ -1746,6 +2095,9 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     rowDragRef.current.accumX = 0;
     rowDragRef.current.lastVelocityX = 0;
     rowDragRef.current.moved = false;
+    rowDragRef.current.startClientX = 0;
+    rowDragRef.current.startClientY = 0;
+    rowDragRef.current.totalMovementPx = 0;
     dragProgressRef.current = 0;
     setDragProgress(0);
     setIsRowDragging(false);
@@ -1814,12 +2166,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       if (Date.now() < suppressCardClickUntilRef.current) return;
       if (slot !== 0) {
         if (activeItems.length <= 1) return;
-        navigateBy(slot < 0 ? -1 : 1, 1.35, "rapid");
+        navigateBy(slot < 0 ? -1 : 1, 1.35, "rapid", !usesMobileFocusTapZones);
         return;
       }
       openProductView(item, imageNode);
     },
-    [activeItems.length, isReturnInteractionLocked, navigateBy, openProductView],
+    [activeItems.length, isReturnInteractionLocked, navigateBy, openProductView, usesMobileFocusTapZones],
   );
   const handleWheelPointerUp = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -1844,6 +2196,25 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       if (zone === "center") openFocused();
     },
     [classifyWheelZone, isReturnInteractionLocked, navigateBy, openFocused, updateHoveredWheelZone],
+  );
+
+  const handleRowBackgroundTap = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      if (!isVerticalFlow) return;
+      if (isReturnInteractionLocked) return;
+      if (activeItems.length <= 1) return;
+      if (Date.now() < suppressCardClickUntilRef.current) return;
+      if (isGridActionEventTarget(event.target)) return;
+      if (isImmersiveDragExemptTarget(event.target)) return;
+      if (isImmersiveCardTarget(event.target)) return;
+
+      const stageRect = rowStageRef.current?.getBoundingClientRect();
+      if (!stageRect) return;
+      const centerX = stageRect.left + stageRect.width / 2;
+      const direction = event.clientX >= centerX ? 1 : -1;
+      navigateBy(direction, 1.45, "rapid");
+    },
+    [activeItems.length, isReturnInteractionLocked, isVerticalFlow, navigateBy],
   );
 
   const handleWheelPointerCancel = useCallback(
@@ -1932,7 +2303,9 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     const slotOrder = isVerticalFlow
       ? hideGallerySideSlots
         ? ([0] as const)
-        : ([-1, 0, 1] as const)
+        : isFocusRoute && isMobileFocusViewport
+          ? SLOT_ORDER
+          : ([-1, 0, 1] as const)
       : SLOT_ORDER;
     const seenByItemId = new Map<string, number>();
     return slotOrder.map((slot) => {
@@ -1947,7 +2320,15 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         item,
       };
     });
-  }, [activeItems, dragProgress, focusedTrack, hideGallerySideSlots, isVerticalFlow]);
+  }, [
+    activeItems,
+    dragProgress,
+    focusedTrack,
+    hideGallerySideSlots,
+    isFocusRoute,
+    isMobileFocusViewport,
+    isVerticalFlow,
+  ]);
 
   const focusedItemNumber = focusedItem ? getItemNumber(focusedItem) : "00";
   const focusedIdLabel =
@@ -1964,6 +2345,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
     [isVerticalFlow, rowHeightPx],
   );
   const showGalleryCategoryNav = mode === "gallery";
+  const isTouchExpandCategoryNav = isIPadExperience;
   const visualCategory = displayCategory || selectedCategory;
   const activeCategoryEntry =
     categoryEntries.find((entry) => entry.key === visualCategory) ??
@@ -1991,6 +2373,12 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   const expandedCategoryEntries = categoryEntries
     .map((entry, index) => ({ ...entry, index }))
     .filter((entry) => entry.key !== activeCategoryEntry?.key);
+  const mobileVerticalBottomRelaxPx = useMemo(() => {
+    if (!isVerticalFlow) return 0;
+    const vh = sectionHeight > 0 ? sectionHeight : DEFAULT_SECTION_HEIGHT;
+    return Math.round(clampNumber(18, vh * 0.055, 44));
+  }, [isVerticalFlow, sectionHeight]);
+  const sectionHeightCss = `calc(var(--viewport-h) - ${dividerAlignedTopInsetCss} + var(--mobile-safe-bottom))`;
 
   const wheelBackground = "radial-gradient(circle at 32% 28%, #2f2f2f 0%, #171717 54%, #0e0e0e 100%)";
   const wheelCenterClass =
@@ -2007,14 +2395,15 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
   return (
     <section
       ref={sectionRef}
-      className="relative mx-auto flex w-full max-w-[1333px] select-none flex-col items-center px-6 pb-6 sm:px-10"
+      data-immersive-zoom-zone="true"
+      className="relative mx-auto flex w-full max-w-[1333px] select-none flex-col items-center px-6 pb-0 sm:px-10 md:pb-6"
       style={{
-        height: `calc(var(--viewport-h) - ${dividerAlignedTopInsetCss})`,
-        minHeight: `calc(var(--viewport-h) - ${dividerAlignedTopInsetCss})`,
+        height: sectionHeightCss,
+        minHeight: sectionHeightCss,
         paddingTop: `${layoutLane.rowTopPadPx}px`,
         paddingBottom:
           isVerticalFlow
-            ? "0px"
+            ? `${isFocusRoute && isMobileFocusViewport ? 0 : isMobileFocusViewport ? mobileVerticalBottomRelaxPx : 0}px`
             : hideArchiveWheel
               ? `${verticalGapPx}px`
               : `${wheelSizePx + wheelDockBottomPx + verticalGapPx}px`,
@@ -2026,6 +2415,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
       onDragStart={(event) => {
         event.preventDefault();
       }}
+      onClick={usesMobileFocusTapZones ? handleRowBackgroundTap : undefined}
     >
       {isReturnInteractionLocked ? (
         <div
@@ -2080,7 +2470,11 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
         <div
           ref={rowStageRef}
           className={`relative ${isVerticalFlow ? "mt-0" : "mt-[8px]"} w-[calc(var(--viewport-w)+6px)] max-w-none ${
-            isVerticalFlow ? "overflow-x-visible overflow-y-hidden" : "overflow-x-hidden overflow-y-visible"
+            isVerticalFlow
+              ? isMobileFocusViewport
+                ? "overflow-x-visible overflow-y-visible"
+                : "overflow-x-visible overflow-y-hidden"
+              : "overflow-x-hidden overflow-y-visible"
           }`}
           style={{
             height: `${rowHeightPx}px`,
@@ -2090,6 +2484,11 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
             willChange: "transform",
           }}
           onWheel={handleRowWheel}
+          onPointerDown={isVerticalFlow ? handleRowPointerDown : undefined}
+          onPointerMove={isVerticalFlow ? handleRowPointerMove : undefined}
+          onPointerUp={isVerticalFlow ? finishRowDrag : undefined}
+          onPointerCancel={isVerticalFlow ? finishRowDrag : undefined}
+          onClick={usesMobileFocusTapZones ? undefined : handleRowBackgroundTap}
           onContextMenu={(event) => {
             if (!isVerticalFlow) return;
             event.preventDefault();
@@ -2103,12 +2502,14 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
               key={instanceKey}
               baseCardHeight={safariCardBaseSize.height}
               baseCardWidth={safariCardBaseSize.width}
-              enableEdgeEntryAnimation={hasCompletedInitialCardMount}
+              enableHoverActions
+              enableEdgeEntryAnimation={hasCompletedInitialCardMount && !suppressReturnEntryAnimation}
               isClickable={Math.abs(slot) <= 2 && !isReturnInteractionLocked}
               isDragging={isRowDragging}
               isMotionLocked={isReturnLaneFrozen}
               hiddenForReturn={slot === 0 && returnImageState.hiddenItemId === item.id}
               item={item}
+              loadImageEagerly={suppressReturnEntryAnimation}
               focusLiftPx={focusLiftPx}
               motionEasing={motionEasing}
               mode={mode}
@@ -2120,21 +2521,25 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
               onCardActivate={handleCardActivate}
               onPrefetch={prefetchItem}
               onFocusedRefChange={slot === 0 ? handleFocusedImageRef : undefined}
-              useFixedTransformSizing={isSafariBrowser}
+              useFixedTransformSizing={isSafariBrowser && !usesMobileFocusTapZones}
             />
           ))}
           {isVerticalFlow ? (
             <>
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 z-50 bg-gradient-to-b from-paper/12 via-paper/4 to-transparent"
-                style={{ height: `${verticalEdgeFadeHeightPx}px` }}
-              />
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-gradient-to-t from-paper/26 via-paper/10 to-transparent"
-                style={{ height: `${verticalEdgeFadeHeightPx}px` }}
-              />
+              {!isMobileFocusViewport ? (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 top-0 z-50 bg-gradient-to-b from-paper/12 via-paper/4 to-transparent"
+                  style={{ height: `${verticalEdgeFadeHeightPx}px` }}
+                />
+              ) : null}
+              {!isMobileFocusViewport ? (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-gradient-to-t from-paper/26 via-paper/10 to-transparent"
+                  style={{ height: `${verticalEdgeFadeHeightPx}px` }}
+                />
+              ) : null}
             </>
           ) : (
             <>
@@ -2203,7 +2608,7 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
             onMouseEnter={openCategoryNav}
             onMouseMove={handleCategoryNavPointerMove}
             onMouseLeave={closeCategoryNav}
-            onFocusCapture={openCategoryNav}
+            onFocusCapture={isTouchExpandCategoryNav ? undefined : openCategoryNav}
             onBlurCapture={handleCategoryNavBlurCapture}
           >
             <div className="relative h-[252px] w-[246px] rounded-xl px-4 py-4">
@@ -2221,6 +2626,15 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
                       aria-expanded={isCategoryNavExpanded}
                       onClick={(event) => {
                         if (isReturnInteractionLocked) return;
+                        if (isTouchExpandCategoryNav) {
+                          if (isCategoryNavExpanded) {
+                            categoryHoverSuppressPointRef.current = null;
+                            setIsCategoryNavExpanded(false);
+                          } else {
+                            openCategoryNav();
+                          }
+                          return;
+                        }
                         selectCategory(activeCategoryEntry.key, { x: event.clientX, y: event.clientY });
                       }}
                       data-nav-active-anchor="true"
@@ -2292,6 +2706,29 @@ export function ImmersiveView({ mode }: ImmersiveViewProps) {
             </div>
           </nav>
         </div>
+      ) : null}
+
+      {showGalleryCategoryNav ? (
+        <MobileFloatingCategoryPill
+          ariaLabel="Focus categories"
+          enableDragSnap
+          options={categoryEntries.map((entry) => ({
+            key: entry.key,
+            label: entry.label,
+            disabled: entry.items.length === 0,
+          }))}
+          activeKey={selectedCategory}
+          focusCueLabel={
+            mode === "gallery" && editParam === "edit1a" && selectedCategory === "OUTER"
+              ? "Based on broader aesthetic cues"
+              : undefined
+          }
+          onSelect={(key) => {
+            const targetEntry = categoryEntries.find((entry) => entry.key === key);
+            if (!targetEntry || targetEntry.items.length === 0) return;
+            selectCategory(targetEntry.key);
+          }}
+        />
       ) : null}
 
       {!hideArchiveWheel && mode === "archive" && !isVerticalFlow ? (

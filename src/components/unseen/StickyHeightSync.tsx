@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 
 const DEFAULT_STICKY_HEIGHT = 156;
+const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 type StickyHeightSyncProps = {
   targetId?: string;
@@ -15,7 +16,7 @@ function readHeight(element: HTMLElement | null) {
 }
 
 export function StickyHeightSync({ targetId = "sticky-stack" }: StickyHeightSyncProps) {
-  useEffect(() => {
+  useBrowserLayoutEffect(() => {
     const root = document.documentElement;
     const target = document.getElementById(targetId);
 
@@ -26,8 +27,14 @@ export function StickyHeightSync({ targetId = "sticky-stack" }: StickyHeightSync
     };
 
     applyHeight();
+    root.dataset.stickyReady = "1";
+    window.dispatchEvent(new Event("unseen:sticky-paint-ready"));
 
-    if (!target) return;
+    if (!target) {
+      return () => {
+        delete root.dataset.stickyReady;
+      };
+    }
 
     const observer = new ResizeObserver(() => {
       applyHeight();
@@ -38,6 +45,7 @@ export function StickyHeightSync({ targetId = "sticky-stack" }: StickyHeightSync
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", applyHeight);
+      delete root.dataset.stickyReady;
     };
   }, [targetId]);
 

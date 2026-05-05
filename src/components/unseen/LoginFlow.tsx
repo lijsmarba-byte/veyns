@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useRef, useState } from "react";
 
 const GALLERY_ENTRY_ARRIVAL_KEY = "unseen:gallery-entry-arrival";
 const GALLERY_ARRIVAL_ACTIVE_KEY = "unseen:gallery-arrival-active";
@@ -11,9 +11,13 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function isMobileLoginViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+}
+
 function UnseenBetaMark() {
   return (
-    <div className="fixed right-10 top-[23px] z-30 flex h-[26px] items-center gap-[8px]">
+    <div className="fixed right-4 top-[calc(var(--mobile-safe-top)+18px)] z-30 flex h-[26px] items-center gap-[8px] md:right-10 md:top-[23px]">
       <p className="inline-flex h-[26px] items-center text-right text-ink leading-none">
         <span className="font-ui text-[18px] font-bold leading-[18px] tracking-[-0.04em]">cenoir</span>
       </p>
@@ -37,7 +41,7 @@ function ActionPill({
     <button
       type={type}
       onClick={onClick}
-      className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-meta shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none"
+      className="inline-flex h-[35px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-[15px] font-ui text-[14px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:outline-none md:h-[33px] md:px-4 md:text-[13px]"
     >
       {label}
     </button>
@@ -132,12 +136,23 @@ export function LoginFlow() {
   };
 
   const inputClass =
-    "mt-1 block h-[30px] w-full select-text border-0 bg-transparent px-0 text-center font-ui text-[13px] font-normal leading-6 text-ink outline-none placeholder:text-inactive";
+    "mt-1 block h-[30px] w-full select-text border-0 bg-transparent px-0 text-center font-ui text-[16px] font-normal leading-6 text-ink outline-none placeholder:text-inactive md:text-[13px]";
+  const isPasswordMasked = password.trim().length > 0 && !isPasswordHovered;
+  const passwordMaskDotCount = Math.min(password.length, 18);
+  const maskedPasswordInputClass =
+    isPasswordMasked
+      ? `${inputClass} text-transparent caret-ink [-webkit-text-fill-color:transparent] md:text-[13px] md:text-ink md:[-webkit-text-fill-color:currentColor]`
+      : inputClass;
 
   const focusPasswordField = () => {
     window.requestAnimationFrame(() => {
       passwordInputRef.current?.focus();
     });
+  };
+
+  const handleMobileLoginInputPointerDown = (event: PointerEvent<HTMLInputElement>) => {
+    if (!isMobileLoginViewport()) return;
+    event.currentTarget.focus({ preventScroll: true });
   };
 
   const handleEmailEnter = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -154,22 +169,22 @@ export function LoginFlow() {
   };
 
   return (
-    <section className="font-ui min-h-screen bg-paper text-ink">
-      <div className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
+    <section className="font-ui min-h-[var(--viewport-h)] bg-paper text-ink">
+      <div className="relative mx-auto w-full max-w-[1440px] px-4 pb-[calc(var(--mobile-safe-bottom)+28px)] pt-0 md:px-24 md:py-10 lg:px-28 lg:py-6">
         <UnseenBetaMark />
 
-        <div className="pt-[92px]">
+        <div className="pt-[calc(var(--mobile-safe-top)+58px)] md:pt-[92px]">
           <div className="mx-auto w-full max-w-[920px]">
-            <div className="mx-auto w-full max-w-[460px] rounded-[6px] bg-paper px-6 py-8 shadow-[0_8px_20px_rgba(0,0,0,0.06)] md:px-10 md:py-10">
+            <div className="mx-auto w-full max-w-[460px] bg-paper px-0 py-0 md:rounded-[6px] md:px-10 md:py-10 md:shadow-[0_8px_20px_rgba(0,0,0,0.06)]">
               <div className="w-full">
                 <nav aria-label="Login" className="flex w-full justify-center">
-                  <div className="inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-ink bg-ink px-3 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]">
-                    log in
+                  <div className="inline-flex h-[35px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-ink bg-ink px-[15px] font-ui text-[14px] font-normal leading-5 tracking-[-0.03em] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] md:h-[33px] md:px-3 md:text-[13px]">
+                    Login
                   </div>
                 </nav>
 
-                <form onSubmit={handleSubmit} className="mt-12 w-full">
-                  <div className="mx-auto mt-12 w-full max-w-[220px]">
+                <form onSubmit={handleSubmit} className="mt-9 w-full md:mt-12">
+                  <div className="mx-auto mt-8 w-full max-w-[260px] md:mt-12 md:max-w-[220px]">
                     <label className="relative block">
                       <input
                         ref={emailInputRef}
@@ -177,8 +192,9 @@ export function LoginFlow() {
                         autoComplete="username"
                         value={email}
                         onChange={(event) => setEmail(event.target.value)}
+                        onPointerDown={handleMobileLoginInputPointerDown}
                         onKeyDown={handleEmailEnter}
-                        placeholder="email"
+                        placeholder="Email"
                         className={inputClass}
                       />
                     </label>
@@ -196,17 +212,30 @@ export function LoginFlow() {
                             autoComplete="current-password"
                             value={password}
                             onChange={(event) => setPassword(event.target.value)}
+                            onPointerDown={handleMobileLoginInputPointerDown}
                             onKeyDown={handlePasswordEnter}
-                            placeholder="password"
-                            className={inputClass}
+                            placeholder="Password"
+                            className={maskedPasswordInputClass}
                           />
+                          {isPasswordMasked ? (
+                            <div
+                              aria-hidden="true"
+                              className="pointer-events-none absolute inset-x-0 top-1 flex h-[30px] items-center justify-center md:hidden"
+                            >
+                              <span className="inline-flex max-w-[152px] items-center justify-center gap-[4px] overflow-hidden">
+                                {Array.from({ length: passwordMaskDotCount }).map((_, dotIndex) => (
+                                  <span key={dotIndex} className="h-[4px] w-[4px] shrink-0 rounded-full bg-ink" />
+                                ))}
+                              </span>
+                            </div>
+                          ) : null}
                         </div>
                       </label>
                     ) : null}
                   </div>
 
                   {error || showForgotPassword ? (
-                    <div className="mx-auto mt-6 w-full max-w-[220px] text-left">
+                    <div className="mx-auto mt-6 w-full max-w-[260px] text-left md:max-w-[220px]">
                       {error ? <p className="font-ui text-[13px] leading-6 text-[#B22929]">{error}</p> : null}
                       {showForgotPassword ? (
                         <div className="mt-1 flex justify-start">
@@ -223,7 +252,7 @@ export function LoginFlow() {
                   ) : null}
 
                   {canEnter ? (
-                    <div className="mt-12 flex justify-center">
+                    <div className="mt-10 flex justify-center md:mt-12">
                       <ActionPill type="submit" label="enter" />
                     </div>
                   ) : null}

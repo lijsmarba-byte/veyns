@@ -22,6 +22,7 @@ const RETURN_FLIGHT_FINISHED_EVENT = "unseen:return-flight-finished";
 const RETURN_FLIGHT_FINISHED_KEY = "unseen:return-flight-finished-flag";
 const RETURN_PREV_BODY_PADDING_ATTR = "data-unseen-return-prev-pr";
 const WORLD2_RETURN_REVEAL_KEY = "unseen:world2-return-reveal";
+const IMMERSIVE_RETURN_STEADY_KEY = "unseen:immersive-return-steady";
 
 type ProductViewCloseButtonProps = {
   backHref: string;
@@ -303,6 +304,7 @@ export function ProductViewCloseButton({
   productId,
 }: ProductViewCloseButtonProps) {
   const router = useRouter();
+  const mountedAtRef = useRef<number | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const isAnimatingRef = useRef(false);
   const hasViewportResizedRef = useRef(false);
@@ -318,8 +320,13 @@ export function ProductViewCloseButton({
   const CLOSE_ICON_STROKE_PX = 1.5;
   const CLOSE_ICON_BOX_HEIGHT_PX = 14;
   const closeIconCenterPx = CLOSE_ICON_BOX_HEIGHT_PX / 2 - CLOSE_ICON_STROKE_PX / 2;
+  const isFocusReturn = backHref.includes("/focus");
   const isImmersiveReturn = backHref.includes("/immersive");
   const closeEndHoldMs = isImmersiveReturn ? 80 : CLOSE_END_HOLD_MS;
+
+  useEffect(() => {
+    mountedAtRef.current = Date.now();
+  }, []);
 
   useEffect(() => {
     router.prefetch(backHref);
@@ -408,19 +415,34 @@ export function ProductViewCloseButton({
     let closeSettleHoldMs = closeEndHoldMs;
     let closeFlightEasing = "cubic-bezier(0.22, 1, 0.36, 1)";
     let closeOverlay: HTMLDivElement | null = null;
-    const returnBackdropDetail = canUseExactImageReturn || canUseIndicatedImageReturn
-      ? {
-          targetOpacity: isImmersiveReturn ? 0.085 : 0.16,
-          raiseMs: 240,
-          holdMs: isImmersiveReturn ? 260 : 260,
-          fallMs: isImmersiveReturn ? 1260 : 780,
-        }
-      : {
-          targetOpacity: isImmersiveReturn ? 0.08 : 0.18,
-          raiseMs: 110,
-          holdMs: isImmersiveReturn ? 300 : 280,
-          fallMs: isImmersiveReturn ? 1500 : 860,
-        };
+    const returnBackdropDetail =
+      isFocusReturn
+        ? {
+            targetOpacity: 0,
+            raiseMs: 40,
+            holdMs: 0,
+            fallMs: 120,
+          }
+        : canUseExactImageReturn && !isImmersiveReturn
+        ? {
+            targetOpacity: 0.035,
+            raiseMs: 70,
+            holdMs: 40,
+            fallMs: 220,
+          }
+        : canUseExactImageReturn || canUseIndicatedImageReturn
+          ? {
+              targetOpacity: isImmersiveReturn ? 0.085 : 0.16,
+              raiseMs: 240,
+              holdMs: isImmersiveReturn ? 260 : 260,
+              fallMs: isImmersiveReturn ? 1260 : 780,
+            }
+          : {
+              targetOpacity: isImmersiveReturn ? 0.08 : 0.18,
+              raiseMs: 110,
+              holdMs: isImmersiveReturn ? 300 : 280,
+              fallMs: isImmersiveReturn ? 1500 : 860,
+            };
     window.dispatchEvent(
       new CustomEvent("unseen:return-transition-start", {
         detail: {
@@ -483,6 +505,11 @@ export function ProductViewCloseButton({
       const scaleX = payload.width / Math.max(start.width, 1);
       const scaleY = payload.height / Math.max(start.height, 1);
       const scale = (scaleX + scaleY) * 0.5;
+      if (isFocusReturn) {
+        closeDurationMs = 780;
+        closeSettleHoldMs = 70;
+        closeFlightEasing = "cubic-bezier(0.2, 0.88, 0.24, 1)";
+      }
       if (isImmersiveReturn) {
         const travelDistancePx = Math.hypot(translateX, translateY);
         const viewportDiagonalPx = Math.max(1, Math.hypot(window.innerWidth, window.innerHeight));
@@ -794,11 +821,19 @@ export function ProductViewCloseButton({
               fadeMs: canUseIndicatedImageReturn ? 380 : 500,
             }),
           );
+          window.sessionStorage.setItem(
+            IMMERSIVE_RETURN_STEADY_KEY,
+            JSON.stringify({
+              at: now,
+              href: backHref,
+            }),
+          );
+          window.sessionStorage.removeItem(RETURN_FOCUS_ITEM_KEY);
         } catch {
           // Optional return polish only.
         }
       }
-      if (canUseExactImageReturn || canUseIndicatedImageReturn) {
+      if (!isImmersiveReturn && (canUseExactImageReturn || canUseIndicatedImageReturn)) {
         try {
           const closeSettleMs = Math.max(0, closeSettleHoldMs);
           const remainingHideBaseMs = Math.max(0, closeDurationMs + closeSettleMs - CLOSE_ROUTE_DELAY_MS);
@@ -817,19 +852,21 @@ export function ProductViewCloseButton({
       }
       router.replace(backHref, { scroll: false });
     }, CLOSE_ROUTE_DELAY_MS);
-  }, [backHref, closeEndHoldMs, isImmersiveReturn, productId, router]);
+  }, [backHref, closeEndHoldMs, isFocusReturn, isImmersiveReturn, productId, router]);
 
   useEffect(() => {
     if (!enableBackdropClose) return;
 
     const handleDocumentClick = (event: MouseEvent) => {
+      if (mountedAtRef.current !== null && Date.now() - mountedAtRef.current < 420) return;
       const path = typeof event.composedPath === "function" ? event.composedPath() : [];
       const hasProtectedHit = path.some((entry) => {
         if (!(entry instanceof Element)) return false;
         return (
           entry.matches('[data-pv-close-button="true"]') ||
           entry.matches('[data-pv-info-hit="true"]') ||
-          entry.matches('[data-pv-image-hit="true"]')
+          entry.matches('[data-pv-image-hit="true"]') ||
+          entry.matches('[data-pv-mobile-hit="true"]')
         );
       });
       if (hasProtectedHit) return;
@@ -839,6 +876,7 @@ export function ProductViewCloseButton({
       if (target.closest('[data-pv-close-button="true"]')) return;
       if (target.closest('[data-pv-info-hit="true"]')) return;
       if (target.closest('[data-pv-image-hit="true"]')) return;
+      if (target.closest('[data-pv-mobile-hit="true"]')) return;
 
       handleClose();
     };

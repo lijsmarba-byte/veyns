@@ -29,7 +29,11 @@ export default async function GalleryImmersivePage({ searchParams }: GalleryWorl
   );
 
   return (
-    <main data-return-root="true" className="relative min-h-screen bg-paper" style={{ minHeight: "var(--viewport-h)" }}>
+    <main
+      data-return-root="true"
+      data-mobile-first-paint-gate="true"
+      className="relative bg-paper min-h-[calc(var(--viewport-h)+var(--mobile-safe-bottom))] md:min-h-[var(--viewport-h)]"
+    >
       <Suspense
         fallback={<RouteShellFallback />}
       >
@@ -37,11 +41,9 @@ export default async function GalleryImmersivePage({ searchParams }: GalleryWorl
         <StickyShell mode="gallery" view="immersive" />
         <section
           data-world2-root="true"
-          className="relative flex w-full items-stretch justify-center"
+          className="relative flex w-full items-stretch justify-center h-[calc(var(--viewport-h)+var(--mobile-safe-bottom))] min-h-[calc(var(--viewport-h)+var(--mobile-safe-bottom))] md:h-[var(--viewport-h)] md:min-h-[var(--viewport-h)]"
           style={{
-            height: "var(--viewport-h)",
-            minHeight: "var(--viewport-h)",
-            marginTop: "calc(var(--sticky-h) * -1)",
+            marginTop: "calc(var(--immersive-sticky-h, var(--sticky-h)) * -1)",
           }}
         >
           <World2ViewClient key={world2ViewKey} items={worldItems} mode="gallery" />

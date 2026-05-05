@@ -542,7 +542,7 @@ export function ProfileSignatureContentV2({ user }: { user: MockUserProfile }) {
                       {focusAttributes.map((word) => (
                         <span
                           key={`detail-tag-${word.id}`}
-                          className="inline-flex items-center rounded-full border border-line bg-[#F5F5F6] px-4 py-[6px] font-ui text-[12px] font-normal tracking-[0.02em] text-meta"
+                          className="inline-flex items-center rounded-full border border-line bg-[#F5F5F6] px-4 py-[6px] font-ui text-[12px] font-normal tracking-[0.02em] text-[#6F7381]"
                         >
                           {word.label}
                         </span>

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import type { MockCatalogItem } from "@/data/mockCatalog";
 import { GalleryHoverActions } from "@/components/unseen/GalleryHoverActions";
 import { showProductTransitionHold, warmProductImage } from "@/components/unseen/productImagePreload";
+import { useViewportMode } from "@/lib/ui/viewportMode";
 
 type ProductTileProps = {
   item: MockCatalogItem;
@@ -88,19 +89,17 @@ export function ProductTile({
 }: ProductTileProps) {
   const hasHoverActions = mode === "gallery" || mode === "archive";
   const [hoverResetKey, setHoverResetKey] = useState(0);
-  const [returnImageState, setReturnImageState] = useState(() => {
-    const delayMs = readReturnFocusDelayMs(item.id, true);
-    return {
-      delayMs: delayMs ?? 0,
-      hidden: delayMs !== null,
-    };
-  });
+  const [returnImageState, setReturnImageState] = useState({ delayMs: 0, hidden: false });
   const imageAreaRef = useRef<HTMLDivElement | null>(null);
   const topLabelRef = useRef<HTMLParagraphElement | null>(null);
+  const brandLabelRef = useRef<HTMLParagraphElement | null>(null);
   const prefetchedHrefRef = useRef<string | null>(null);
+  const [isMobileBrandWrapped, setIsMobileBrandWrapped] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { isIPadExperience, isMobileExperience } = useViewportMode();
+  const showPreviewHoverActions = hasHoverActions && !isIPadExperience;
   const itemNumber = getItemNumber(item);
   const galleryCoreLabel = item.idxLabel.replace(/^\[/, "").replace(/\]$/, "");
   const topLabel = mode === "archive" ? `Issue ${issueNumber} | ${itemNumber}` : galleryCoreLabel;
@@ -124,6 +123,15 @@ export function ProductTile({
     }
     return `/product-view?${nextParams.toString()}`;
   }, [backHref, editParam, item.id, item.imgSrc, mode]);
+  const warmTransitionImage = useCallback(() => {
+    void warmProductImage(item.imgSrc);
+  }, [item.imgSrc]);
+  const warmProductTransition = useCallback(() => {
+    warmTransitionImage();
+    if (prefetchedHrefRef.current === productViewHref) return;
+    prefetchedHrefRef.current = productViewHref;
+    router.prefetch(productViewHref);
+  }, [productViewHref, router, warmTransitionImage]);
 
   useEffect(() => {
     if (hasPrefetchedProductViewRoute) return;
@@ -134,7 +142,7 @@ export function ProductTile({
   useEffect(() => {
     if (!imagePriority) return;
     warmProductTransition();
-  }, [imagePriority, productViewHref]);
+  }, [imagePriority, warmProductTransition]);
 
   useLayoutEffect(() => {
     if (returnImageState.hidden) return;
@@ -172,21 +180,39 @@ export function ProductTile({
     };
   }, [returnImageState.delayMs, returnImageState.hidden]);
 
+  const syncMobileBrandWrap = useCallback(() => {
+    const labelNode = brandLabelRef.current;
+    if (!labelNode) return;
+    if (window.innerWidth > 640) {
+      setIsMobileBrandWrapped(false);
+      return;
+    }
+    const wrapped = labelNode.scrollHeight - labelNode.clientHeight > 1;
+    setIsMobileBrandWrapped(wrapped);
+  }, []);
+
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(syncMobileBrandWrap);
+    const onResize = () => {
+      window.requestAnimationFrame(syncMobileBrandWrap);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [syncMobileBrandWrap]);
+
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(syncMobileBrandWrap);
+    return () => window.cancelAnimationFrame(raf);
+  }, [item.brand, syncMobileBrandWrap]);
+
   const isGridActionEventTarget = (target: EventTarget | null) => {
     if (!(target instanceof Node)) return false;
     const element = target instanceof Element ? target : target.parentElement;
     return Boolean(element?.closest('[data-grid-action-hit="true"]'));
   };
-  const warmTransitionImage = () => {
-    void warmProductImage(item.imgSrc);
-  };
-  const warmProductTransition = () => {
-    warmTransitionImage();
-    if (prefetchedHrefRef.current === productViewHref) return;
-    prefetchedHrefRef.current = productViewHref;
-    router.prefetch(productViewHref);
-  };
-
   const openProductView = () => {
     warmProductTransition();
     const imgEl = imageAreaRef.current?.querySelector("img");
@@ -203,54 +229,70 @@ export function ProductTile({
     const containRect =
       containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
     const rect = containRect ?? imgRect ?? containerRect;
-    showProductTransitionHold(imageAreaRef.current, item.imgSrc, aspectRatio, item.id);
-    if (rect) {
+    if (isMobileExperience) {
       try {
-        window.sessionStorage.setItem(
-          "unseen:product-view-transition",
-          JSON.stringify({
-            itemId: item.id,
-            src: item.imgSrc,
-            left: rect.left,
-            top: rect.top,
-            width: rect.width,
-            height: rect.height,
-            aspectRatio,
-            at: Date.now(),
-          }),
-        );
+        window.sessionStorage.removeItem("unseen:product-view-transition");
+        window.sessionStorage.removeItem("unseen:product-view-text-transition");
+        window.sessionStorage.removeItem("unseen:return-focus-item");
+        window.sessionStorage.removeItem("unseen:return-flight-finished-flag");
+        document.getElementById("unseen-product-transition-source-hold")?.remove();
       } catch {
-        // Transition is optional; ignore storage failures.
+        // Ignore storage failures.
       }
-    }
-    const textRect = topLabelRef.current?.getBoundingClientRect();
-    if (textRect) {
-      try {
-        window.sessionStorage.setItem(
-          "unseen:product-view-text-transition",
-          JSON.stringify({
-            itemId: item.id,
-            left: textRect.left,
-            top: textRect.top,
-            width: textRect.width,
-            height: textRect.height,
-            at: Date.now(),
-          }),
-        );
-      } catch {
-        // Transition is optional; ignore storage failures.
+    } else {
+      showProductTransitionHold(imageAreaRef.current, item.imgSrc, aspectRatio, item.id);
+      if (rect) {
+        try {
+          window.sessionStorage.setItem(
+            "unseen:product-view-transition",
+            JSON.stringify({
+              itemId: item.id,
+              src: item.imgSrc,
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: rect.height,
+              aspectRatio,
+              at: Date.now(),
+            }),
+          );
+        } catch {
+          // Transition is optional; ignore storage failures.
+        }
+      }
+      const textRect = topLabelRef.current?.getBoundingClientRect();
+      if (textRect) {
+        try {
+          window.sessionStorage.setItem(
+            "unseen:product-view-text-transition",
+            JSON.stringify({
+              itemId: item.id,
+              left: textRect.left,
+              top: textRect.top,
+              width: textRect.width,
+              height: textRect.height,
+              at: Date.now(),
+            }),
+          );
+        } catch {
+          // Transition is optional; ignore storage failures.
+        }
       }
     }
 
     try {
-      window.sessionStorage.setItem(
-        "unseen:return-scroll",
-        JSON.stringify({
-          at: Date.now(),
-          backHref,
-          scrollY: window.scrollY,
-        }),
-      );
+      if (!isMobileExperience) {
+        window.sessionStorage.setItem(
+          "unseen:return-scroll",
+          JSON.stringify({
+            at: Date.now(),
+            backHref,
+            scrollY: window.scrollY,
+          }),
+        );
+      } else {
+        window.sessionStorage.removeItem("unseen:return-scroll");
+      }
     } catch {
       // Ignore storage failures.
     }
@@ -273,7 +315,7 @@ export function ProductTile({
       <div
         ref={imageAreaRef}
         data-product-tile-image-root="true"
-        className={`relative mx-auto h-[280px] w-full max-w-[210px] cursor-pointer ${
+        className={`relative mx-auto h-[212px] w-full max-w-[162px] cursor-pointer min-[641px]:h-[280px] min-[641px]:max-w-[210px] ${
           returnImageState.hidden ? "pointer-events-none opacity-0" : "opacity-100"
         }`}
         onPointerDown={warmProductTransition}
@@ -287,8 +329,13 @@ export function ProductTile({
           src={item.imgSrc}
           alt={`${item.brand} ${item.artsyName}`}
           fill
-          className={`pointer-events-none select-none object-contain object-center transition-[filter] duration-150 ease-out ${
-            hasHoverActions ? "group-hover/product:blur-[1.8px] group-focus-within/product:blur-[1.8px]" : ""
+          data-gallery-mobile-static-image={mode === "gallery" ? "true" : undefined}
+          className={`pointer-events-none select-none object-contain object-center ${
+            showPreviewHoverActions
+              ? mode === "gallery"
+                ? "max-[767px]:!filter-none max-[767px]:!transition-none min-[768px]:transition-[filter] min-[768px]:duration-150 min-[768px]:ease-out min-[768px]:group-hover/product:blur-[1.8px] min-[768px]:group-focus-within/product:blur-[1.8px]"
+                : "transition-[filter] duration-150 ease-out group-hover/product:blur-[1.8px] group-focus-within/product:blur-[1.8px]"
+              : ""
           }`}
           sizes="(max-width: 768px) 70vw, (max-width: 1024px) 42vw, 19vw"
           loading={imagePriority ? "eager" : "lazy"}
@@ -296,11 +343,18 @@ export function ProductTile({
           draggable={false}
           onDragStart={(event) => event.preventDefault()}
         />
-        {hasHoverActions ? <GalleryHoverActions itemId={item.id} mode={mode} hoverResetKey={hoverResetKey} /> : null}
+        {showPreviewHoverActions ? (
+          <GalleryHoverActions
+            itemId={item.id}
+            mode={mode}
+            hoverResetKey={hoverResetKey}
+            mobileDisabled={true}
+          />
+        ) : null}
       </div>
 
       <div
-        className="mt-[16px] flex w-full cursor-pointer flex-col items-center gap-[3px] text-center text-[13px] font-medium leading-5 tracking-[0.02em] text-meta"
+        className="mt-[16px] flex h-[76px] w-full cursor-pointer flex-col items-center justify-between text-center text-[13px] font-medium leading-5 tracking-[0.02em] text-meta min-[641px]:mt-[14px] min-[641px]:h-auto min-[641px]:justify-start min-[641px]:gap-[3px]"
         onPointerDown={warmProductTransition}
         onFocus={warmProductTransition}
         onClick={openProductView}
@@ -313,10 +367,21 @@ export function ProductTile({
           <span className="px-[2px]">{topLabel}</span>
           <span aria-hidden="true">|</span>
         </p>
-        <p className={`inline-flex h-[22px] items-center justify-center text-center font-ui ${brandTextClass}`}>
+        <p
+          ref={brandLabelRef}
+          className={`w-full max-w-full px-1 text-center font-ui min-[641px]:inline-flex min-[641px]:h-[22px] min-[641px]:items-center min-[641px]:justify-center min-[641px]:leading-5 max-[640px]:h-[30px] max-[640px]:overflow-hidden max-[640px]:[display:-webkit-box] max-[640px]:[-webkit-box-orient:vertical] max-[640px]:[-webkit-line-clamp:2] ${
+            isMobileBrandWrapped
+              ? "max-[640px]:pt-0 max-[640px]:leading-[13px]"
+              : "max-[640px]:pt-[4px] max-[640px]:leading-5"
+          } ${brandTextClass}`}
+        >
           {item.brand}
         </p>
-        <p className="inline-flex h-[22px] items-center justify-center font-ui text-meta">
+        <p
+          className={`inline-flex h-[22px] items-center justify-center font-ui text-meta ${
+            isMobileBrandWrapped ? "max-[640px]:translate-y-[2px]" : ""
+          }`}
+        >
           {item.price}
         </p>
       </div>

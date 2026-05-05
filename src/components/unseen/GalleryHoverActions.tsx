@@ -9,6 +9,7 @@ type GalleryHoverActionsProps = {
   hoverResetKey?: number;
   softDropdownFade?: boolean;
   dropdownDirection?: "down" | "up";
+  mobileDisabled?: boolean;
 };
 
 type CapsuleOption = {
@@ -44,6 +45,7 @@ export function GalleryHoverActions({
   hoverResetKey = 0,
   softDropdownFade = false,
   dropdownDirection = "down",
+  mobileDisabled = false,
 }: GalleryHoverActionsProps) {
   const acquireUrl = "https://www.mytheresa.com";
   const searchParams = useSearchParams();
@@ -62,17 +64,21 @@ export function GalleryHoverActions({
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("unseen:saved-items");
-      if (!raw) return;
+      if (!raw) {
+        setIsSaved(mode === "archive");
+        return;
+      }
       const records = JSON.parse(raw) as SavedItemRecord[];
       const existingRecord = records.find((record) => record.itemId === itemId);
-      if (!existingRecord) return;
-
-      setSelectedCapsuleId(existingRecord.capsuleId);
-      setIsSaved(true);
+      if (existingRecord) {
+        setSelectedCapsuleId(existingRecord.capsuleId);
+      }
+      setIsSaved(mode === "archive" || Boolean(existingRecord));
     } catch {
       // Ignore malformed local data and continue with default capsule logic.
+      setIsSaved(mode === "archive");
     }
-  }, [itemId]);
+  }, [itemId, mode]);
 
   useEffect(() => {
     if (!isSaved) {
@@ -158,6 +164,11 @@ export function GalleryHoverActions({
     } catch {
       // Keep UI responsive even if storage is unavailable.
     }
+    setIsSaved(false);
+    setIsSaveFlowOpen(false);
+    setIsDropdownOpen(false);
+    setSelectedCapsuleId(defaultCapsuleId);
+    setIsArchiveDeleteExpanded(false);
     console.info("[archive-action:delete-from-capsule]", itemId);
   };
   const clearSavedState = () => {
@@ -191,14 +202,22 @@ export function GalleryHoverActions({
     "relative inline-flex h-[33px] w-auto items-center overflow-visible rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] pl-[12px] pr-0 font-ui text-[13px] leading-5 tracking-[-0.03em] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)]";
   const dropdownItemClass =
     "w-full rounded-[10px] px-[10px] py-[6px] text-left font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-accent focus-visible:outline-none";
-  const archiveDeletePillClass =
-    "inline-flex h-[33px] items-center overflow-hidden rounded-[999px] border-[0.5px] border-accent bg-accent shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-[width] duration-220 ease-out";
+  const archiveDeletePillClass = "inline-flex h-[33px] items-center";
+  const archiveDeleteExpandedButtonClass =
+    "inline-flex h-[33px] w-[67px] items-center justify-center rounded-[999px] border-[0.5px] border-accent bg-accent px-4 font-ui text-[13px] font-medium leading-5 tracking-[-0.03em] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none";
   const archiveMinusCircleClass =
-    "inline-flex h-[33px] w-[33px] shrink-0 items-center justify-center rounded-full border-[0.5px] border-accent bg-accent shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none";
+    "inline-flex h-[33px] w-[33px] shrink-0 items-center justify-center rounded-full border-[0.5px] border-accent bg-accent p-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] focus-visible:outline-none";
   const dropdownPositionClass = dropdownDirection === "up" ? "bottom-[39px]" : "top-[39px]";
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 opacity-0 transition-opacity duration-150 ease-out group-hover/product:opacity-100 group-focus-within/product:opacity-100">
+    <div
+      data-gallery-mobile-hover-actions={mobileDisabled ? "disabled" : undefined}
+      className={
+        mobileDisabled
+          ? "pointer-events-none absolute inset-0 z-10 hidden opacity-0 min-[768px]:block min-[768px]:transition-opacity min-[768px]:duration-150 min-[768px]:ease-out min-[768px]:group-hover/product:opacity-100 min-[768px]:group-focus-within/product:opacity-100"
+          : "pointer-events-none absolute inset-0 z-10 opacity-0 transition-opacity duration-150 ease-out group-hover/product:opacity-100 group-focus-within/product:opacity-100"
+      }
+    >
       <div
         data-grid-action-hit="true"
         className="pointer-events-auto absolute left-1/2 top-1/2 flex -translate-x-1/2 translate-y-[18px] flex-col items-center gap-[10px]"
@@ -212,16 +231,15 @@ export function GalleryHoverActions({
           acquire
         </button>
 
-        {mode === "archive" ? (
+        {mode === "archive" && isSaved ? (
           <div
             className={archiveDeletePillClass}
-            style={{ width: isArchiveDeleteExpanded ? "67px" : "33px" }}
             onMouseLeave={() => setIsArchiveDeleteExpanded(false)}
           >
             {isArchiveDeleteExpanded ? (
               <button
                 type="button"
-                className="inline-flex h-[33px] w-full items-center justify-center px-4 font-ui text-[13px] font-medium leading-5 tracking-[-0.03em] text-paper focus-visible:outline-none"
+                className={archiveDeleteExpandedButtonClass}
                 onClick={handleArchiveDelete}
                 aria-label="Delete from capsule"
               >
@@ -231,15 +249,15 @@ export function GalleryHoverActions({
               <button
                 type="button"
                 className={archiveMinusCircleClass}
-              onMouseEnter={() => setIsArchiveDeleteExpanded(true)}
-              onFocus={() => setIsArchiveDeleteExpanded(true)}
-              onClick={handleArchiveDelete}
-              aria-label="Delete from capsule"
-            >
-              <span aria-hidden="true" className="relative left-[-1px] block h-[2px] w-[9px] rounded-full bg-paper" />
-            </button>
-          )}
-        </div>
+                onMouseEnter={() => setIsArchiveDeleteExpanded(true)}
+                onFocus={() => setIsArchiveDeleteExpanded(true)}
+                onClick={handleArchiveDelete}
+                aria-label="Delete from capsule"
+              >
+                <span aria-hidden="true" className="relative left-[-1px] block h-[2px] w-[9px] rounded-full bg-paper" />
+              </button>
+            )}
+          </div>
         ) : isSaved ? (
           <button
             type="button"

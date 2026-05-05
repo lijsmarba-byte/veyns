@@ -3,6 +3,8 @@ import { ProductActionRow } from "@/components/unseen/ProductActionRow";
 import { ProductImageRail } from "@/components/unseen/ProductImageRail";
 import { ProductInfoTransition } from "@/components/unseen/ProductInfoTransition";
 import { ProductViewCloseButton } from "@/components/unseen/ProductViewCloseButton";
+import { ProductViewDesktopShell } from "@/components/unseen/ProductViewDesktopShell";
+import { ProductViewMobileShell } from "@/components/unseen/ProductViewMobileShell";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -89,8 +91,26 @@ export default async function ProductViewPage({
   const leftStickyTop = "calc(var(--sticky-h) + (var(--viewport-h) - var(--sticky-h)) / 2 - 260px)";
 
   return (
-    <main className="font-ui min-h-screen bg-paper text-ink" style={{ minHeight: "var(--viewport-h)" }}>
-      <section data-pv-shell="true" className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
+    <>
+      <ProductViewMobileShell
+        backHref={backHref}
+        brand={current.item.brand}
+        cues={cuePills}
+        description={current.item.artsyDesc}
+        editId={editId ?? null}
+        images={imageRail}
+        isArchiveMode={isArchiveMode}
+        isPreOwned={isPreOwned}
+        itemId={current.item.id}
+        mode={mode}
+        pipeLabel={formatPipeLabel(current.item.idxLabel)}
+        price={current.item.price}
+        title={current.item.artsyName}
+      />
+
+      <ProductViewDesktopShell>
+      <main className="font-ui min-h-screen bg-paper text-ink" style={{ minHeight: "var(--viewport-h)" }}>
+        <section data-pv-shell="true" className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
         <div className="fixed right-4 top-[23px] z-50 md:right-10">
           <div className="flex h-[26px] items-center">
             <ProductViewCloseButton
@@ -161,7 +181,9 @@ export default async function ProductViewPage({
             />
           </div>
         </div>
-      </section>
-    </main>
+        </section>
+      </main>
+      </ProductViewDesktopShell>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type SyntheticEvent } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -49,6 +49,14 @@ type QuietConstraintEditor = {
   section: "pre-owned";
 };
 type ConstraintsPageVersion = "coming-soon" | "active";
+type SignatureArtifactActionVersion = "coming-soon" | "active";
+type ComingSoonActionId =
+  | "signature-save"
+  | "signature-share"
+  | "constraints-price"
+  | "constraints-sizing"
+  | "constraints-gender"
+  | "constraints-pre-owned";
 
 const QUIET_CONSTRAINT_STORAGE_KEY = "unseen:quiet-constraints";
 const QUIET_CONSTRAINT_ACTIVE_FROM_ISSUE = 2;
@@ -124,6 +132,8 @@ const PRICE_RANGE_LIMITS: Record<PriceCategory, { min: number; max: number }> = 
 };
 // Switch constraints experience here: "coming-soon" | "active".
 const CONSTRAINTS_PAGE_VERSION: ConstraintsPageVersion = "coming-soon";
+// Switch signature artifact save/share actions here: "coming-soon" | "active".
+const SIGNATURE_ARTIFACT_ACTION_VERSION: SignatureArtifactActionVersion = "coming-soon";
 
 const womensClothingConversionTable = [
   { standard: "XXS", numeric: "0", eu: 32, fr: 34, it: 36, uk: "4", us: "0" },
@@ -549,6 +559,12 @@ const PROFILE_HEADER_NAV_TOP_PX = 46;
 const PROFILE_HEADER_DIVIDER_TOP_PX = 96;
 const PROFILE_HEADER_HEIGHT_PX = 97;
 const PROFILE_HEADER_META_FOLD_BUFFER_PX = 38;
+const MOBILE_PROFILE_HEADER_NAME_TOP_PX = 22;
+const MOBILE_PROFILE_CLOSE_TOP_PX = 26;
+const MOBILE_PROFILE_HEADER_NAV_TOP_PX = 36;
+const MOBILE_PROFILE_HEADER_DIVIDER_TOP_PX = 74;
+const MOBILE_PROFILE_HEADER_HEIGHT_PX = 75;
+const MOBILE_PROFILE_CONTENT_TOP_PX = 76;
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -607,7 +623,6 @@ export default function ProfilePage() {
   });
   const [editingSetIds, setEditingSetIds] = useState<Record<string, boolean>>({});
   const [expandedSetIds, setExpandedSetIds] = useState<Record<string, boolean>>({});
-  const [hoveredImageId, setHoveredImageId] = useState<string | null>(null);
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
   const [isNewEditUploading, setIsNewEditUploading] = useState(false);
   const [isCreateEditOpen, setIsCreateEditOpen] = useState(startsInCreateEditFlow);
@@ -646,6 +661,7 @@ export default function ProfilePage() {
   const [editingGenderExceptionCategories, setEditingGenderExceptionCategories] = useState<PriceCategory[]>([]);
   const [editingPreOwnedPreference, setEditingPreOwnedPreference] = useState<PreOwnedPreference>("default");
   const [editingFieldShake, setEditingFieldShake] = useState<"floor" | "ceiling" | null>(null);
+  const [activeComingSoonActionId, setActiveComingSoonActionId] = useState<ComingSoonActionId | null>(null);
   const [isConversionOpen, setIsConversionOpen] = useState(false);
   const [isConversionMenuOpen, setIsConversionMenuOpen] = useState(false);
   const [isResetConstraintsConfirmOpen, setIsResetConstraintsConfirmOpen] = useState(false);
@@ -658,6 +674,7 @@ export default function ProfilePage() {
   const [referenceSets, setReferenceSets] = useState<ReferenceSet[]>(
     () => buildReferenceSets(activeUser?.referenceSetForMainEdit ?? []),
   );
+  const [minimumReferenceDisclaimerSetIds, setMinimumReferenceDisclaimerSetIds] = useState<Record<string, boolean>>({});
   const [isMainEditHintDismissedForAccount, setIsMainEditHintDismissedForAccount] = useState(false);
   const [mainEditRecalibrationCount, setMainEditRecalibrationCount] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(1440);
@@ -675,12 +692,14 @@ export default function ProfilePage() {
   const [uploadTargetSetId, setUploadTargetSetId] = useState<string | null>(null);
   const [uploadMode, setUploadMode] = useState<"append" | "replace">("append");
   const fixedHeaderRef = useRef<HTMLDivElement | null>(null);
+  const profileRootRef = useRef<HTMLElement | null>(null);
   const headerMetaRef = useRef<HTMLParagraphElement | null>(null);
   const headerNavRef = useRef<HTMLDivElement | null>(null);
   const createActionRowRef = useRef<HTMLDivElement | null>(null);
   const createActionButtonRef = useRef<HTMLButtonElement | null>(null);
   const primaryActionsRowRef = useRef<HTMLDivElement | null>(null);
   const constraintHintTimeoutRef = useRef<number | null>(null);
+  const comingSoonActionTimeoutRef = useRef<number | null>(null);
   const newEditUploadPulseTimeoutRef = useRef<number | null>(null);
   const conversionPopoverRef = useRef<HTMLDivElement | null>(null);
   const conversionTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -696,6 +715,26 @@ export default function ProfilePage() {
   const constraintsStorageKeyRef = useRef<string>(`${QUIET_CONSTRAINT_STORAGE_KEY}:${activeUser?.userId ?? "default"}`);
   const [draggingPrice, setDraggingPrice] = useState<PriceDragState>(null);
   const isCompactHeaderLayout = viewportWidth < 980;
+  const isMobileProfileViewport = viewportWidth < 768;
+  const isMobileEmbedded = isEmbedded && viewportWidth < 768;
+  const isMobileProfileHeader = !isEmbedded && viewportWidth < 768;
+  const isMobileMenuPageEmbedded =
+    isMobileEmbedded &&
+    (overlaySection === "settings" || overlaySection === "feedback" || overlaySection === "about");
+  const resolvedProfileHeaderNameTopPx = isMobileProfileHeader
+    ? MOBILE_PROFILE_HEADER_NAME_TOP_PX
+    : PROFILE_HEADER_NAME_TOP_PX;
+  const resolvedProfileHeaderNavTopPx = isMobileProfileHeader
+    ? MOBILE_PROFILE_HEADER_NAV_TOP_PX
+    : PROFILE_HEADER_NAV_TOP_PX;
+  const resolvedProfileHeaderDividerTopPx = isMobileProfileHeader
+    ? MOBILE_PROFILE_HEADER_DIVIDER_TOP_PX
+    : PROFILE_HEADER_DIVIDER_TOP_PX;
+  const resolvedProfileHeaderHeightPx = isMobileProfileHeader
+    ? MOBILE_PROFILE_HEADER_HEIGHT_PX
+    : PROFILE_HEADER_HEIGHT_PX;
+  const resolvedProfileContentTopPx = isMobileProfileHeader ? MOBILE_PROFILE_CONTENT_TOP_PX : 116;
+  const referenceHeaderTextSizeClass = "text-[25px] max-[767px]:text-[24px]";
   const constraintsContentTranslateXPx = isEmbedded
     ? Math.round(interpolateClamped(viewportWidth, 900, 1620, 0, 14))
     : viewportWidth >= 768
@@ -704,7 +743,7 @@ export default function ProfilePage() {
   const constraintsContentMaxWidthPx = isEmbedded
     ? Math.round(interpolateClamped(viewportWidth, 980, 1620, 860, 920))
     : 960;
-  const embeddedSignaturePanelMaxWidthPx = 900;
+  const embeddedSignaturePanelMaxWidthPx = isMobileEmbedded ? Math.max(0, viewportWidth - 32) : 900;
 
   const mainEditImages = useMemo(
     () => referenceSets.find((set) => set.id === MAIN_EDIT_SET_ID)?.images ?? [],
@@ -716,6 +755,14 @@ export default function ProfilePage() {
     syncViewportWidth();
     window.addEventListener("resize", syncViewportWidth);
     return () => window.removeEventListener("resize", syncViewportWidth);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (comingSoonActionTimeoutRef.current !== null) {
+        window.clearTimeout(comingSoonActionTimeoutRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -883,6 +930,46 @@ export default function ProfilePage() {
   }, [activeTab, isEmbedded]);
 
   useEffect(() => {
+    if (!isMobileMenuPageEmbedded) return;
+
+    let startX = 0;
+    let startY = 0;
+    let startTarget: EventTarget | null = null;
+
+    const shouldIgnoreSwipeTarget = (target: EventTarget | null) =>
+      target instanceof Element &&
+      Boolean(target.closest("input, textarea, select, button, a, [contenteditable='true']"));
+
+    const handleTouchStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      startTarget = event.target;
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      const touch = event.changedTouches[0];
+      if (!touch || shouldIgnoreSwipeTarget(startTarget)) return;
+
+      const deltaX = touch.clientX - startX;
+      const deltaY = touch.clientY - startY;
+      const isBackSwipe = deltaX >= 72 && Math.abs(deltaY) <= 46 && deltaX > Math.abs(deltaY) * 1.6;
+      if (!isBackSwipe) return;
+
+      window.parent.dispatchEvent(new CustomEvent("unseen:mobile-menu-page-back"));
+    };
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [isMobileMenuPageEmbedded]);
+
+  useEffect(() => {
     if (!isCompactEmbeddedOverlay) return;
 
     let rafId = 0;
@@ -949,6 +1036,10 @@ export default function ProfilePage() {
       setShouldFoldHeaderMeta(false);
       return;
     }
+    if (isMobileProfileHeader) {
+      setShouldFoldHeaderMeta(false);
+      return;
+    }
     const measureMetaFold = () => {
       if (isCompactHeaderLayout) {
         setShouldFoldHeaderMeta(true);
@@ -978,7 +1069,7 @@ export default function ProfilePage() {
       resizeObserver.disconnect();
       window.removeEventListener("resize", measureMetaFold);
     };
-  }, [isCompactHeaderLayout, activeTab, isEmbedded]);
+  }, [isCompactHeaderLayout, activeTab, isEmbedded, isMobileProfileHeader]);
 
   const clusters = useMemo(
     () => [...(activeUser?.tasteAttributes.clusters ?? [])].sort((a, b) => clusterWeight(b) - clusterWeight(a)),
@@ -1006,22 +1097,34 @@ export default function ProfilePage() {
   );
   const signatureTitleDisplay = signatureTitle.replace(/[.!?]+$/g, "");
   const settingsActionPillClass =
-    `inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] ${
+    `inline-flex h-[35px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] md:h-[33px] ${
       isEmbedded ? "bg-[#F5F5F6]" : "bg-[#F5F5F6]"
-    } px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink`;
+    } px-[15px] font-ui text-[14px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink md:px-4 md:text-[13px]`;
   const settingsDeletePillClass =
-    `inline-flex h-[33px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] ${
+    `inline-flex h-[35px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] md:h-[33px] ${
       isEmbedded ? "bg-[#F5F5F6]" : "bg-[#F5F5F6]"
-    } px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] outline-none transition-colors duration-150 hover:border-[#D94343] hover:bg-[#D94343] hover:text-paper focus:outline-none focus-visible:outline-none focus-visible:ring-0`;
+    } px-[15px] font-ui text-[14px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] outline-none transition-colors duration-150 hover:border-[#D94343] hover:bg-[#D94343] hover:text-paper focus:outline-none focus-visible:outline-none focus-visible:ring-0 md:px-4 md:text-[13px]`;
+  const settingsDangerPillClass =
+    "inline-flex h-[35px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#D94343] bg-[#D94343] px-[15px] font-ui text-[14px] font-normal leading-5 tracking-[-0.03em] text-paper shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] outline-none transition-colors duration-150 hover:border-[#B92F2F] hover:bg-[#B92F2F] focus:outline-none focus-visible:outline-none focus-visible:ring-0 md:h-[33px] md:px-4 md:text-[13px]";
   const overlayTitleClass = "font-ui text-[16px] font-medium leading-5 text-ink";
   const formFieldTitleClass = "font-ui text-[13px] font-medium leading-5 text-meta";
-  const embeddedProfileContentClass = isEmbedded ? "mx-auto w-full max-w-[940px]" : "w-full";
-  const overlayInfoCardClass = isEmbedded ? "px-5 py-5" : "rounded-[6px] bg-[#F5F5F6] px-5 py-5";
-  const aboutInfoCardClass = isEmbedded ? "px-5 py-5" : "rounded-[6px] bg-[#F5F5F6] px-6 py-6";
+  const embeddedProfileContentClass = isEmbedded
+    ? "mx-auto w-full max-w-[940px] max-[767px]:max-w-none"
+    : "w-full";
+  const overlayInfoCardClass = isMobileEmbedded
+    ? "px-0 py-5"
+    : isEmbedded
+      ? "px-5 py-5"
+      : "rounded-[6px] bg-[#F5F5F6] px-5 py-5";
+  const aboutInfoCardClass = isMobileEmbedded
+    ? "px-0 py-5"
+    : isEmbedded
+      ? "px-5 py-5"
+      : "rounded-[6px] bg-[#F5F5F6] px-6 py-6";
   const overlayInputClass =
     `mt-2 h-9 w-full ${
       isEmbedded ? "rounded-[4px] border border-line/80 bg-[#F5F5F6] px-3" : "rounded-[4px] border border-line/80 bg-paper px-3"
-    } font-ui text-[13px] font-normal text-meta outline-none placeholder:text-meta/75`;
+    } font-ui text-[16px] font-normal text-meta outline-none placeholder:text-meta/75 md:text-[13px]`;
   const overlayReadOnlyFieldClass =
     `mt-2 w-full ${
       isEmbedded ? "rounded-[4px] border border-transparent bg-[#F5F5F6] px-3 py-2" : "rounded-[4px] border border-transparent bg-paper/65 px-3 py-2"
@@ -1035,14 +1138,20 @@ export default function ProfilePage() {
   const constraintListRowValueClass =
     "text-[13px] font-ui leading-[1.25] text-meta";
   const constraintPriceRowLabelClass = "inline-flex h-7 items-center text-[13px] font-ui leading-[1.25] text-meta";
-  const constraintPriceRowReadClass = "grid min-h-[44px] grid-cols-[112px_minmax(0,1fr)] items-center gap-4 py-2";
-  const constraintPriceRowEditClass = "grid min-h-[58px] grid-cols-[112px_minmax(0,1fr)] items-start gap-4 py-2";
+  const constraintPriceRowReadClass =
+    "grid min-h-[44px] grid-cols-[112px_minmax(0,1fr)] items-center gap-4 py-2 max-[767px]:gap-3";
+  const constraintPriceRowComingSoonMobileReadClass =
+    "grid min-h-[31px] grid-cols-[112px_minmax(0,1fr)] items-center gap-3 py-0";
+  const constraintPriceRowEditClass =
+    "grid min-h-[58px] grid-cols-[112px_minmax(0,1fr)] items-start gap-4 py-2 max-[767px]:gap-3";
   const constraintPriceInlineValueClass =
     "inline-flex h-7 items-center justify-center whitespace-nowrap font-ui text-[13px] leading-5 text-meta";
   const constraintPriceValueSlotClass =
     "inline-flex h-7 w-[60px] items-center justify-center text-[13px] font-ui leading-5 text-meta";
   const constraintPriceDashClass = "inline-flex h-7 w-[12px] items-center justify-center text-[13px] font-ui leading-5 text-meta";
-  const constraintPriceSliderWidthPx = 220;
+  const constraintPriceSliderWidthPx = isMobileEmbedded
+    ? Math.round(clampNumber(viewportWidth - 180, 132, 220))
+    : 220;
   const constraintPriceSliderHandleSizePx = 14;
   const constraintPriceSliderWrapClass =
     "relative h-7 select-none touch-none";
@@ -1059,11 +1168,22 @@ export default function ProfilePage() {
   const constraintOptionButtonActiveClass = "bg-transparent !text-ink font-semibold";
   const constraintReadRowClass =
     "grid min-h-[44px] grid-cols-[112px_minmax(0,1fr)] items-center gap-4 py-2";
+  const constraintReadRowComingSoonMobileClass =
+    "grid min-h-[31px] grid-cols-[112px_minmax(0,1fr)] items-center gap-3 py-0";
   const constraintEditRowClass =
     "grid min-h-[44px] grid-cols-[112px_minmax(0,1fr)] items-center gap-4 py-2";
+  const constraintPanelHeaderClass =
+    "flex flex-wrap items-center gap-3 max-[767px]:flex-nowrap max-[767px]:justify-between";
+  const constraintPanelTitleGroupClass =
+    "flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1";
+  const constraintPanelActionGroupClass =
+    "flex items-center gap-3 max-[767px]:ml-auto max-[767px]:shrink-0 max-[767px]:justify-end";
   const constraintActionPillClass = `${settingsActionPillClass} active:text-ink`;
+  const signatureArtifactActionPillClass =
+    "inline-flex h-[35px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-[15px] font-ui text-[14px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink focus-visible:text-ink active:text-ink md:h-[31px] md:px-4 md:text-[13px]";
   const constraintComingSoonPillClass =
     "pointer-events-none absolute left-1/2 top-full z-20 mt-2 inline-flex h-[29px] items-center justify-center -translate-x-1/2 translate-y-1 whitespace-nowrap rounded-[999px] border border-ink bg-ink px-[11px] font-ui text-[13px] font-normal leading-[18px] tracking-[-0.02em] text-paper opacity-0 shadow-[0_0.5px_1px_rgba(0,0,0,0.12)] transition-all duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100 group-active:translate-y-0 group-active:opacity-100";
+  const comingSoonPillVisibleClass = "!translate-y-0 !opacity-100";
   const constraintsPageVersionConfig: Record<
     ConstraintsPageVersion,
     {
@@ -1080,8 +1200,29 @@ export default function ProfilePage() {
       priceComingSoonValueLabel: "none",
     },
   };
+  const signatureArtifactActionVersionConfig: Record<
+    SignatureArtifactActionVersion,
+    {
+      isComingSoonMode: boolean;
+    }
+  > = {
+    "coming-soon": {
+      isComingSoonMode: true,
+    },
+    active: {
+      isComingSoonMode: false,
+    },
+  };
   const activeConstraintsPageVersion = constraintsPageVersionConfig[CONSTRAINTS_PAGE_VERSION];
+  const activeSignatureArtifactActionVersion =
+    signatureArtifactActionVersionConfig[SIGNATURE_ARTIFACT_ACTION_VERSION];
   const isConstraintsComingSoonMode = activeConstraintsPageVersion.isComingSoonMode;
+  const isSignatureArtifactComingSoonMode = activeSignatureArtifactActionVersion.isComingSoonMode;
+  const shouldTightenComingSoonConstraintRows = isMobileProfileViewport && isConstraintsComingSoonMode;
+  const constraintArticleClass = `${overlayInfoCardClass} h-full ${
+    isMobileEmbedded ? "px-3" : ""
+  } ${isMobileProfileViewport ? "!pt-0" : ""}`;
+  const constraintRowsTopMarginClass = shouldTightenComingSoonConstraintRows ? "mt-2" : "mt-4";
   const constraintPriceComingSoonValueLabel = activeConstraintsPageVersion.priceComingSoonValueLabel;
   const constraintSizingComingSoonValueLabel = "not specified";
   const isShortcutCreateFlowActive = isFocusedCreateFlow && isCreateEditOpen;
@@ -1101,6 +1242,79 @@ export default function ProfilePage() {
   const pendingRebuildSet = pendingRebuildSetId ? referenceSets.find((set) => set.id === pendingRebuildSetId) ?? null : null;
   const isPendingRebuildMainEdit = pendingRebuildSet?.id === MAIN_EDIT_SET_ID;
   const pendingDeleteSet = pendingDeleteSetId ? referenceSets.find((set) => set.id === pendingDeleteSetId) ?? null : null;
+  const showComingSoonAction = (actionId: ComingSoonActionId) => {
+    if (comingSoonActionTimeoutRef.current !== null) {
+      window.clearTimeout(comingSoonActionTimeoutRef.current);
+    }
+    setActiveComingSoonActionId(actionId);
+    comingSoonActionTimeoutRef.current = window.setTimeout(() => {
+      setActiveComingSoonActionId((current) => (current === actionId ? null : current));
+      comingSoonActionTimeoutRef.current = null;
+    }, 1100);
+  };
+  const comingSoonPillClassFor = (actionId: ComingSoonActionId) =>
+    `${constraintComingSoonPillClass} ${
+      activeComingSoonActionId === actionId ? comingSoonPillVisibleClass : ""
+    }`;
+
+  useEffect(() => {
+    if (viewportWidth >= 768 || !showReferenceSetsSection) return;
+
+    const root = document.documentElement;
+    const body = document.body;
+    const previousRootOverflowY = root.style.overflowY;
+    const previousBodyOverflowY = body.style.overflowY;
+    let frameId: number | null = null;
+
+    const syncReferenceScroll = () => {
+      frameId = null;
+      const contentNode = profileRootRef.current;
+      const viewportHeight = window.innerHeight;
+      const contentHeight = Math.ceil(
+        Math.max(
+          contentNode?.scrollHeight ?? 0,
+          body.scrollHeight,
+          root.scrollHeight,
+        ),
+      );
+      const needsScroll = contentHeight > viewportHeight + 2;
+      root.style.overflowY = needsScroll ? "auto" : "hidden";
+      body.style.overflowY = needsScroll ? "auto" : "hidden";
+    };
+
+    const scheduleSync = () => {
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(syncReferenceScroll);
+    };
+
+    scheduleSync();
+    const resizeObserver = new ResizeObserver(scheduleSync);
+    if (profileRootRef.current) resizeObserver.observe(profileRootRef.current);
+    resizeObserver.observe(body);
+    window.addEventListener("resize", scheduleSync);
+    window.visualViewport?.addEventListener("resize", scheduleSync);
+
+    return () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleSync);
+      window.visualViewport?.removeEventListener("resize", scheduleSync);
+      root.style.overflowY = previousRootOverflowY;
+      body.style.overflowY = previousBodyOverflowY;
+    };
+  }, [
+    editingSetIds,
+    expandedSetIds,
+    isCreateEditOpen,
+    pendingDeleteSetId,
+    pendingDoneSetId,
+    pendingRebuildSetId,
+    minimumReferenceDisclaimerSetIds,
+    referenceSets,
+    showReferenceSetsSection,
+    viewportWidth,
+  ]);
+
   const dismissMainEditMetaHint = () => {
     if (!activeUser) return;
     const key = `unseen:main-edit-meta-dismissed-profile-create:${activeUser.userId}`;
@@ -1561,6 +1775,23 @@ export default function ProfilePage() {
     setMainEditRecalibrationCount((current) => current + 1);
   };
 
+  const setMinimumReferenceDisclaimer = (setId: string, shouldShow: boolean) => {
+    setMinimumReferenceDisclaimerSetIds((current) => {
+      if (shouldShow) {
+        if (current[setId]) return current;
+        return {
+          ...current,
+          [setId]: true,
+        };
+      }
+
+      if (!current[setId]) return current;
+      const next = { ...current };
+      delete next[setId];
+      return next;
+    });
+  };
+
   const autoResizeFeedbackField = (textarea: HTMLTextAreaElement) => {
     textarea.style.height = "auto";
     textarea.style.height = `${textarea.scrollHeight}px`;
@@ -1646,7 +1877,6 @@ export default function ProfilePage() {
       setEditingSetIds({});
       setPendingDoneSetId(null);
       setDragOverSetId(null);
-      setHoveredImageId(null);
       setIsCreateEditOpen(false);
       setNewEditName("");
       setPendingRebuildSetId(null);
@@ -1704,7 +1934,23 @@ export default function ProfilePage() {
     cancelSettingsFieldEdit();
   };
 
+  const stopSettingsFieldPropagation = (event: SyntheticEvent) => {
+    event.stopPropagation();
+  };
+
+  const handleSettingsPasswordKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   const removeImage = (setId: string, imageId: string) => {
+    const targetSet = referenceSets.find((set) => set.id === setId);
+    if (targetSet) {
+      const nextCount = targetSet.images.filter((img) => img.id !== imageId).length;
+      setMinimumReferenceDisclaimer(setId, nextCount < MIN_NEW_EDIT_REFERENCES);
+    }
+
     setReferenceSets((prev) =>
       prev.map((set) =>
         set.id === setId
@@ -1786,6 +2032,7 @@ export default function ProfilePage() {
 
   const confirmDeleteSet = (setId: string) => {
     setReferenceSets((prev) => prev.filter((set) => set.id !== setId));
+    setMinimumReferenceDisclaimer(setId, false);
     setExpandedSetIds((current) => {
       const next = { ...current };
       delete next[setId];
@@ -1877,14 +2124,17 @@ export default function ProfilePage() {
     const files = event.target.files;
     if (!files || files.length === 0 || !uploadTargetSetId) return;
 
+    const uploadedFiles = Array.from(files);
+
     if (uploadTargetSetId === NEW_EDIT_TARGET) {
-      appendNewEditReferences(Array.from(files));
+      appendNewEditReferences(uploadedFiles);
     } else if (uploadMode === "replace") {
-      const nextImages = Array.from(files).map((file, index) => ({
+      const nextImages = uploadedFiles.map((file, index) => ({
         id: `upload-${Date.now()}-${index}`,
         fileName: file.name,
         publicPath: URL.createObjectURL(file),
       }));
+      setMinimumReferenceDisclaimer(uploadTargetSetId, nextImages.length < MIN_NEW_EDIT_REFERENCES);
       setReferenceSets((prev) =>
         prev.map((set) =>
           set.id === uploadTargetSetId
@@ -1899,11 +2149,15 @@ export default function ProfilePage() {
         bumpMainEditRecalibration();
       }
     } else {
-      const nextImages = Array.from(files).map((file, index) => ({
+      const nextImages = uploadedFiles.map((file, index) => ({
         id: `upload-${Date.now()}-${index}`,
         fileName: file.name,
         publicPath: URL.createObjectURL(file),
       }));
+      const targetSet = referenceSets.find((set) => set.id === uploadTargetSetId);
+      if ((targetSet?.images.length ?? 0) + nextImages.length >= MIN_NEW_EDIT_REFERENCES) {
+        setMinimumReferenceDisclaimer(uploadTargetSetId, false);
+      }
       setReferenceSets((prev) =>
         prev.map((set) =>
           set.id === uploadTargetSetId
@@ -1935,6 +2189,10 @@ export default function ProfilePage() {
       fileName: file.name,
       publicPath: URL.createObjectURL(file),
     }));
+    const targetSet = referenceSets.find((set) => set.id === setId);
+    if ((targetSet?.images.length ?? 0) + nextImages.length >= MIN_NEW_EDIT_REFERENCES) {
+      setMinimumReferenceDisclaimer(setId, false);
+    }
 
     setReferenceSets((prev) =>
       prev.map((set) =>
@@ -1990,7 +2248,7 @@ export default function ProfilePage() {
           value={newEditName}
           onChange={(event) => setNewEditName(event.target.value)}
           placeholder="Edit name, e.g. Summer Edit"
-          className="mt-1 block h-[30px] w-full border-0 bg-transparent px-0 text-center font-ui text-[14px] font-normal leading-6 text-ink outline-none placeholder:text-inactive"
+          className="mt-1 block h-[30px] w-full border-0 bg-transparent px-0 text-center font-ui text-[16px] font-normal leading-6 text-ink outline-none placeholder:text-inactive md:text-[14px]"
         />
       </div>
 
@@ -2013,7 +2271,7 @@ export default function ProfilePage() {
           >
             <span
               className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[18px] leading-none shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink ${
-                isNewEditUploading ? "border-ink bg-ink text-paper" : "text-meta group-hover:text-paper"
+                isNewEditUploading ? "border-ink bg-ink text-paper" : "text-[#6F7381] group-hover:text-paper"
               }`}
             >
               ↑
@@ -2050,7 +2308,7 @@ export default function ProfilePage() {
                   type="button"
                   aria-label="Remove uploaded reference"
                   onClick={() => removeNewEditReference(image.id)}
-                  className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-paper/92 font-ui text-[12px] leading-none text-meta opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+                  className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-paper/92 font-ui text-[12px] leading-none text-[#6F7381] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
                 >
                   ×
                 </button>
@@ -2062,7 +2320,7 @@ export default function ProfilePage() {
               onClick={() => requestUpload(NEW_EDIT_TARGET)}
               className="group inline-flex aspect-square w-full flex-col items-center justify-center gap-2 border-0 bg-transparent transition-colors duration-180 focus-visible:outline-none"
             >
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[16px] font-medium leading-none text-meta shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink group-hover:text-paper">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[16px] font-medium leading-none text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink group-hover:text-paper">
                 ↑
               </span>
               <span className="font-ui text-[11px] font-medium leading-4 tracking-[0.02em] text-meta transition-colors duration-150 group-hover:text-ink">
@@ -2091,6 +2349,11 @@ export default function ProfilePage() {
           proceed
         </button>
       </div>
+      {!canProceedNewEdit ? (
+        <p className="mt-3 text-center font-ui text-[12px] font-medium leading-5 tracking-[0.02em] text-meta">
+          upload at least {MIN_NEW_EDIT_REFERENCES} images to proceed
+        </p>
+      ) : null}
     </div>
   );
 
@@ -2114,7 +2377,10 @@ export default function ProfilePage() {
 
   return (
     <motion.main
-      className={`relative z-[120] isolate bg-paper ${isEmbedded ? "min-h-0" : "min-h-screen"}`}
+      ref={profileRootRef}
+      className={`relative z-[120] isolate bg-paper ${
+        isMobileEmbedded && showReferenceSetsSection ? "min-h-0" : isMobileEmbedded ? "min-h-screen" : isEmbedded ? "min-h-0" : "min-h-screen"
+      }`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.22, ease: "easeOut" }}
@@ -2125,6 +2391,9 @@ export default function ProfilePage() {
           aria-label="Close profile"
           onClick={handleCloseProfile}
           className="fixed right-4 top-[23px] z-50 inline-flex h-[14px] w-[20px] items-center justify-center text-meta transition-colors duration-150 hover:text-ink focus-visible:outline-none md:right-10"
+          style={{
+            top: isMobileProfileHeader ? `${MOBILE_PROFILE_CLOSE_TOP_PX}px` : undefined,
+          }}
         >
           <span
             className={`absolute left-1/2 top-1/2 block h-[1.5px] w-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current transition-all duration-300 ease-[cubic-bezier(0.22,0.75,0.28,1)] ${
@@ -2154,20 +2423,30 @@ export default function ProfilePage() {
       />
 
       <section
-        className={`mx-auto w-full max-w-[1333px] px-5 sm:px-10 ${
-          isCompactEmbeddedOverlay ? "pb-0" : "pb-16"
+        className={`mx-auto w-full max-w-[1333px] ${isMobileEmbedded ? "px-4" : "px-5 sm:px-10"} ${
+          isCompactEmbeddedOverlay ? "pb-0" : showReferenceSetsSection ? "pb-16 max-[767px]:pb-0" : "pb-16"
         } ${isEmbedded ? "pt-0" : "pt-[116px]"}`}
+        style={{
+          paddingTop: !isEmbedded ? `${resolvedProfileContentTopPx}px` : undefined,
+        }}
       >
         {!isEmbedded ? (
           <div
             ref={fixedHeaderRef}
             className="fixed inset-x-0 top-0 z-40 mx-[calc(50%-50vw)] bg-paper px-5 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-8 after:h-8 after:bg-[linear-gradient(180deg,rgba(254,254,253,0.34)_0%,rgba(254,254,253,0.16)_42%,rgba(254,254,253,0.05)_72%,rgba(254,254,253,0)_100%)] sm:px-10"
-            style={{ height: `${PROFILE_HEADER_HEIGHT_PX}px` }}
+            style={{ height: `${resolvedProfileHeaderHeightPx}px` }}
           >
           <div className="relative h-full w-full">
-            <div className="absolute left-0 text-left" style={{ top: `${PROFILE_HEADER_NAME_TOP_PX}px` }}>
+            <div
+              className={`absolute left-0 text-left ${
+                isMobileProfileHeader ? "right-12 flex h-[22px] items-center gap-[8px] overflow-hidden" : ""
+              }`}
+              style={{ top: `${resolvedProfileHeaderNameTopPx}px` }}
+            >
               <h1
-                className="m-0 text-left font-ui text-[20px] leading-none tracking-[-0.03em] text-ink sm:text-[26px]"
+                className={`m-0 shrink-0 text-left font-ui leading-none tracking-[-0.03em] text-ink ${
+                  isMobileProfileHeader ? "text-[18px]" : "text-[20px] sm:text-[26px]"
+                }`}
                 style={{
                   fontFamily: "var(--font-ui-sans), sans-serif",
                   whiteSpace: "nowrap",
@@ -2178,7 +2457,11 @@ export default function ProfilePage() {
               <p
                 ref={headerMetaRef}
                 aria-hidden={shouldFoldHeaderMeta}
-                className="m-0 mt-[14px] text-left font-ui text-[12px] font-medium leading-4 tracking-[0.02em] text-ink sm:mt-[8px]"
+                className={`m-0 text-left font-ui font-medium leading-4 tracking-[0.02em] text-ink ${
+                  isMobileProfileHeader
+                    ? "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px]"
+                    : "mt-[14px] text-[12px] sm:mt-[8px]"
+                }`}
                 style={{
                   fontFamily: "var(--font-ui-sans), sans-serif",
                   whiteSpace: "nowrap",
@@ -2194,7 +2477,7 @@ export default function ProfilePage() {
               className={`absolute z-20 flex h-12 items-end gap-x-4 sm:gap-x-7 md:gap-x-[47px] ${
                 isCompactHeaderLayout ? "inset-x-0 justify-start overflow-x-auto pr-14" : "right-0 justify-end"
               }`}
-              style={{ top: `${PROFILE_HEADER_NAV_TOP_PX}px` }}
+              style={{ top: `${resolvedProfileHeaderNavTopPx}px` }}
             >
                 <button
                   type="button"
@@ -2267,63 +2550,79 @@ export default function ProfilePage() {
 
             <div
               className="absolute inset-x-0 h-px bg-[#ECEDEF] shadow-[0_1px_1px_rgba(0,0,0,0.03)]"
-              style={{ top: `${PROFILE_HEADER_DIVIDER_TOP_PX}px` }}
+              style={{ top: `${resolvedProfileHeaderDividerTopPx}px` }}
             />
           </div>
           </div>
         ) : null}
 
         {showSignatureSection ? (
-          <section className="mt-10">
-            <div className="mx-auto w-full px-10">
+          <section className={isMobileEmbedded ? "mt-5 touch-pan-y" : "mt-10"}>
+            <div className={`mx-auto w-full ${isMobileEmbedded ? "px-0" : "px-10"}`}>
               <div
-                className="mx-auto w-full overflow-hidden"
+                className={`mx-auto w-full overflow-hidden ${isMobileEmbedded ? "touch-pan-y" : ""}`}
                 style={{
                   maxWidth: isEmbedded ? `${embeddedSignaturePanelMaxWidthPx}px` : "1080px",
                   backgroundColor: "#F5F5F6",
-                  borderRadius: "36px",
+                  borderRadius: isMobileEmbedded ? "26px" : "36px",
                   boxShadow: "0 2px 8px rgba(17,17,17,0.06)",
                 }}
               >
-                <div className={`grid w-full gap-0 ${isEmbedded ? "grid-cols-[0.42fr_0.58fr]" : "lg:grid-cols-[0.43fr_0.57fr]"}`}>
+                <div className={`grid w-full gap-0 ${
+                  isMobileEmbedded
+                    ? "grid-cols-1"
+                    : isEmbedded
+                      ? "grid-cols-[0.42fr_0.58fr]"
+                      : "lg:grid-cols-[0.43fr_0.57fr]"
+                }`}>
                   <div
                     className={`min-w-0 ${
-                      isEmbedded
+                      isMobileEmbedded
+                        ? "flex min-h-0 items-stretch justify-start px-3 pt-3"
+                        : isEmbedded
                         ? "flex min-h-[292px] items-stretch justify-start py-4 pr-3 md:py-4 md:pr-3"
                         : "flex min-h-[430px] items-stretch justify-start py-4 pr-4 md:py-4 md:pr-4"
                     }`}
                     style={{
                       backgroundColor: "#F5F5F6",
-                      paddingLeft: isEmbedded ? "37px" : "56px",
+                      paddingLeft: isMobileEmbedded ? undefined : isEmbedded ? "37px" : "56px",
                     }}
                   >
                     <div
                       className={`bg-ink ${
-                        isEmbedded
+                        isMobileEmbedded
+                          ? "min-h-[210px] w-full max-w-none self-center px-5 py-6"
+                          : isEmbedded
                           ? "min-h-[218px] w-full max-w-[374px] self-center px-7 py-6"
                           : "min-h-[352px] w-full self-center px-7 py-7 md:px-8 md:py-8"
                       }`}
-                      style={isEmbedded ? { borderRadius: "32px", maxWidth: "374px" } : { borderRadius: "32px" }}
+                      style={
+                        isMobileEmbedded
+                          ? { borderRadius: "24px" }
+                          : isEmbedded
+                            ? { borderRadius: "32px", maxWidth: "374px" }
+                            : { borderRadius: "32px" }
+                      }
                     >
-                      <h2 className={`${isEmbedded ? "mb-5 text-[22px]" : "mb-7 text-[25px]"} inline-flex w-full items-end justify-start leading-none text-paper`}>
+                      <h2 className={`${isMobileEmbedded ? "mb-5 text-[24px]" : isEmbedded ? "mb-5 text-[22px]" : "mb-7 text-[25px]"} inline-flex w-full items-end justify-start leading-none text-paper`}>
                         <span className="font-ui font-normal tracking-[-0.06em]">{activeUser.name}</span>
                         <span className="-ml-[1px] font-ui font-normal tracking-[-0.06em]">–</span>
                         <span className="ml-[1px] font-instrument italic tracking-[0.01em]">{signatureTitleDisplay}</span>
                       </h2>
 
-                      <p className={`${isEmbedded ? "text-[13px] leading-[1.75]" : "text-[14px] leading-[1.8]"} max-w-[52ch] text-left font-ui font-normal text-paper/88`}>
+                      <p className={`${isEmbedded ? "text-[13px] leading-[1.75]" : "text-[14px] leading-[1.8]"} ${isMobileEmbedded ? "max-w-none" : "max-w-[52ch]"} text-left font-ui font-normal text-paper/88`}>
                         {shortSummary}
                       </p>
                     </div>
                   </div>
 
                   <div
-                    className={`flex ${isEmbedded ? "min-h-[292px]" : "min-h-[430px]"} min-w-0 items-center justify-center py-4 ${
-                      isEmbedded ? "pl-2 pr-3 md:pl-2 md:pr-3" : "px-4 md:px-5"
+                    className={`flex ${isMobileEmbedded ? "min-h-[256px]" : isEmbedded ? "min-h-[292px]" : "min-h-[430px]"} min-w-0 items-center justify-center ${
+                      isMobileEmbedded ? "px-2 pb-4 pt-1" : isEmbedded ? "py-4 pl-2 pr-3 md:pl-2 md:pr-3" : "px-4 py-4 md:px-5"
                     }`}
                     style={{ backgroundColor: "#F5F5F6" }}
                   >
-                    <div className={`${isEmbedded ? "mx-auto w-[136%] max-w-none" : "mx-auto w-[96%]"} overflow-visible rounded-[32px]`}>
+                    <div className={`${isMobileEmbedded ? "mx-auto w-full max-w-none touch-pan-y" : isEmbedded ? "mx-auto w-[136%] max-w-none" : "mx-auto w-[96%]"} overflow-visible rounded-[32px]`}>
                       <ProfileSignatureContourInline
                         user={activeUser}
                         backgroundColor="#F5F5F6"
@@ -2342,41 +2641,70 @@ export default function ProfilePage() {
                 className="mx-auto mt-4 flex w-full items-center justify-end gap-[10px]"
                 style={{ maxWidth: isEmbedded ? `${embeddedSignaturePanelMaxWidthPx}px` : "1080px" }}
               >
-                <button
-                  type="button"
-                  onClick={() =>
-                    window.dispatchEvent(
-                      new CustomEvent("unseen:signature-artifact-export", { detail: { mode: "save" } }),
-                    )
-                  }
-                  className="inline-flex h-[31px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink"
-                >
-                  save
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    window.dispatchEvent(
-                      new CustomEvent("unseen:signature-artifact-export", { detail: { mode: "share" } }),
-                    )
-                  }
-                  className="inline-flex h-[31px] items-center justify-center whitespace-nowrap rounded-[999px] border-[0.5px] border-[#F0F0F1] bg-[#F5F5F6] px-4 font-ui text-[13px] font-normal leading-5 tracking-[-0.03em] text-[#6F7381] shadow-[0_0.5px_1px_rgba(0,0,0,0.05)] transition-colors duration-150 hover:text-ink"
-                >
-                  share
-                </button>
+                {isSignatureArtifactComingSoonMode ? (
+                  <>
+                    <div className="group relative inline-flex">
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        onClick={() => showComingSoonAction("signature-save")}
+                        className={`${signatureArtifactActionPillClass} cursor-default`}
+                      >
+                        save
+                      </button>
+                      <span className={comingSoonPillClassFor("signature-save")}>coming soon</span>
+                    </div>
+                    <div className="group relative inline-flex">
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        onClick={() => showComingSoonAction("signature-share")}
+                        className={`${signatureArtifactActionPillClass} cursor-default`}
+                      >
+                        share
+                      </button>
+                      <span className={comingSoonPillClassFor("signature-share")}>coming soon</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent("unseen:signature-artifact-export", { detail: { mode: "save" } }),
+                        )
+                      }
+                      className={signatureArtifactActionPillClass}
+                    >
+                      save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent("unseen:signature-artifact-export", { detail: { mode: "share" } }),
+                        )
+                      }
+                      className={signatureArtifactActionPillClass}
+                    >
+                      share
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </section>
         ) : null}
 
         {showReferenceSetsSection ? (
-          <div className="mx-[calc(50%-50vw)] px-10">
+          <div className="mx-[calc(50%-50vw)] px-10 max-[767px]:px-4">
             <section className={embeddedProfileContentClass}>
               {isShortcutCreateFlowActive ? (
                 <div
                   ref={createEditSectionRef}
                   className="mt-12 w-full"
-                  style={{ scrollMarginTop: `${PROFILE_HEADER_HEIGHT_PX + 28}px` }}
+                  style={{ scrollMarginTop: `${resolvedProfileHeaderHeightPx + 28}px` }}
                 >
                   <div className="mt-2">
                     {createEditComposer}
@@ -2390,31 +2718,51 @@ export default function ProfilePage() {
                 const isRenaming = renamingSetId === set.id;
                 const isMainEdit = set.id === MAIN_EDIT_SET_ID;
                 const shouldShowMainEditMetaHint = isMainEdit && !isMainEditHintDismissedForAccount;
+                const showMinimumReferenceDisclaimer =
+                  Boolean(minimumReferenceDisclaimerSetIds[set.id]) && set.images.length < MIN_NEW_EDIT_REFERENCES;
                 const previewColumns = isEmbedded
                   ? Math.min(getReferencePreviewColumns(viewportWidth), 5)
                   : getReferencePreviewColumns(viewportWidth);
                 const previewRows = 1;
-                const previewCount = previewColumns * previewRows;
+                const previewCount = (isEmbedded ? 5 : previewColumns) * previewRows;
                 const visibleImages = isExpanded ? set.images : set.images.slice(0, previewCount);
+                const referenceGridClass = isEmbedded
+                  ? `mt-6 grid gap-[6px] ${
+                      isExpanded
+                        ? isEditing
+                          ? "grid-cols-4 max-[767px]:grid-cols-2"
+                          : "grid-cols-5 max-[767px]:grid-cols-3"
+                        : "grid-cols-5 max-[767px]:grid-cols-4 max-[767px]:[&>*:nth-child(n+5)]:hidden"
+                    }`
+                  : "mt-6 grid gap-[6px]";
+                const referenceGridStyle = isEmbedded
+                  ? undefined
+                  : { gridTemplateColumns: `repeat(${previewColumns}, minmax(0, 1fr))` };
 
                 return (
                   <div key={set.id} className={setIndex === 0 ? "mt-12" : "mt-8"}>
-                    <div className={`flex justify-between gap-8 ${shouldShowMainEditMetaHint ? "items-start" : "items-center"}`}>
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div>
+	                    <div className={`flex justify-between ${isMobileEmbedded ? "gap-4" : "gap-8"} ${shouldShowMainEditMetaHint ? "items-start" : "items-center"}`}>
+	                      <div className="flex min-w-0 flex-1 items-center gap-3">
+	                        <div className="w-full">
                           <h3 className="inline-flex items-baseline leading-none text-ink">
-                            <span className="font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">The</span>
-                            <span className="-ml-[1px] font-ui text-[25px] font-normal leading-none tracking-[-0.06em]">
+                            <span className={`font-ui ${referenceHeaderTextSizeClass} font-normal leading-none tracking-[-0.06em]`}>The</span>
+                            <span className={`-ml-[1px] font-ui ${referenceHeaderTextSizeClass} font-normal leading-none tracking-[-0.06em]`}>
                               –
                             </span>
-                            <span className="ml-[2px] font-instrument text-[25px] italic leading-none tracking-[0.01em]">
+                            <span className={`ml-[2px] font-instrument ${referenceHeaderTextSizeClass} italic leading-none tracking-[0.01em]`}>
                               {set.name}
                             </span>
                           </h3>
-                          {shouldShowMainEditMetaHint ? (
-                            <p className="mt-2 font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
-                              This is the core reference set behind the Main Edit. The personal Signature is shaped
-                              from it. Additional Edits exist for distinct contexts.
+	                          {shouldShowMainEditMetaHint ? (
+		                            <p className="mt-2 w-full max-w-none font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
+	                              This is the core reference set behind the Main Edit. The personal Signature is shaped
+	                              from it. Additional Edits exist for distinct contexts.
+	                            </p>
+	                          ) : null}
+                          {showMinimumReferenceDisclaimer ? (
+                            <p className="mt-2 w-full max-w-none font-ui text-[13px] font-medium leading-5 tracking-[0.02em] text-meta">
+                              Fewer than {MIN_NEW_EDIT_REFERENCES} references are active. More references need to be
+                              added before this edit has enough signal.
                             </p>
                           ) : null}
                         </div>
@@ -2426,15 +2774,13 @@ export default function ProfilePage() {
                     {!isCreateEditOpen ? (
                       <>
                         <div
-                          className="mt-6 grid gap-[6px]"
-                          style={{ gridTemplateColumns: `repeat(${previewColumns}, minmax(0, 1fr))` }}
+                          className={referenceGridClass}
+                          style={referenceGridStyle}
                         >
                           {visibleImages.map((image) => (
                             <div
                               key={image.id}
                               className="relative aspect-square w-full overflow-hidden rounded-[3px]"
-                              onMouseEnter={() => setHoveredImageId(image.id)}
-                              onMouseLeave={() => setHoveredImageId(null)}
                             >
                               <Image
                                 src={image.publicPath}
@@ -2446,12 +2792,12 @@ export default function ProfilePage() {
                                 draggable={false}
                                 onDragStart={(event) => event.preventDefault()}
                               />
-                              {isEditing && hoveredImageId === image.id ? (
+                              {isEditing ? (
                                 <button
                                   type="button"
                                   aria-label="Remove reference"
                                   onClick={() => removeImage(set.id, image.id)}
-                                  className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-paper/92 font-ui text-[12px] leading-none text-meta"
+                                  className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-paper/92 font-ui text-[12px] leading-none text-[#6F7381] opacity-100 shadow-[0_0.5px_1px_rgba(0,0,0,0.08)] transition-opacity duration-150"
                                 >
                                   ×
                                 </button>
@@ -2474,7 +2820,7 @@ export default function ProfilePage() {
                               }`}
                             >
                               <span
-                                className={`inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[16px] font-medium leading-none text-meta shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink group-hover:text-paper ${
+                                className={`inline-flex h-7 w-7 items-center justify-center rounded-full border border-line/80 bg-paper font-ui text-[16px] font-medium leading-none text-[#6F7381] shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 group-hover:border-ink group-hover:bg-ink group-hover:text-paper ${
                                   dragOverSetId === set.id ? "border-ink bg-ink text-paper" : ""
                                 }`}
                               >
@@ -2679,7 +3025,7 @@ export default function ProfilePage() {
                             value={renameDraft}
                             onChange={(event) => setRenameDraft(event.target.value)}
                             placeholder="Edit name, e.g. Summer Edit"
-                            className="block h-[30px] w-full border-0 bg-transparent px-0 text-center font-ui text-[14px] font-normal leading-6 text-ink outline-none placeholder:text-inactive"
+	                            className="block h-[30px] w-full border-0 bg-transparent px-0 text-center font-ui text-[16px] font-normal leading-6 text-ink outline-none placeholder:text-inactive md:text-[14px]"
                             autoFocus
                           />
                         </div>
@@ -2707,7 +3053,7 @@ export default function ProfilePage() {
                     <div
                       ref={createEditSectionRef}
                       className={`w-full ${isCreateEditOpen ? "mt-2 pb-12" : "mt-4"}`}
-                      style={{ scrollMarginTop: `${PROFILE_HEADER_HEIGHT_PX + 28}px` }}
+                      style={{ scrollMarginTop: `${resolvedProfileHeaderHeightPx + 28}px` }}
                     >
                       {isCreateEditOpen ? (
                         <p className="font-ui text-[14px] font-normal leading-6 text-meta">/ New Edit</p>
@@ -3051,49 +3397,55 @@ export default function ProfilePage() {
         ) : null}
 
         {showConstraintsSection ? (
-          <div className="mx-[calc(50%-50vw)] px-10">
-            <section className="mt-12 w-full">
+          <div
+            data-compact-overlay-content={isEmbedded ? "constraints" : undefined}
+            className={`mx-[calc(50%-50vw)] ${isMobileEmbedded ? "px-4" : "px-10"} ${isEmbedded ? "pb-4" : ""}`}
+          >
+            <section className={isMobileEmbedded ? embeddedProfileContentClass : "mt-12 w-full"}>
               <div
-                className="mx-auto w-full px-4 md:px-8"
+                className={`${isMobileEmbedded ? "mx-0 mt-12" : "mx-auto"} w-full px-0 md:px-8`}
                 style={{
-                  maxWidth: `${constraintsContentMaxWidthPx}px`,
+                  maxWidth: isMobileEmbedded ? undefined : `${constraintsContentMaxWidthPx}px`,
                   transform: constraintsContentTranslateXPx > 0 ? `translateX(${constraintsContentTranslateXPx}px)` : undefined,
                 }}
               >
                 <div className="grid gap-4 md:grid-cols-2 md:gap-3">
-                  <article className={`${overlayInfoCardClass} h-full`}>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">
-                        Price Range{" "}
+                  <article className={constraintArticleClass}>
+                    <div className={constraintPanelHeaderClass}>
+                      <div className={constraintPanelTitleGroupClass}>
+                        <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Price Range</h2>
                         <span className="font-ui text-[13px] font-normal leading-5 text-meta">(in EUR)</span>
-                      </h2>
-                      {isConstraintsComingSoonMode ? (
-                        <div className="group relative inline-flex">
-                          <button
-                            type="button"
-                            aria-disabled="true"
-                            className={`${constraintActionPillClass} cursor-default`}
-                          >
+                      </div>
+                      <div className={constraintPanelActionGroupClass}>
+                        {isConstraintsComingSoonMode ? (
+                          <div className="group relative inline-flex">
+                            <button
+                              type="button"
+                              aria-disabled="true"
+                              onClick={() => showComingSoonAction("constraints-price")}
+                              className={`${constraintActionPillClass} cursor-default`}
+                            >
+                              edit
+                            </button>
+                            <span className={comingSoonPillClassFor("constraints-price")}>coming soon</span>
+                          </div>
+                        ) : activeConstraintSectionEditor === "price" ? (
+                          <div className="flex items-center gap-3">
+                            <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
+                              cancel
+                            </button>
+                            <button type="button" onClick={savePriceSection} className={constraintActionPillClass}>
+                              save
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={beginPriceSectionEditor} className={constraintActionPillClass}>
                             edit
                           </button>
-                          <span className={constraintComingSoonPillClass}>coming soon</span>
-                        </div>
-                      ) : activeConstraintSectionEditor === "price" ? (
-                        <div className="flex items-center gap-3">
-                          <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
-                            cancel
-                          </button>
-                          <button type="button" onClick={savePriceSection} className={constraintActionPillClass}>
-                            save
-                          </button>
-                        </div>
-                      ) : (
-                        <button type="button" onClick={beginPriceSectionEditor} className={constraintActionPillClass}>
-                          edit
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
-                    <div className="mt-4 space-y-0">
+                    <div className={`${constraintRowsTopMarginClass} space-y-0`}>
                       {PRICE_CATEGORIES.map((category) => {
                         const range = constraints.price[category];
                         const isEditing = activeConstraintSectionEditor === "price";
@@ -3101,7 +3453,13 @@ export default function ProfilePage() {
                         return (
                           <div
                             key={category}
-                            className={isEditing ? constraintPriceRowEditClass : constraintPriceRowReadClass}
+                            className={
+                              isEditing
+                                ? constraintPriceRowEditClass
+                                : shouldTightenComingSoonConstraintRows
+                                  ? constraintPriceRowComingSoonMobileReadClass
+                                  : constraintPriceRowReadClass
+                            }
                           >
                             <p className={constraintPriceRowLabelClass}>{labelForPriceCategory(category)}</p>
                             <div className="min-w-0">
@@ -3243,44 +3601,49 @@ export default function ProfilePage() {
                     </div>
                   </article>
 
-                  <article className={`${overlayInfoCardClass} h-full`}>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Sizing</h2>
-                      <button
-                        ref={conversionTriggerRef}
-                        type="button"
-                        onClick={openConstraintConversion}
-                        className={expandTextButtonClass}
-                      >
-                        (conversion chart)
-                      </button>
-                      {isConstraintsComingSoonMode ? (
-                        <div className="group relative inline-flex">
-                          <button
-                            type="button"
-                            aria-disabled="true"
-                            className={`${constraintActionPillClass} cursor-default`}
-                          >
+                  <article className={constraintArticleClass}>
+                    <div className={constraintPanelHeaderClass}>
+                      <div className={constraintPanelTitleGroupClass}>
+                        <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Sizing</h2>
+                        <button
+                          ref={conversionTriggerRef}
+                          type="button"
+                          onClick={openConstraintConversion}
+                          className={expandTextButtonClass}
+                        >
+                          (conversion chart)
+                        </button>
+                      </div>
+                      <div className={constraintPanelActionGroupClass}>
+                        {isConstraintsComingSoonMode ? (
+                          <div className="group relative inline-flex">
+                            <button
+                              type="button"
+                              aria-disabled="true"
+                              onClick={() => showComingSoonAction("constraints-sizing")}
+                              className={`${constraintActionPillClass} cursor-default`}
+                            >
+                              edit
+                            </button>
+                            <span className={comingSoonPillClassFor("constraints-sizing")}>coming soon</span>
+                          </div>
+                        ) : activeConstraintSectionEditor === "sizing" ? (
+                          <div className="flex items-center gap-3">
+                            <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
+                              cancel
+                            </button>
+                            <button type="button" onClick={saveSizingSection} className={constraintActionPillClass}>
+                              save
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={beginSizingSectionEditor} className={constraintActionPillClass}>
                             edit
                           </button>
-                          <span className={constraintComingSoonPillClass}>coming soon</span>
-                        </div>
-                      ) : activeConstraintSectionEditor === "sizing" ? (
-                        <div className="flex items-center gap-3">
-                          <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
-                            cancel
-                          </button>
-                          <button type="button" onClick={saveSizingSection} className={constraintActionPillClass}>
-                            save
-                          </button>
-                        </div>
-                      ) : (
-                        <button type="button" onClick={beginSizingSectionEditor} className={constraintActionPillClass}>
-                          edit
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
-                    <div className="mt-4 space-y-0">
+                    <div className={`${constraintRowsTopMarginClass} space-y-0`}>
                       {SIZING_CATEGORIES.map((category) => {
                         const isClothing = category === "clothing";
                         const clothingValue = (() => {
@@ -3300,7 +3663,13 @@ export default function ProfilePage() {
                         return (
                           <div
                             key={category}
-                            className={isEditing ? constraintEditRowClass : constraintReadRowClass}
+                            className={
+                              isEditing
+                                ? constraintEditRowClass
+                                : shouldTightenComingSoonConstraintRows
+                                  ? constraintReadRowComingSoonMobileClass
+                                  : constraintReadRowClass
+                            }
                           >
                             <p className={formFieldTitleClass}>
                               {labelForSizingCategory(category)}
@@ -3348,34 +3717,39 @@ export default function ProfilePage() {
                     </div>
                   </article>
 
-                  <article className={`${overlayInfoCardClass} h-full`}>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Gender</h2>
-                      {isConstraintsComingSoonMode ? (
-                        <div className="group relative inline-flex">
-                          <button
-                            type="button"
-                            aria-disabled="true"
-                            className={`${constraintActionPillClass} cursor-default`}
-                          >
+                  <article className={constraintArticleClass}>
+                    <div className={constraintPanelHeaderClass}>
+                      <div className={constraintPanelTitleGroupClass}>
+                        <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Gender</h2>
+                      </div>
+                      <div className={constraintPanelActionGroupClass}>
+                        {isConstraintsComingSoonMode ? (
+                          <div className="group relative inline-flex">
+                            <button
+                              type="button"
+                              aria-disabled="true"
+                              onClick={() => showComingSoonAction("constraints-gender")}
+                              className={`${constraintActionPillClass} cursor-default`}
+                            >
+                              edit
+                            </button>
+                            <span className={comingSoonPillClassFor("constraints-gender")}>coming soon</span>
+                          </div>
+                        ) : activeConstraintEditor?.section === "gender" ? (
+                          <div className="flex items-center gap-3">
+                            <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
+                              cancel
+                            </button>
+                            <button type="button" onClick={saveGenderConstraint} className={constraintActionPillClass}>
+                              save
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={beginGenderConstraintEditor} className={constraintActionPillClass}>
                             edit
                           </button>
-                          <span className={constraintComingSoonPillClass}>coming soon</span>
-                        </div>
-                      ) : activeConstraintEditor?.section === "gender" ? (
-                        <div className="flex items-center gap-3">
-                          <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
-                            cancel
-                          </button>
-                          <button type="button" onClick={saveGenderConstraint} className={constraintActionPillClass}>
-                            save
-                          </button>
-                        </div>
-                      ) : (
-                        <button type="button" onClick={beginGenderConstraintEditor} className={constraintActionPillClass}>
-                          edit
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
                     <div className="mt-4 space-y-0">
                       {(() => {
@@ -3530,34 +3904,39 @@ export default function ProfilePage() {
                     </div>
                   </article>
 
-                  <article className={`${overlayInfoCardClass} h-full`}>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Pre-owned items</h2>
-                      {isConstraintsComingSoonMode ? (
-                        <div className="group relative inline-flex">
-                          <button
-                            type="button"
-                            aria-disabled="true"
-                            className={`${constraintActionPillClass} cursor-default`}
-                          >
+                  <article className={constraintArticleClass}>
+                    <div className={constraintPanelHeaderClass}>
+                      <div className={constraintPanelTitleGroupClass}>
+                        <h2 className="font-ui text-[16px] font-medium leading-5 text-ink">Pre-owned items</h2>
+                      </div>
+                      <div className={constraintPanelActionGroupClass}>
+                        {isConstraintsComingSoonMode ? (
+                          <div className="group relative inline-flex">
+                            <button
+                              type="button"
+                              aria-disabled="true"
+                              onClick={() => showComingSoonAction("constraints-pre-owned")}
+                              className={`${constraintActionPillClass} cursor-default`}
+                            >
+                              edit
+                            </button>
+                            <span className={comingSoonPillClassFor("constraints-pre-owned")}>coming soon</span>
+                          </div>
+                        ) : activeConstraintEditor?.section === "pre-owned" ? (
+                          <div className="flex items-center gap-3">
+                            <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
+                              cancel
+                            </button>
+                            <button type="button" onClick={savePreOwnedConstraint} className={constraintActionPillClass}>
+                              save
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={beginPreOwnedConstraintEditor} className={constraintActionPillClass}>
                             edit
                           </button>
-                          <span className={constraintComingSoonPillClass}>coming soon</span>
-                        </div>
-                      ) : activeConstraintEditor?.section === "pre-owned" ? (
-                        <div className="flex items-center gap-3">
-                          <button type="button" onClick={cancelConstraintEditor} className={constraintActionPillClass}>
-                            cancel
-                          </button>
-                          <button type="button" onClick={savePreOwnedConstraint} className={constraintActionPillClass}>
-                            save
-                          </button>
-                        </div>
-                      ) : (
-                        <button type="button" onClick={beginPreOwnedConstraintEditor} className={constraintActionPillClass}>
-                          edit
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
                     <div className="mt-4 space-y-0">
                       <div className={activeConstraintEditor?.section === "pre-owned" ? constraintEditRowClass : constraintReadRowClass}>
@@ -3608,7 +3987,7 @@ export default function ProfilePage() {
         {showSettingsSection ? (
           <div
             data-compact-overlay-content={isEmbedded ? "settings" : undefined}
-            className={`mx-[calc(50%-50vw)] px-10 ${isEmbedded ? "pb-4" : ""}`}
+            className={`mx-[calc(50%-50vw)] ${isMobileEmbedded ? "px-4" : "px-10"} ${isEmbedded ? "pb-4" : ""}`}
           >
             <section className={`${isEmbedded ? "pt-[66px]" : "mt-4"} w-full`}>
               <div className="w-full space-y-4">
@@ -3682,11 +4061,12 @@ export default function ProfilePage() {
                     <div>
                       <p className={formFieldTitleClass}>Password</p>
                       {activeSettingsField === "password" ? (
-                        <>
+                        <div onPointerDown={stopSettingsFieldPropagation} onClick={stopSettingsFieldPropagation}>
                           <input
                             type="password"
                             value={settingsFieldDraft}
                             onChange={(event) => setSettingsFieldDraft(event.target.value)}
+                            onKeyDown={handleSettingsPasswordKeyDown}
                             className={overlayInputClass}
                             placeholder="new password"
                             autoFocus
@@ -3699,7 +4079,7 @@ export default function ProfilePage() {
                               save
                             </button>
                           </div>
-                        </>
+                        </div>
                       ) : (
                         <button
                           type="button"
@@ -3712,7 +4092,7 @@ export default function ProfilePage() {
                     </div>
                   </div>
                 </article>
-                <div className={`${isEmbedded ? "px-5" : ""} flex w-full items-center justify-start gap-3`}>
+                <div className={`${isMobileEmbedded ? "" : isEmbedded ? "px-5" : ""} flex w-full items-center justify-start gap-3`}>
                   <button type="button" className={settingsActionPillClass}>
                     log out
                   </button>
@@ -3757,7 +4137,7 @@ export default function ProfilePage() {
                 <button
                   type="button"
                   onClick={() => setIsDeleteProfileDisclaimerOpen(false)}
-                  className={settingsDeletePillClass}
+                  className={settingsDangerPillClass}
                 >
                   proceed
                 </button>
@@ -3769,7 +4149,7 @@ export default function ProfilePage() {
         {showAboutSection ? (
           <div
             data-compact-overlay-content={isEmbedded ? "about" : undefined}
-            className={`mx-[calc(50%-50vw)] px-10 ${isEmbedded ? "pb-4" : ""}`}
+            className={`mx-[calc(50%-50vw)] ${isMobileEmbedded ? "px-4" : "px-10"} ${isEmbedded ? "pb-4" : ""}`}
           >
             <section className={`${isEmbedded ? "pt-[66px]" : "mt-10"} w-full`}>
               <div className="w-full space-y-8 [&_h2]:text-[16px] [&_h3]:text-[13px] [&_h3]:text-meta [&_p]:text-[13px] [&_li]:text-[13px] [&_th]:text-[12px] [&_th]:text-meta [&_td]:text-[12px]">
@@ -4157,7 +4537,7 @@ export default function ProfilePage() {
         {showFeedbackFormSection ? (
           <div
             data-compact-overlay-content={isEmbedded ? "feedback" : undefined}
-            className={`mx-[calc(50%-50vw)] px-10 ${isEmbedded ? "pb-4" : ""}`}
+            className={`mx-[calc(50%-50vw)] ${isMobileEmbedded ? "px-4" : "px-10"} ${isEmbedded ? "pb-4" : ""}`}
           >
             <section className={`${isEmbedded ? "pt-[66px]" : "mt-10"} w-full`}>
               <div className="w-full space-y-4">
@@ -4183,7 +4563,7 @@ export default function ProfilePage() {
                           onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "clarity")}
                           className={`mt-2 h-9 w-full resize-none overflow-hidden ${
                             isEmbedded ? "rounded-[4px] border border-transparent bg-[#F5F5F6] px-3" : "rounded-[4px] border border-line/80 bg-paper px-3"
-                          } py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none`}
+	                          } py-2 font-ui text-[16px] font-normal leading-[1.5] text-meta outline-none md:text-[13px]`}
                         />
                       </div>
                     </label>
@@ -4203,7 +4583,7 @@ export default function ProfilePage() {
                           onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "quality")}
                           className={`mt-2 h-9 w-full resize-none overflow-hidden ${
                             isEmbedded ? "rounded-[4px] border border-transparent bg-[#F5F5F6] px-3" : "rounded-[4px] border border-line/80 bg-paper px-3"
-                          } py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none`}
+	                          } py-2 font-ui text-[16px] font-normal leading-[1.5] text-meta outline-none md:text-[13px]`}
                         />
                       </div>
                     </label>
@@ -4223,14 +4603,14 @@ export default function ProfilePage() {
                           onKeyDown={(event) => handleFeedbackFieldKeyDown(event, "trust")}
                           className={`mt-2 h-9 w-full resize-none overflow-hidden ${
                             isEmbedded ? "rounded-[4px] border border-transparent bg-[#F5F5F6] px-3" : "rounded-[4px] border border-line/80 bg-paper px-3"
-                          } py-2 font-ui text-[13px] font-normal leading-[1.5] text-meta outline-none`}
+	                          } py-2 font-ui text-[16px] font-normal leading-[1.5] text-meta outline-none md:text-[13px]`}
                         />
                       </div>
                     </label>
                   </div>
                 </article>
-                <div className={isEmbedded ? "px-5" : ""}>
-                  <div className="flex items-center gap-3">
+                <div className={isMobileEmbedded ? "" : isEmbedded ? "px-5" : ""}>
+                  <div className={isMobileEmbedded ? "flex flex-col items-start gap-2" : "flex items-center gap-3"}>
                     <button
                       type="button"
                       onClick={() => {
@@ -4282,7 +4662,7 @@ export default function ProfilePage() {
                     ) : null}
                   </div>
                   {isFeedbackHistoryOpen && feedbackHistory.length > 0 ? (
-                    <div className="mt-4 space-y-3">
+                    <div className={`${isMobileEmbedded ? "max-h-[calc(100dvh-430px)] overflow-y-auto overscroll-contain pr-1" : ""} mt-4 space-y-3`}>
                       {feedbackHistory.map((entry, index) => (
                         <div
                           key={`${entry.sentAt}-${index}`}

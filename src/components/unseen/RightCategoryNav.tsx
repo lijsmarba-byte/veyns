@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
+import { useViewportMode } from "@/lib/ui/viewportMode";
 
 type RightCategoryNavProps = {
   sectionKeys: string[];
@@ -64,6 +65,7 @@ export function RightCategoryNav({
   sectionIdPrefix = "gallery-section-",
   className = "",
 }: RightCategoryNavProps) {
+  const { isIPadExperience } = useViewportMode();
   const navRootRef = useRef<HTMLElement | null>(null);
   const searchParams = useSearchParams();
   const [activeCategory, setActiveCategory] = useState(sectionKeys[0] ?? "");
@@ -353,6 +355,7 @@ export function RightCategoryNav({
   };
 
   const effectiveExpanded = isExpanded;
+  const isTouchExpandMode = isIPadExperience;
   const visualActiveKey = displayActiveCategory || activeCategory;
   const activeSection =
     sections.find((section) => section.key === visualActiveKey) ??
@@ -401,7 +404,7 @@ export function RightCategoryNav({
       onMouseEnter={openExpanded}
       onMouseMove={handlePointerMove}
       onMouseLeave={closeExpanded}
-      onFocusCapture={openExpanded}
+      onFocusCapture={isTouchExpandMode ? undefined : openExpanded}
       onBlurCapture={handleBlurCapture}
     >
       <div className="relative h-[252px] w-[246px] rounded-xl px-4 py-4">
@@ -418,9 +421,18 @@ export function RightCategoryNav({
                 type="button"
                 aria-expanded={effectiveExpanded}
                 aria-controls={expandedListId}
-                onClick={(event) =>
-                  handleClick(activeSection.key, activeSection.id, { x: event.clientX, y: event.clientY })
-                }
+                onClick={(event) => {
+                  if (isTouchExpandMode) {
+                    if (effectiveExpanded) {
+                      hoverSuppressPointRef.current = null;
+                      setIsExpanded(false);
+                    } else {
+                      openExpanded();
+                    }
+                    return;
+                  }
+                  handleClick(activeSection.key, activeSection.id, { x: event.clientX, y: event.clientY });
+                }}
                 data-nav-active-anchor="true"
                 className="inline-flex items-center justify-start rounded-md py-[2px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
               >

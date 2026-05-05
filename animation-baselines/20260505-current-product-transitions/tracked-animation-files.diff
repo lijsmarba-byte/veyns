@@ -1,0 +1,434 @@
+diff --git a/src/app/product-view/page.tsx b/src/app/product-view/page.tsx
+index 04f72d0..5749f75 100644
+--- a/src/app/product-view/page.tsx
++++ b/src/app/product-view/page.tsx
+@@ -3,6 +3,7 @@ import { ProductActionRow } from "@/components/unseen/ProductActionRow";
+ import { ProductImageRail } from "@/components/unseen/ProductImageRail";
+ import { ProductInfoTransition } from "@/components/unseen/ProductInfoTransition";
+ import { ProductViewCloseButton } from "@/components/unseen/ProductViewCloseButton";
++import { ProductViewMobile } from "@/components/unseen/ProductViewMobile";
+ 
+ type SearchParams = Record<string, string | string[] | undefined>;
+ 
+@@ -89,8 +90,25 @@ export default async function ProductViewPage({
+   const leftStickyTop = "calc(var(--sticky-h) + (var(--viewport-h) - var(--sticky-h)) / 2 - 260px)";
+ 
+   return (
+-    <main className="font-ui min-h-screen bg-paper text-ink" style={{ minHeight: "var(--viewport-h)" }}>
+-      <section data-pv-shell="true" className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
++    <>
++      <ProductViewMobile
++        backHref={backHref}
++        brand={current.item.brand}
++        cues={cuePills}
++        description={current.item.artsyDesc}
++        editId={editId ?? null}
++        images={imageRail}
++        isArchiveMode={isArchiveMode}
++        isPreOwned={isPreOwned}
++        itemId={current.item.id}
++        mode={mode}
++        pipeLabel={formatPipeLabel(current.item.idxLabel)}
++        price={current.item.price}
++        title={current.item.artsyName}
++      />
++
++      <main className="font-ui hidden min-h-screen bg-paper text-ink md:block" style={{ minHeight: "var(--viewport-h)" }}>
++        <section data-pv-shell="true" className="relative mx-auto w-full max-w-[1440px] px-10 py-8 sm:px-14 md:px-24 md:py-10 lg:px-28 lg:py-6">
+         <div className="fixed right-4 top-[23px] z-50 md:right-10">
+           <div className="flex h-[26px] items-center">
+             <ProductViewCloseButton
+@@ -161,7 +179,8 @@ export default async function ProductViewPage({
+             />
+           </div>
+         </div>
+-      </section>
+-    </main>
++        </section>
++      </main>
++    </>
+   );
+ }
+diff --git a/src/components/unseen/ProductTile.tsx b/src/components/unseen/ProductTile.tsx
+index 01f30c9..7656e48 100644
+--- a/src/components/unseen/ProductTile.tsx
++++ b/src/components/unseen/ProductTile.tsx
+@@ -1,11 +1,12 @@
+ "use client";
+ 
+-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
++import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+ import { usePathname, useRouter, useSearchParams } from "next/navigation";
+ import Image from "next/image";
+ import type { MockCatalogItem } from "@/data/mockCatalog";
+ import { GalleryHoverActions } from "@/components/unseen/GalleryHoverActions";
+ import { showProductTransitionHold, warmProductImage } from "@/components/unseen/productImagePreload";
++import { useViewportMode } from "@/lib/ui/viewportMode";
+ 
+ type ProductTileProps = {
+   item: MockCatalogItem;
+@@ -88,19 +89,16 @@ export function ProductTile({
+ }: ProductTileProps) {
+   const hasHoverActions = mode === "gallery" || mode === "archive";
+   const [hoverResetKey, setHoverResetKey] = useState(0);
+-  const [returnImageState, setReturnImageState] = useState(() => {
+-    const delayMs = readReturnFocusDelayMs(item.id, true);
+-    return {
+-      delayMs: delayMs ?? 0,
+-      hidden: delayMs !== null,
+-    };
+-  });
++  const [returnImageState, setReturnImageState] = useState({ delayMs: 0, hidden: false });
+   const imageAreaRef = useRef<HTMLDivElement | null>(null);
+   const topLabelRef = useRef<HTMLParagraphElement | null>(null);
++  const brandLabelRef = useRef<HTMLParagraphElement | null>(null);
+   const prefetchedHrefRef = useRef<string | null>(null);
++  const [isMobileBrandWrapped, setIsMobileBrandWrapped] = useState(false);
+   const router = useRouter();
+   const pathname = usePathname();
+   const searchParams = useSearchParams();
++  const { isMobileExperience } = useViewportMode();
+   const itemNumber = getItemNumber(item);
+   const galleryCoreLabel = item.idxLabel.replace(/^\[/, "").replace(/\]$/, "");
+   const topLabel = mode === "archive" ? `Issue ${issueNumber} | ${itemNumber}` : galleryCoreLabel;
+@@ -172,6 +170,34 @@ export function ProductTile({
+     };
+   }, [returnImageState.delayMs, returnImageState.hidden]);
+ 
++  const syncMobileBrandWrap = useCallback(() => {
++    const labelNode = brandLabelRef.current;
++    if (!labelNode) return;
++    if (window.innerWidth > 640) {
++      setIsMobileBrandWrapped(false);
++      return;
++    }
++    const wrapped = labelNode.scrollHeight - labelNode.clientHeight > 1;
++    setIsMobileBrandWrapped(wrapped);
++  }, []);
++
++  useEffect(() => {
++    const raf = window.requestAnimationFrame(syncMobileBrandWrap);
++    const onResize = () => {
++      window.requestAnimationFrame(syncMobileBrandWrap);
++    };
++    window.addEventListener("resize", onResize);
++    return () => {
++      window.cancelAnimationFrame(raf);
++      window.removeEventListener("resize", onResize);
++    };
++  }, [syncMobileBrandWrap]);
++
++  useEffect(() => {
++    const raf = window.requestAnimationFrame(syncMobileBrandWrap);
++    return () => window.cancelAnimationFrame(raf);
++  }, [item.brand, syncMobileBrandWrap]);
++
+   const isGridActionEventTarget = (target: EventTarget | null) => {
+     if (!(target instanceof Node)) return false;
+     const element = target instanceof Element ? target : target.parentElement;
+@@ -203,54 +229,70 @@ export function ProductTile({
+     const containRect =
+       containerRect && aspectRatio ? getContainRect(containerRect, aspectRatio) : null;
+     const rect = containRect ?? imgRect ?? containerRect;
+-    showProductTransitionHold(imageAreaRef.current, item.imgSrc, aspectRatio, item.id);
+-    if (rect) {
++    if (isMobileExperience) {
+       try {
+-        window.sessionStorage.setItem(
+-          "unseen:product-view-transition",
+-          JSON.stringify({
+-            itemId: item.id,
+-            src: item.imgSrc,
+-            left: rect.left,
+-            top: rect.top,
+-            width: rect.width,
+-            height: rect.height,
+-            aspectRatio,
+-            at: Date.now(),
+-          }),
+-        );
++        window.sessionStorage.removeItem("unseen:product-view-transition");
++        window.sessionStorage.removeItem("unseen:product-view-text-transition");
++        window.sessionStorage.removeItem("unseen:return-focus-item");
++        window.sessionStorage.removeItem("unseen:return-flight-finished-flag");
++        document.getElementById("unseen-product-transition-source-hold")?.remove();
+       } catch {
+-        // Transition is optional; ignore storage failures.
++        // Ignore storage failures.
++      }
++    } else {
++      showProductTransitionHold(imageAreaRef.current, item.imgSrc, aspectRatio, item.id);
++      if (rect) {
++        try {
++          window.sessionStorage.setItem(
++            "unseen:product-view-transition",
++            JSON.stringify({
++              itemId: item.id,
++              src: item.imgSrc,
++              left: rect.left,
++              top: rect.top,
++              width: rect.width,
++              height: rect.height,
++              aspectRatio,
++              at: Date.now(),
++            }),
++          );
++        } catch {
++          // Transition is optional; ignore storage failures.
++        }
++      }
++      const textRect = topLabelRef.current?.getBoundingClientRect();
++      if (textRect) {
++        try {
++          window.sessionStorage.setItem(
++            "unseen:product-view-text-transition",
++            JSON.stringify({
++              itemId: item.id,
++              left: textRect.left,
++              top: textRect.top,
++              width: textRect.width,
++              height: textRect.height,
++              at: Date.now(),
++            }),
++          );
++        } catch {
++          // Transition is optional; ignore storage failures.
++        }
+       }
+     }
+-    const textRect = topLabelRef.current?.getBoundingClientRect();
+-    if (textRect) {
+-      try {
++
++    try {
++      if (!isMobileExperience) {
+         window.sessionStorage.setItem(
+-          "unseen:product-view-text-transition",
++          "unseen:return-scroll",
+           JSON.stringify({
+-            itemId: item.id,
+-            left: textRect.left,
+-            top: textRect.top,
+-            width: textRect.width,
+-            height: textRect.height,
+             at: Date.now(),
++            backHref,
++            scrollY: window.scrollY,
+           }),
+         );
+-      } catch {
+-        // Transition is optional; ignore storage failures.
++      } else {
++        window.sessionStorage.removeItem("unseen:return-scroll");
+       }
+-    }
+-
+-    try {
+-      window.sessionStorage.setItem(
+-        "unseen:return-scroll",
+-        JSON.stringify({
+-          at: Date.now(),
+-          backHref,
+-          scrollY: window.scrollY,
+-        }),
+-      );
+     } catch {
+       // Ignore storage failures.
+     }
+@@ -273,7 +315,7 @@ export function ProductTile({
+       <div
+         ref={imageAreaRef}
+         data-product-tile-image-root="true"
+-        className={`relative mx-auto h-[280px] w-full max-w-[210px] cursor-pointer ${
++        className={`relative mx-auto h-[212px] w-full max-w-[162px] cursor-pointer min-[641px]:h-[280px] min-[641px]:max-w-[210px] ${
+           returnImageState.hidden ? "pointer-events-none opacity-0" : "opacity-100"
+         }`}
+         onPointerDown={warmProductTransition}
+@@ -300,7 +342,7 @@ export function ProductTile({
+       </div>
+ 
+       <div
+-        className="mt-[16px] flex w-full cursor-pointer flex-col items-center gap-[3px] text-center text-[13px] font-medium leading-5 tracking-[0.02em] text-meta"
++        className="mt-[16px] flex h-[76px] w-full cursor-pointer flex-col items-center justify-between text-center text-[13px] font-medium leading-5 tracking-[0.02em] text-meta min-[641px]:mt-[14px] min-[641px]:h-auto min-[641px]:justify-start min-[641px]:gap-[3px]"
+         onPointerDown={warmProductTransition}
+         onFocus={warmProductTransition}
+         onClick={openProductView}
+@@ -313,10 +355,21 @@ export function ProductTile({
+           <span className="px-[2px]">{topLabel}</span>
+           <span aria-hidden="true">|</span>
+         </p>
+-        <p className={`inline-flex h-[22px] items-center justify-center text-center font-ui ${brandTextClass}`}>
++        <p
++          ref={brandLabelRef}
++          className={`w-full max-w-full px-1 text-center font-ui min-[641px]:inline-flex min-[641px]:h-[22px] min-[641px]:items-center min-[641px]:justify-center min-[641px]:leading-5 max-[640px]:h-[30px] max-[640px]:overflow-hidden max-[640px]:[display:-webkit-box] max-[640px]:[-webkit-box-orient:vertical] max-[640px]:[-webkit-line-clamp:2] ${
++            isMobileBrandWrapped
++              ? "max-[640px]:pt-0 max-[640px]:leading-[13px]"
++              : "max-[640px]:pt-[4px] max-[640px]:leading-5"
++          } ${brandTextClass}`}
++        >
+           {item.brand}
+         </p>
+-        <p className="inline-flex h-[22px] items-center justify-center font-ui text-meta">
++        <p
++          className={`inline-flex h-[22px] items-center justify-center font-ui text-meta ${
++            isMobileBrandWrapped ? "max-[640px]:translate-y-[2px]" : ""
++          }`}
++        >
+           {item.price}
+         </p>
+       </div>
+diff --git a/src/components/unseen/ProductViewCloseButton.tsx b/src/components/unseen/ProductViewCloseButton.tsx
+index 07d50db..b5efc4b 100644
+--- a/src/components/unseen/ProductViewCloseButton.tsx
++++ b/src/components/unseen/ProductViewCloseButton.tsx
+@@ -22,6 +22,7 @@ const RETURN_FLIGHT_FINISHED_EVENT = "unseen:return-flight-finished";
+ const RETURN_FLIGHT_FINISHED_KEY = "unseen:return-flight-finished-flag";
+ const RETURN_PREV_BODY_PADDING_ATTR = "data-unseen-return-prev-pr";
+ const WORLD2_RETURN_REVEAL_KEY = "unseen:world2-return-reveal";
++const IMMERSIVE_RETURN_STEADY_KEY = "unseen:immersive-return-steady";
+ 
+ type ProductViewCloseButtonProps = {
+   backHref: string;
+@@ -303,6 +304,7 @@ export function ProductViewCloseButton({
+   productId,
+ }: ProductViewCloseButtonProps) {
+   const router = useRouter();
++  const mountedAtRef = useRef<number | null>(null);
+   const [isAnimating, setIsAnimating] = useState(false);
+   const isAnimatingRef = useRef(false);
+   const hasViewportResizedRef = useRef(false);
+@@ -318,9 +320,14 @@ export function ProductViewCloseButton({
+   const CLOSE_ICON_STROKE_PX = 1.5;
+   const CLOSE_ICON_BOX_HEIGHT_PX = 14;
+   const closeIconCenterPx = CLOSE_ICON_BOX_HEIGHT_PX / 2 - CLOSE_ICON_STROKE_PX / 2;
++  const isFocusReturn = backHref.includes("/focus");
+   const isImmersiveReturn = backHref.includes("/immersive");
+   const closeEndHoldMs = isImmersiveReturn ? 80 : CLOSE_END_HOLD_MS;
+ 
++  useEffect(() => {
++    mountedAtRef.current = Date.now();
++  }, []);
++
+   useEffect(() => {
+     router.prefetch(backHref);
+   }, [backHref, router]);
+@@ -366,6 +373,18 @@ export function ProductViewCloseButton({
+     if (isAnimatingRef.current) return;
+     isAnimatingRef.current = true;
+     setIsAnimating(true);
++    if (isFocusReturn) {
++      window.dispatchEvent(new CustomEvent("unseen:product-view-closing"));
++      try {
++        window.sessionStorage.removeItem(RETURN_FOCUS_ITEM_KEY);
++        window.sessionStorage.removeItem(RETURN_FLIGHT_FINISHED_KEY);
++      } catch {
++        // Optional transition hygiene only.
++      }
++      signalReturnFlightFinished();
++      router.replace(backHref, { scroll: false });
++      return;
++    }
+     lockPageScrollForReturn();
+     const stopIntentCapture = startReturnIntentCapture();
+     const stopScrollBlock = startReturnScrollBlock();
+@@ -408,19 +427,34 @@ export function ProductViewCloseButton({
+     let closeSettleHoldMs = closeEndHoldMs;
+     let closeFlightEasing = "cubic-bezier(0.22, 1, 0.36, 1)";
+     let closeOverlay: HTMLDivElement | null = null;
+-    const returnBackdropDetail = canUseExactImageReturn || canUseIndicatedImageReturn
+-      ? {
+-          targetOpacity: isImmersiveReturn ? 0.085 : 0.16,
+-          raiseMs: 240,
+-          holdMs: isImmersiveReturn ? 260 : 260,
+-          fallMs: isImmersiveReturn ? 1260 : 780,
+-        }
+-      : {
+-          targetOpacity: isImmersiveReturn ? 0.08 : 0.18,
+-          raiseMs: 110,
+-          holdMs: isImmersiveReturn ? 300 : 280,
+-          fallMs: isImmersiveReturn ? 1500 : 860,
+-        };
++    const returnBackdropDetail =
++      isFocusReturn
++        ? {
++            targetOpacity: 0,
++            raiseMs: 40,
++            holdMs: 0,
++            fallMs: 120,
++          }
++        : canUseExactImageReturn && !isImmersiveReturn
++        ? {
++            targetOpacity: 0.035,
++            raiseMs: 70,
++            holdMs: 40,
++            fallMs: 220,
++          }
++        : canUseExactImageReturn || canUseIndicatedImageReturn
++          ? {
++              targetOpacity: isImmersiveReturn ? 0.085 : 0.16,
++              raiseMs: 240,
++              holdMs: isImmersiveReturn ? 260 : 260,
++              fallMs: isImmersiveReturn ? 1260 : 780,
++            }
++          : {
++              targetOpacity: isImmersiveReturn ? 0.08 : 0.18,
++              raiseMs: 110,
++              holdMs: isImmersiveReturn ? 300 : 280,
++              fallMs: isImmersiveReturn ? 1500 : 860,
++            };
+     window.dispatchEvent(
+       new CustomEvent("unseen:return-transition-start", {
+         detail: {
+@@ -794,11 +828,19 @@ export function ProductViewCloseButton({
+               fadeMs: canUseIndicatedImageReturn ? 380 : 500,
+             }),
+           );
++          window.sessionStorage.setItem(
++            IMMERSIVE_RETURN_STEADY_KEY,
++            JSON.stringify({
++              at: now,
++              href: backHref,
++            }),
++          );
++          window.sessionStorage.removeItem(RETURN_FOCUS_ITEM_KEY);
+         } catch {
+           // Optional return polish only.
+         }
+       }
+-      if (canUseExactImageReturn || canUseIndicatedImageReturn) {
++      if (!isImmersiveReturn && (canUseExactImageReturn || canUseIndicatedImageReturn)) {
+         try {
+           const closeSettleMs = Math.max(0, closeSettleHoldMs);
+           const remainingHideBaseMs = Math.max(0, closeDurationMs + closeSettleMs - CLOSE_ROUTE_DELAY_MS);
+@@ -817,19 +859,21 @@ export function ProductViewCloseButton({
+       }
+       router.replace(backHref, { scroll: false });
+     }, CLOSE_ROUTE_DELAY_MS);
+-  }, [backHref, closeEndHoldMs, isImmersiveReturn, productId, router]);
++  }, [backHref, closeEndHoldMs, isFocusReturn, isImmersiveReturn, productId, router]);
+ 
+   useEffect(() => {
+     if (!enableBackdropClose) return;
+ 
+     const handleDocumentClick = (event: MouseEvent) => {
++      if (mountedAtRef.current !== null && Date.now() - mountedAtRef.current < 420) return;
+       const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+       const hasProtectedHit = path.some((entry) => {
+         if (!(entry instanceof Element)) return false;
+         return (
+           entry.matches('[data-pv-close-button="true"]') ||
+           entry.matches('[data-pv-info-hit="true"]') ||
+-          entry.matches('[data-pv-image-hit="true"]')
++          entry.matches('[data-pv-image-hit="true"]') ||
++          entry.matches('[data-pv-mobile-hit="true"]')
+         );
+       });
+       if (hasProtectedHit) return;
+@@ -839,6 +883,7 @@ export function ProductViewCloseButton({
+       if (target.closest('[data-pv-close-button="true"]')) return;
+       if (target.closest('[data-pv-info-hit="true"]')) return;
+       if (target.closest('[data-pv-image-hit="true"]')) return;
++      if (target.closest('[data-pv-mobile-hit="true"]')) return;
+ 
+       handleClose();
+     };

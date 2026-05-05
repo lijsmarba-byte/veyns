@@ -943,11 +943,11 @@ export function ProfileSignatureContourInline({
   }, []);
 
   return (
-    <div className="w-full overflow-visible">
+    <div className="w-full overflow-visible" style={{ touchAction: "pan-y" }}>
       <div
         ref={heatmapContainerRef}
         className="relative mx-auto overflow-visible"
-        style={{ width: `${OVERLAY_HEATMAP_SCALE * 100}%` }}
+        style={{ width: `${OVERLAY_HEATMAP_SCALE * 100}%`, touchAction: "pan-y" }}
       >
         <svg
           ref={heatmapSvgRef}
@@ -960,6 +960,7 @@ export function ProfileSignatureContourInline({
           style={{
             backgroundColor,
             overflow: "visible",
+            touchAction: "pan-y",
           }}
         >
           {allContours.map((contour, index) => (
@@ -981,13 +982,18 @@ export function ProfileSignatureContourInline({
           {data.clusters.map((cluster) => {
             const isHovered = hoveredClusterId === cluster.id;
             const isActive = activeClusterId === cluster.id;
+            const activateCluster = () => {
+              clearHoverExpandTimer();
+              const isSameCluster = activeClusterId === cluster.id;
+              setIsOverlayExpanded(!isSameCluster);
+              setActiveClusterId(isSameCluster ? null : cluster.id);
+            };
             return (
-              <text
+              <g
                 key={`label-${cluster.id}`}
-                x={cluster.cx}
-                y={cluster.cy}
-                textAnchor="middle"
-                className="select-none font-ui"
+                role="button"
+                tabIndex={0}
+                className="select-none outline-none"
                 onMouseEnter={() => {
                   setHoveredClusterId(cluster.id);
                   startHoverExpandTimer(cluster.id);
@@ -1004,23 +1010,42 @@ export function ProfileSignatureContourInline({
                   setHoveredClusterId((current) => (current === cluster.id ? null : current));
                   clearHoverExpandTimer();
                 }}
-                onClick={() => {
-                  clearHoverExpandTimer();
-                  const isSameCluster = activeClusterId === cluster.id;
-                  setIsOverlayExpanded(!isSameCluster);
-                  setActiveClusterId(isSameCluster ? null : cluster.id);
+                onClick={activateCluster}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  activateCluster();
                 }}
                 style={{
-                  fontSize: isHovered ? "19px" : "17px",
-                  fontWeight: isActive || isHovered ? 540 : 500,
-                  fill: isActive || isHovered ? "var(--ink)" : "rgba(17,17,17,0.72)",
-                  letterSpacing: "0.015em",
                   cursor: "pointer",
-                  transition: "fill 160ms ease, font-size 180ms ease",
+                  touchAction: "pan-y",
                 }}
               >
-                {cluster.name}
-              </text>
+                <rect
+                  x={cluster.cx - (cluster.labelW + 42) / 2}
+                  y={cluster.cy - 28}
+                  width={cluster.labelW + 42}
+                  height={42}
+                  rx={21}
+                  fill="transparent"
+                  pointerEvents="all"
+                />
+                <text
+                  x={cluster.cx}
+                  y={cluster.cy}
+                  textAnchor="middle"
+                  className="pointer-events-none font-ui"
+                  style={{
+                    fontSize: isHovered ? "19px" : "17px",
+                    fontWeight: isActive || isHovered ? 540 : 500,
+                    fill: isActive || isHovered ? "var(--ink)" : "rgba(17,17,17,0.72)",
+                    letterSpacing: "0.015em",
+                    transition: "fill 160ms ease, font-size 180ms ease",
+                  }}
+                >
+                  {cluster.name}
+                </text>
+              </g>
             );
           })}
         </svg>

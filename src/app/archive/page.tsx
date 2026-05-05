@@ -28,14 +28,22 @@ export default async function ArchivePage({ searchParams }: ArchivePageProps) {
   const issueLabel = "04";
 
   return (
-    <main data-return-root="true" className="relative min-h-screen bg-paper" style={{ minHeight: "var(--viewport-h)" }}>
+    <main
+      data-return-root="true"
+      data-mobile-first-paint-gate="true"
+      className="relative min-h-screen bg-paper"
+      style={{ minHeight: "calc(var(--viewport-h) + var(--mobile-safe-bottom))" }}
+    >
       <Suspense
         fallback={<RouteShellFallback />}
       >
         <ReturnScrollRestore />
         <StickyShell mode="archive" view="grid" archiveActiveItemCount={sectionItems.length} />
-        <section data-grid-root="true" className="relative w-full bg-paper pb-24 pt-[64px]">
-          <div className="mx-auto max-w-[1333px] px-10">
+        <section
+          data-grid-root="true"
+          className="relative w-full bg-paper pb-[var(--mobile-safe-bottom)] pt-[64px] md:pb-24"
+        >
+          <div className="mx-auto max-w-[1333px] px-2 sm:px-6 md:px-10">
             {isCapsule2Empty ? (
               <div className="mx-auto flex w-full max-w-[560px] flex-col items-center gap-4 pt-[86px] text-center">
                 <h2 className="font-ui text-[14px] font-medium leading-5 tracking-[0.02em] text-accent">
@@ -52,7 +60,7 @@ export default async function ArchivePage({ searchParams }: ArchivePageProps) {
                 </Link>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-y-[132px] md:grid-cols-2 md:gap-x-[64px] lg:grid-cols-3 lg:gap-x-[72px]">
+              <div className="grid grid-cols-2 gap-x-[14px] gap-y-[96px] md:gap-x-[64px] md:gap-y-[132px] lg:grid-cols-3 lg:gap-x-[72px]">
                 {sectionItems.map((item, itemIndex) => (
                   <ProductTile
                     key={item.id}

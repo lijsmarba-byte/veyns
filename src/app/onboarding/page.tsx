@@ -1,10 +1,12 @@
-import { OnboardingFlow } from "@/components/unseen/OnboardingFlow";
+import { OnboardingClient } from "./OnboardingClient";
 
 export default function OnboardingPage() {
   return (
-    <main className="relative min-h-screen bg-paper" style={{ minHeight: "var(--viewport-h)" }}>
-      <OnboardingFlow />
+    <main
+      className="relative h-[var(--viewport-h)] overflow-hidden bg-paper md:h-auto md:min-h-screen md:overflow-visible"
+      style={{ minHeight: "var(--viewport-h)" }}
+    >
+      <OnboardingClient />
     </main>
   );
 }
-

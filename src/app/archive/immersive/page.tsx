@@ -64,8 +64,8 @@ export default async function ArchiveImmersivePage({ searchParams }: ArchiveWorl
   return (
     <main
       data-return-root="true"
-      className="relative h-[var(--viewport-h)] w-full overflow-hidden bg-paper"
-      style={{ height: "var(--viewport-h)" }}
+      data-mobile-first-paint-gate="true"
+      className="relative w-full bg-paper min-h-[calc(var(--viewport-h)+var(--mobile-safe-bottom))] md:h-[var(--viewport-h)] md:overflow-hidden"
     >
       <Suspense
         fallback={<RouteShellFallback />}
@@ -74,11 +74,9 @@ export default async function ArchiveImmersivePage({ searchParams }: ArchiveWorl
         <StickyShell mode="archive" view="immersive" archiveActiveItemCount={activeCapsuleItemCount} />
         <section
           data-world2-root="true"
-          className="relative flex w-full items-stretch justify-center"
+          className="relative flex w-full items-stretch justify-center h-[calc(var(--viewport-h)+var(--mobile-safe-bottom))] min-h-[calc(var(--viewport-h)+var(--mobile-safe-bottom))] md:h-[var(--viewport-h)] md:min-h-[var(--viewport-h)]"
           style={{
-            height: "var(--viewport-h)",
-            minHeight: "var(--viewport-h)",
-            marginTop: "calc(var(--sticky-h) * -1)",
+            marginTop: "calc(var(--immersive-sticky-h, var(--sticky-h)) * -1)",
           }}
         >
           <World2ViewClient key={activeCapsule} items={worldItems} mode="archive" showCategoryNav={false} />
